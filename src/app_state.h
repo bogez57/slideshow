@@ -26,6 +26,22 @@ struct OPEN_Row {
    String8      path;  // what a click opens, or goes to
 };
 
+// A thing in the presenter's window that a click does something to.
+typedef enum PRES_HitKind {
+   PRES_HitKind_Null,
+   PRES_HitKind_Slide, // go to slide_idx
+   PRES_HitKind_Clock, // stop the clock, or let it run again
+   PRES_HitKind_ClockReset, // back to 00:00
+} PRES_HitKind;
+
+typedef struct PRES_Hit {
+   PRES_HitKind kind;
+   Rng2F32      rect;
+   U64          slide_idx;
+} PRES_Hit;
+
+#define PRES_MAX_HITS 96
+
 typedef struct App_State App_State;
 struct App_State {
    WM_Window    window;
@@ -60,6 +76,17 @@ struct App_State {
    WM_Window presenter_window;
    R_Handle  presenter_window_eqp;
    U64       presenter_started_us; // what its clock counts from
+   U64       presenter_paused_us; // when its clock was stopped. 0: it runs
+
+   // What can be clicked in it, as PRES_Draw last laid it out. PRES_Input
+   // asks these of a click, a frame later - the window is laid out as it is
+   // drawn, and nothing moves between the two.
+   PRES_Hit presenter_hits[PRES_MAX_HITS];
+   U64      presenter_hit_count;
+   // The slide a click in it asked for, plus one. 0: none. Gone to by the
+   // presentation's own input, with its other ways of changing slide, so
+   // that the change fades as theirs do.
+   U64 presenter_goto;
 
    // What is logged (LogInfoF, LogUserErrorF) is gathered a frame at a time
    // and written to local\logs\slideshow_log.txt beside the program, and to

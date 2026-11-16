@@ -505,6 +505,11 @@ _FR_PresentInput(App_State* app_state) {
          }
       }
 
+      // A slide clicked in the presenter's window (frame_presenter.c).
+      if (app_state->presenter_goto != 0) {
+         app_state->slide_idx = Min(app_state->presenter_goto - 1, last_idx);
+      }
+
       if (Core_WM_KeyPress(events, window, 0, WM_Key_Home)) {
          app_state->slide_idx = 0;
       }
@@ -526,6 +531,8 @@ _FR_PresentInput(App_State* app_state) {
          }
       }
    }
+
+   app_state->presenter_goto = 0;
 
    // However many presses there were this frame, the fade is from the slide
    // that was on screen to the one that ends up showing.
