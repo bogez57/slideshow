@@ -4,31 +4,36 @@
 // The program's one unit: bgz's headers, then each layer's header, then each
 // layer's .c, in dependency order. bgz itself is not compiled here - it is
 // bgz.dll (src\bgz\build.bat), linked through bin\bgz.lib.
+//
+//    bin\slideshow.exe            shows the images in data\slides
+//    bin\slideshow.exe <folder>   shows the images in that folder
+//
+// Keys are in frame.c.
 
 #define _CRT_SECURE_NO_WARNINGS
+
+#include <stdio.h>
+
+// The folder shown when none is given, relative to where the program is
+// started from.
+#define DEFAULT_SLIDES_FOLDER "data\\slides"
 
 // bgz lib
 #include "bgz_inc.h"
 
 ////////////////////////////////
-//~ bgz: app state
+//~ bgz: headers / public types
 
-typedef struct App_State App_State;
-struct App_State {
-   WM_Window    window;
-   R_Handle     window_eqp;
-   Arena*       frame_arena; // cleared at the end of every frame
-   WM_EventList events;      // this frame's, on frame_arena
-   B32          quit;
-};
+#include "image/image.h"
+#include "deck/deck.h"
+#include "app_state.h"
 
-// What _Main_RepaintFrame draws: it is called by bgz with no arguments. 0
-// until the window is ready to be drawn into.
-global App_State* g_repaint_app_state = 0;
+////////////////////////////////
+//~ bgz: implementations
 
-// Set while a frame is being drawn, so a repaint asked for from inside one
-// does nothing - see _Main_RepaintFrame.
-global B32 g_frame_running = 0;
+#include "image/image.c"
+#include "deck/deck.c"
+#include "frame.c"
 
 ////////////////////////////////
 //~ bgz: one frame
@@ -41,28 +46,22 @@ global B32 g_frame_running = 0;
 // frame() - which bgz.dll hands on to _Main_RepaintFrame (see
 // CoreMainThreadEntry in src\bgz\bgz\base\base_entry_point.h).
 
+// What _Main_RepaintFrame draws: it is called by bgz with no arguments. 0
+// until the window is ready to be drawn into.
+global App_State* g_repaint_app_state = 0;
+
+// Set while a frame is being drawn, so a repaint asked for from inside one
+// does nothing - see _Main_RepaintFrame.
+global B32 g_frame_running = 0;
+
 internal void
 _Main_RunFrame(App_State* app_state) {
    g_frame_running = 1;
 
-   for (WM_Event* event = app_state->events.first; event != 0; event = event->next) {
-      if (event->kind == WM_EventKind_WindowClose) {
-         app_state->quit = 1;
-      }
-   }
-
    Core_R_BeginFrame();
    Core_R_WindowBeginFrame(app_state->window, app_state->window_eqp);
-   Core_D_BeginFrame();
 
-   // Nothing to show yet: the window filled with one color.
-   D_Bucket* bucket = Core_D_BucketMake();
-   Core_D_BucketScope(bucket) {
-      Rng2F32 client_rect = Core_WM_ClientRectFromWindow(app_state->window);
-      Vec2F32 client_dim = Dim2F32(client_rect);
-      Core_D_Rect(R2F32P(0, 0, client_dim.x, client_dim.y), R2F32P(0, 0, 1, 1), V4F32(0.10f, 0.10f, 0.12f, 1.0f));
-   }
-   Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);
+   FrameWork(app_state);
 
    Core_R_WindowEndFrame(app_state->window, app_state->window_eqp);
    Core_R_EndFrame();
@@ -108,11 +107,19 @@ _Main_RepaintFrame(void) {
 
 internal void
 _EntryPoint(CmdLine* cmdline) {
-   UnusedVariable(cmdline);
    SetThreadName(Str8Lit("MainThread"));
 
    App_State app_state = {0};
    app_state.frame_arena = ArenaAlloc();
+
+   // The folder to show: the first thing on the command line that is not an
+   // option, or the default.
+   String8 folder = Str8Lit(DEFAULT_SLIDES_FOLDER);
+   if (cmdline->inputs.first != 0) {
+      folder = cmdline->inputs.first->string;
+   }
+   app_state.deck = DECK_OpenFolder(folder);
+   printf("%llu slides in %.*s\n", (unsigned long long)app_state.deck->slide_count, Str8VArg(app_state.deck->folder));
 
    // UseDefaultPosition: where Windows puts a new window - only the rect's
    // size is used.
