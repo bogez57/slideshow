@@ -182,6 +182,10 @@ internal void DECK_Close(DECK_Deck* deck);
 // one have their images released.
 internal IMG_Image* DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx);
 
+// The same, but releases nothing: for a second look at a slide close to the
+// one DECK_ImageFromSlide was last asked for (the presenter's next slide).
+internal IMG_Image* DECK_LoadImageOfSlide(DECK_Deck* deck, U64 slide_idx);
+
 // The image of a slide only if it is loaded already, else 0. Loads nothing
 // and releases nothing.
 internal IMG_Image* DECK_LoadedImageFromSlide(DECK_Deck* deck, U64 slide_idx);

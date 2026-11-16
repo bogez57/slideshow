@@ -35,9 +35,11 @@ PRES_Toggle(App_State* app_state) {
       app_state->presenter_window =
           Core_WM_WindowOpen(R2F32P(0, 0, 1100, 620), WM_WindowFlag_UseDefaultPosition, Str8Lit("Slideshow - presenter"));
       app_state->presenter_window_eqp = Core_R_WindowEquip(app_state->presenter_window);
-      Core_WM_WindowFirstPaint(app_state->presenter_window);
+      // Open before it is shown, so that the repaint showing it asks for
+      // draws it too.
       app_state->presenter_open = 1;
       app_state->presenter_started_us = NowTimeUS();
+      Core_WM_WindowFirstPaint(app_state->presenter_window);
    }
 }
 
@@ -87,13 +89,16 @@ PRES_Draw(App_State* app_state) {
    Core_D_BucketScope(bucket) {
       Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1), V4F32(0.09f, 0.095f, 0.11f, 1.0f));
 
-      // Sizes follow the window's height, as the edit screen's do.
-      F32 ui = Clamp(0.6f, window_dim.y / 620.0f, 3.0f);
+      // Sizes follow the window: its height, or its width when it is narrow
+      // for its height, so the right column's text still fits across it. Not
+      // so small that the words can't be read: a window too small for them
+      // cuts them off instead.
+      F32 ui = Clamp(0.5f, Min(window_dim.y / 620.0f, window_dim.x / 1100.0f), 3.0f);
       F32 pad = (F32)(S32)(20.0f * ui);
-      F32 label_px = (F32)(S32)(15.0f * ui);
-      F32 notes_px = (F32)(S32)(22.0f * ui);
-      F32 count_px = (F32)(S32)(20.0f * ui);
-      F32 clock_px = (F32)(S32)(52.0f * ui);
+      F32 label_px = (F32)(S32)Max(15.0f * ui, 11.0f);
+      F32 notes_px = (F32)(S32)Max(22.0f * ui, 13.0f);
+      F32 count_px = (F32)(S32)Max(20.0f * ui, 12.0f);
+      F32 clock_px = (F32)(S32)Max(52.0f * ui, 20.0f);
       F32 label_h = TXT_LineHeight(fonts->regular, label_px);
 
       // The left has about two thirds, for the slide showing and its notes.
@@ -124,14 +129,17 @@ PRES_Draw(App_State* app_state) {
 
             F32 line_h = TXT_LineHeight(fonts->regular, notes_px);
             Core_D_PushClip(R2F32P(left.min.x, y, left.max.x, left.max.y));
-            if (slide->notes.node_count == 0) {
-               TXT_Draw(fonts->regular, notes_px, V2F32(left.min.x, y), color_dim,
-                        Str8Lit("None on this slide. A line of  @note Say this  adds one."));
+            String8List notes = slide->notes;
+            Vec4F32     notes_color = color_text;
+            if (notes.node_count == 0) {
+               MemoryZeroStruct(&notes);
+               Str8ListPush(scratch.arena, &notes, Str8Lit("None on this slide. A line of  @note Say this  adds one."));
+               notes_color = color_dim;
             }
-            for (String8Node* note = slide->notes.first; note != 0; note = note->next) {
+            for (String8Node* note = notes.first; note != 0; note = note->next) {
                String8List lines = TXT_Wrap(scratch.arena, fonts->regular, notes_px, note->string, Dim2F32(left).x);
                for (String8Node* line = lines.first; line != 0; line = line->next) {
-                  TXT_Draw(fonts->regular, notes_px, V2F32(left.min.x, y), color_text, line->string);
+                  TXT_Draw(fonts->regular, notes_px, V2F32(left.min.x, y), notes_color, line->string);
                   y += line_h;
                }
                y += line_h * 0.35f; // a little room between one note and the next
@@ -139,20 +147,30 @@ PRES_Draw(App_State* app_state) {
             Core_D_PopClip();
          }
 
-         //- bgz: the slide after it
+         //- bgz: the slide after it. The right column is clipped to itself:
+         // in a small window what does not fit is cut off, not drawn over
+         // the left.
+         Core_D_PushClip(right);
          F32 y = right.min.y;
          TXT_Draw(fonts->bold, label_px, V2F32(right.min.x, y), color_dim, Str8Lit("Next"));
          y += label_h * 1.4f;
 
-         F32     next_w = Dim2F32(right).x;
-         F32     next_h = next_w * VIEW_PAGE_H / VIEW_PAGE_W;
+         // No taller than leaves the count and the clock room under it.
+         F32 next_w = Dim2F32(right).x;
+         F32 next_h = next_w * VIEW_PAGE_H / VIEW_PAGE_W;
+         F32 next_max_h = Max(Dim2F32(right).y * 0.45f, 1.0f);
+         if (next_h > next_max_h) {
+            next_h = next_max_h;
+            next_w = next_h * VIEW_PAGE_W / VIEW_PAGE_H;
+         }
          Rng2F32 next_rect = R2F32P(right.min.x, y, right.min.x + next_w, y + next_h);
          if (slide_idx + 1 < deck->slide_count) {
             Core_D_Rect(next_rect, R2F32P(0, 0, 1, 1), colors.background);
-            // Only a picture that is loaded already: the main window's
-            // drawing is what loads them, a slide ahead at most.
+            // Its picture is loaded here: the main window only loads the one
+            // showing. Being next to that one, it is not released again
+            // until the deck moves on from both.
             VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[slide_idx + 1],
-                           DECK_LoadedImageFromSlide(deck, slide_idx + 1), next_rect, 1.0f, 0);
+                           DECK_LoadImageOfSlide(deck, slide_idx + 1), next_rect, 1.0f, 0);
          } else {
             Core_D_Rect(next_rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.04f));
             String8 end = Str8Lit("The end");
@@ -165,8 +183,14 @@ PRES_Draw(App_State* app_state) {
          y = next_rect.max.y + pad * 1.5f;
 
          //- bgz: where in the deck, and how long it has been
+         // The count and the clock shrink to fit across the column.
+         F32     right_w = Dim2F32(right).x;
          String8 count = PushStr8F(scratch.arena, "Slide %llu of %llu", (unsigned long long)(slide_idx + 1),
                                    (unsigned long long)deck->slide_count);
+         F32 count_w = TXT_Width(fonts->regular, count_px, count);
+         if (count_w > right_w && count_w > 0) {
+            count_px = (F32)(S32)Max(count_px * right_w / count_w, 8.0f);
+         }
          TXT_Draw(fonts->regular, count_px, V2F32(right.min.x, y), color_text, count);
          y += TXT_LineHeight(fonts->regular, count_px) * 1.5f;
 
@@ -176,10 +200,19 @@ PRES_Draw(App_State* app_state) {
                                          (unsigned long long)((seconds / 60) % 60), (unsigned long long)(seconds % 60))
                              : PushStr8F(scratch.arena, "%02llu:%02llu", (unsigned long long)(seconds / 60),
                                          (unsigned long long)(seconds % 60));
+         F32 clock_w = TXT_Width(fonts->bold, clock_px, clock);
+         if (clock_w > right_w && clock_w > 0) {
+            clock_px = (F32)(S32)Max(clock_px * right_w / clock_w, 8.0f);
+         }
          TXT_Draw(fonts->bold, clock_px, V2F32(right.min.x, y), color_clock, clock);
          y += TXT_LineHeight(fonts->bold, clock_px) * 1.1f;
 
-         TXT_Draw(fonts->regular, label_px, V2F32(right.min.x, y), color_dim, Str8Lit("V closes this window"));
+         String8List hint = TXT_Wrap(scratch.arena, fonts->regular, label_px, Str8Lit("V closes this window"), right_w);
+         for (String8Node* line = hint.first; line != 0; line = line->next) {
+            TXT_Draw(fonts->regular, label_px, V2F32(right.min.x, y), color_dim, line->string);
+            y += label_h;
+         }
+         Core_D_PopClip();
       }
    }
    Core_D_SubmitBucket(app_state->presenter_window, app_state->presenter_window_eqp, bucket);

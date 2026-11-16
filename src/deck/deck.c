@@ -575,6 +575,24 @@ DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
 }
 
 internal IMG_Image*
+DECK_LoadImageOfSlide(DECK_Deck* deck, U64 slide_idx) {
+   IMG_Image* result = 0;
+
+   if (slide_idx < deck->slide_count) {
+      DECK_Slide* slide = &deck->slides[slide_idx];
+      if (!IMG_IsLoaded(&slide->image) && !slide->load_failed && slide->image_path.size != 0) {
+         slide->image = IMG_LoadFromPath(slide->image_path);
+         slide->load_failed = !IMG_IsLoaded(&slide->image);
+      }
+      if (IMG_IsLoaded(&slide->image)) {
+         result = &slide->image;
+      }
+   }
+
+   return result;
+}
+
+internal IMG_Image*
 DECK_LoadedImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
    IMG_Image* result = 0;
 
