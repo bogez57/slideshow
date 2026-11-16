@@ -5,16 +5,20 @@
 // layer's .c, in dependency order. bgz itself is not compiled here - it is
 // bgz.dll (src\bgz\build.bat), linked through bin\bgz.lib.
 //
-//    bin\slideshow.exe            shows the images in data\slides
-//    bin\slideshow.exe <folder>   shows the images in that folder
+//    bin\slideshow.exe            shows data\slides
+//    bin\slideshow.exe <folder>   shows the images in that folder - or its
+//                                 slides.md, if it has one
 //    bin\slideshow.exe <image>    shows the images in that image's folder,
 //                                 starting at it
+//    bin\slideshow.exe <file>     shows the slides a text file describes
+//                                 (.md or .txt - the format is in deck\deck.h)
 //
 // Keys are in frame.c.
 
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <stdio.h>
+#include <stdlib.h>
 
 // The folder shown when none is given, relative to where the program is
 // started from.
@@ -27,14 +31,18 @@
 //~ bgz: headers / public types
 
 #include "image/image.h"
+#include "text/text.h"
 #include "deck/deck.h"
+#include "view/view.h"
 #include "app_state.h"
 
 ////////////////////////////////
 //~ bgz: implementations
 
 #include "image/image.c"
+#include "text/text.c"
 #include "deck/deck.c"
+#include "view/view.c"
 #include "frame.c"
 
 ////////////////////////////////
@@ -114,14 +122,17 @@ _EntryPoint(CmdLine* cmdline) {
    App_State app_state = {0};
    app_state.frame_arena = ArenaAlloc();
 
+   app_state.fonts = TXT_OpenFonts();
+
    // What to show: the first thing on the command line that is not an
-   // option - a folder, or one image of a folder - or the default.
+   // option - a folder, an image or a text deck - or the default.
    String8 path = Str8Lit(DEFAULT_SLIDES_FOLDER);
    if (cmdline->inputs.first != 0) {
       path = cmdline->inputs.first->string;
    }
    app_state.deck = DECK_OpenPath(path, &app_state.slide_idx);
-   printf("%llu slides in %.*s\n", (unsigned long long)app_state.deck->slide_count, Str8VArg(app_state.deck->folder));
+   printf("%llu slides in %.*s\n", (unsigned long long)app_state.deck->slide_count,
+          Str8VArg(app_state.deck->file.size != 0 ? app_state.deck->file : app_state.deck->folder));
 
    // UseDefaultPosition: where Windows puts a new window - only the rect's
    // size is used.

@@ -96,7 +96,7 @@ DECK_OpenFolder(String8 folder) {
       deck->slide_count = sorted.count;
       deck->slides = PushArray(arena, DECK_Slide, Max(sorted.count, 1));
       for (U64 i = 0; i < sorted.count; i += 1) {
-         deck->slides[i].path = PushStr8F(arena, "%S\\%S", deck->folder, sorted.v[i]);
+         deck->slides[i].image_path = PushStr8F(arena, "%S\\%S", deck->folder, sorted.v[i]);
       }
 
       ScratchEnd(scratch);
@@ -105,15 +105,227 @@ DECK_OpenFolder(String8 folder) {
    return deck;
 }
 
+////////////////////////////////
+//~ bgz: decks from text files
+
+internal B32
+_DECK_NameIsTextDeck(String8 name) {
+   String8 extension = Str8SkipLastDot(name);
+   B32     result = (Str8Match(extension, Str8Lit("md"), StringMatchFlag_CaseInsensitive) ||
+                 Str8Match(extension, Str8Lit("txt"), StringMatchFlag_CaseInsensitive));
+   return result;
+}
+
+// A slide being read: in a list, since how many there are is not known until
+// the end of the file.
+typedef struct _DECK_SlideNode _DECK_SlideNode;
+struct _DECK_SlideNode {
+   _DECK_SlideNode* next;
+   DECK_Slide       slide;
+};
+
+// The string without the spaces and tabs at either end.
+internal String8
+_DECK_Trim(String8 string) {
+   while (string.size > 0 && (string.str[0] == ' ' || string.str[0] == '\t')) {
+      string.str += 1;
+      string.size -= 1;
+   }
+   while (string.size > 0 && (string.str[string.size - 1] == ' ' || string.str[string.size - 1] == '\t')) {
+      string.size -= 1;
+   }
+   return string;
+}
+
+internal DECK_Deck*
+DECK_OpenFile(String8 file) {
+   Arena*     arena = ArenaAlloc();
+   DECK_Deck* deck = PushArray(arena, DECK_Deck, 1);
+   deck->arena = arena;
+   deck->file = PushStr8Copy(arena, file);
+   deck->file_modified = PropertiesFromFilePath(deck->file).modified;
+
+   // Pictures are found from the folder the file is in. A file with nothing
+   // before its name is in the folder the program was started from.
+   deck->folder = Str8ChopLastSlash(deck->file);
+   if (deck->folder.size == 0) {
+      deck->folder = Str8Lit(".");
+   }
+
+   Temp scratch = ScratchBegin(&arena, 1);
+
+   // The file's text stays on the deck's arena: titles and items are pieces
+   // of it, not copies.
+   String8 text = DataFromFilePath(arena, deck->file);
+
+   // A byte order mark, which Notepad puts at the start of a UTF-8 file.
+   if (text.size >= 3 && text.str[0] == 0xEF && text.str[1] == 0xBB && text.str[2] == 0xBF) {
+      text = Str8Skip(text, 3);
+   }
+
+   _DECK_SlideNode* first_node = 0;
+   _DECK_SlideNode* last_node = 0;
+   U64              node_count = 0;
+
+   // The slide lines are being added to. 0 at the start and after a ---: the
+   // next line with anything on it starts a new slide.
+   DECK_Slide* slide = 0;
+   B32         gap_before = 0;
+
+   U64 pos = 0;
+   while (pos < text.size) {
+      //- bgz: the next line, without its line ending
+      U64 line_start = pos;
+      while (pos < text.size && text.str[pos] != '\n') pos += 1;
+      String8 line = Str8Substr(text, R1U64(line_start, pos));
+      pos += 1;
+      if (line.size > 0 && line.str[line.size - 1] == '\r') {
+         line.size -= 1;
+      }
+
+      // How far in it starts, a tab counting as four spaces.
+      U64 indent = 0;
+      for (U64 i = 0; i < line.size && (line.str[i] == ' ' || line.str[i] == '\t'); i += 1) {
+         indent += (line.str[i] == '\t') ? 4 : 1;
+      }
+      line = _DECK_Trim(line);
+
+      //- bgz: what kind of line it is
+      if (line.size == 0) {
+         gap_before = 1;
+         continue;
+      }
+
+      B32 is_rule = (line.size >= 3);
+      for (U64 i = 0; i < line.size && is_rule; i += 1) {
+         is_rule = (line.str[i] == '-');
+      }
+      if (is_rule) {
+         slide = 0;
+         gap_before = 0;
+         continue;
+      }
+
+      U64 hash_count = 0;
+      while (hash_count < line.size && line.str[hash_count] == '#') hash_count += 1;
+      B32 is_heading = (hash_count > 0 && hash_count < line.size && line.str[hash_count] == ' ');
+      B32 is_title = (is_heading && hash_count == 1);
+
+      B32 is_bullet = (line.size >= 2 && (line.str[0] == '-' || line.str[0] == '*') && line.str[1] == ' ');
+
+      // ![anything](path) and nothing else on the line.
+      String8 image_path = {0};
+      if (line.size >= 5 && line.str[0] == '!' && line.str[1] == '[' && line.str[line.size - 1] == ')') {
+         U64 path_start = Str8FindNeedle(line, 0, Str8Lit("]("), 0);
+         if (path_start < line.size) {
+            image_path = _DECK_Trim(Str8Substr(line, R1U64(path_start + 2, line.size - 1)));
+         }
+      }
+
+      //- bgz: the slide it goes on
+      if (slide == 0 || is_title) {
+         _DECK_SlideNode* node = PushArray(scratch.arena, _DECK_SlideNode, 1);
+         SLLQueuePush(first_node, last_node, node);
+         node_count += 1;
+         slide = &node->slide;
+         gap_before = 0;
+      }
+
+      //- bgz: add it
+      if (is_title) {
+         slide->title = _DECK_Trim(Str8Skip(line, hash_count));
+      } else if (image_path.size != 0) {
+         if (slide->image_path.size == 0) {
+            // A path that says where it starts from is used as it is.
+            B32 is_absolute = (image_path.str[0] == '/' || image_path.str[0] == '\\' ||
+                               (image_path.size >= 2 && image_path.str[1] == ':'));
+            if (is_absolute) {
+               slide->image_path = image_path;
+            } else {
+               slide->image_path = PushStr8F(arena, "%S\\%S", deck->folder, image_path);
+            }
+         }
+      } else {
+         DECK_Item* item = PushArray(arena, DECK_Item, 1);
+         SLLQueuePush(slide->first_item, slide->last_item, item);
+         slide->item_count += 1;
+         item->gap_before = gap_before;
+
+         if (is_heading) {
+            item->kind = DECK_ItemKind_Heading;
+            item->text = _DECK_Trim(Str8Skip(line, hash_count));
+         } else if (is_bullet) {
+            item->kind = DECK_ItemKind_Bullet;
+            item->text = _DECK_Trim(Str8Skip(line, 2));
+            item->level = (U32)Min(indent / 2, DECK_MAX_BULLET_LEVEL);
+         } else {
+            item->kind = DECK_ItemKind_Text;
+            item->text = line;
+         }
+      }
+      gap_before = 0;
+   }
+
+   deck->slide_count = node_count;
+   deck->slides = PushArray(arena, DECK_Slide, Max(node_count, 1));
+   U64 slide_idx = 0;
+   for (_DECK_SlideNode* node = first_node; node != 0; node = node->next) {
+      deck->slides[slide_idx] = node->slide;
+      slide_idx += 1;
+   }
+
+   ScratchEnd(scratch);
+   return deck;
+}
+
+internal B32
+DECK_FileHasChanged(DECK_Deck* deck) {
+   B32 result = 0;
+
+   if (deck->file.size != 0) {
+      // A file that is gone for a moment - some editors save by writing a new
+      // file and renaming it - reads as modified at 0, and has not changed.
+      DenseTime modified = PropertiesFromFilePath(deck->file).modified;
+      result = (modified != 0 && modified != deck->file_modified);
+   }
+
+   return result;
+}
+
+internal B32
+DECK_SlideHasText(DECK_Slide* slide) {
+   B32 result = (slide->title.size != 0 || slide->item_count != 0);
+   return result;
+}
+
+////////////////////////////////
+//~ bgz: decks of either kind
+
 internal DECK_Deck*
 DECK_OpenPath(String8 path, U64* first_slide_out) {
    DECK_Deck* deck = 0;
    U64        first_slide = 0;
 
+   // No trailing slash, so that the last part of the path is its name.
+   while (path.size > 1 && (path.str[path.size - 1] == '/' || path.str[path.size - 1] == '\\')) {
+      path.size -= 1;
+   }
+
    FileProperties properties = PropertiesFromFilePath(path);
    B32            is_folder = !!(properties.flags & FilePropertyFlag_IsFolder);
 
-   if (!is_folder && IMG_NameIsImage(path)) {
+   if (is_folder) {
+      Temp    scratch = ScratchBegin(0, 0);
+      String8 slides_file = PushStr8F(scratch.arena, "%S\\slides.md", path);
+      if (FilePathExists(slides_file)) {
+         deck = DECK_OpenFile(slides_file);
+      } else {
+         deck = DECK_OpenFolder(path);
+      }
+      ScratchEnd(scratch);
+   } else if (_DECK_NameIsTextDeck(path)) {
+      deck = DECK_OpenFile(path);
+   } else if (IMG_NameIsImage(path)) {
       // A file with nothing before its name is in the folder the program was
       // started from.
       String8 folder = Str8ChopLastSlash(path);
@@ -124,14 +336,14 @@ DECK_OpenPath(String8 path, U64* first_slide_out) {
 
       deck = DECK_OpenFolder(folder);
       for (U64 i = 0; i < deck->slide_count; i += 1) {
-         if (Str8Match(Str8SkipLastSlash(deck->slides[i].path), name, StringMatchFlag_CaseInsensitive)) {
+         if (Str8Match(Str8SkipLastSlash(deck->slides[i].image_path), name, StringMatchFlag_CaseInsensitive)) {
             first_slide = i;
             break;
          }
       }
    } else {
-      // A folder - or something that is neither, which as a folder gives the
-      // deck with no slides.
+      // Nothing that can be shown - or nothing at all - which as a folder
+      // gives the deck with no slides.
       deck = DECK_OpenFolder(path);
    }
 
@@ -162,8 +374,8 @@ DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
       }
 
       DECK_Slide* slide = &deck->slides[slide_idx];
-      if (!IMG_IsLoaded(&slide->image) && !slide->load_failed) {
-         slide->image = IMG_LoadFromPath(slide->path);
+      if (!IMG_IsLoaded(&slide->image) && !slide->load_failed && slide->image_path.size != 0) {
+         slide->image = IMG_LoadFromPath(slide->image_path);
          slide->load_failed = !IMG_IsLoaded(&slide->image);
       }
       if (IMG_IsLoaded(&slide->image)) {

@@ -15,7 +15,10 @@
 //    first / last     Home / End
 //    play / pause     P
 //    fullscreen       F, F11 or Alt+Return. Esc leaves it
-//    open             drop a folder, or one image of a folder, on the window
+//    slide number     I
+//    this list        H or F1
+//    open             drop a folder, an image or a text deck (.md, .txt) on the
+//                     window
 //    quit             Esc, or closing the window
 
 #define _FR_FADE_SECONDS 0.25f
@@ -23,6 +26,9 @@
 
 // One notch of a mouse wheel, in the units Windows reports it in.
 #define _FR_SCROLL_PER_SLIDE 120.0f
+
+// How often a text deck's file is looked at for having been saved.
+#define _FR_RELOAD_CHECK_SECONDS 0.25f
 
 // Swaps the deck for the one at path, if that has any slides in it. If not,
 // the deck showing stays.
@@ -35,7 +41,8 @@ _FR_OpenDeck(App_State* app_state, String8 path, U64 now_us) {
       printf("No images in %.*s\n", Str8VArg(path));
       DECK_Close(deck);
    } else {
-      printf("%llu slides in %.*s\n", (unsigned long long)deck->slide_count, Str8VArg(deck->folder));
+      printf("%llu slides in %.*s\n", (unsigned long long)deck->slide_count,
+             Str8VArg(deck->file.size != 0 ? deck->file : deck->folder));
       DECK_Close(app_state->deck);
       app_state->deck = deck;
       app_state->slide_idx = first_slide;
@@ -47,6 +54,35 @@ _FR_OpenDeck(App_State* app_state, String8 path, U64 now_us) {
       app_state->fade_active = 1;
       app_state->fade_from_idx = deck->slide_count;
       app_state->fade_start_us = 0;
+   }
+}
+
+// A deck from a text file, read again if the file has been saved since: the
+// slides change as they are written. The slide showing stays the one with the
+// same number.
+internal void
+_FR_ReloadDeckIfChanged(App_State* app_state, U64 now_us) {
+   U64 check_us = (U64)(_FR_RELOAD_CHECK_SECONDS * 1000000.0f);
+
+   if (now_us - app_state->reload_checked_us >= check_us) {
+      app_state->reload_checked_us = now_us;
+
+      if (DECK_FileHasChanged(app_state->deck)) {
+         // The old deck's file name is read from until the new deck has its
+         // own copy, so the old one is closed after the new one is open.
+         DECK_Deck* deck = DECK_OpenFile(app_state->deck->file);
+
+         // A file caught half way through being saved can read as empty. The
+         // deck showing stays, and the next look reads the file again.
+         if (deck->slide_count == 0) {
+            DECK_Close(deck);
+         } else {
+            DECK_Close(app_state->deck);
+            app_state->deck = deck;
+            app_state->slide_idx = Min(app_state->slide_idx, deck->slide_count - 1);
+            app_state->fade_active = 0;
+         }
+      }
    }
 }
 
@@ -68,6 +104,16 @@ _FR_HandleInput(App_State* app_state) {
       if (event->kind == WM_EventKind_FileDrop && event->strings.first != 0) {
          _FR_OpenDeck(app_state, event->strings.first->string, now_us);
       }
+   }
+
+   _FR_ReloadDeckIfChanged(app_state, now_us);
+
+   //- bgz: overlays
+   if (Core_WM_KeyPress(events, window, 0, WM_Key_I)) {
+      app_state->show_info = !app_state->show_info;
+   }
+   if (Core_WM_KeyPress(events, window, 0, WM_Key_H) || Core_WM_KeyPress(events, window, 0, WM_Key_F1)) {
+      app_state->show_help = !app_state->show_help;
    }
 
    //- bgz: fullscreen and quit
@@ -174,33 +220,17 @@ _FR_HandleInput(App_State* app_state) {
 ////////////////////////////////
 //~ bgz: drawing
 
-// As large as fits in the window with its shape kept, in the middle of it.
-// alpha is how much of the image shows over what is already drawn.
-internal void
-_FR_DrawImageFit(IMG_Image* image, Vec2F32 window_dim, F32 alpha) {
-   F32 image_w = (F32)image->size.x;
-   F32 image_h = (F32)image->size.y;
-   F32 scale = Min(window_dim.x / image_w, window_dim.y / image_h);
-   F32 w = image_w * scale;
-   F32 h = image_h * scale;
-   F32 x = (window_dim.x - w) * 0.5f;
-   F32 y = (window_dim.y - h) * 0.5f;
-
-   // The source rect is in the image's own pixels.
-   Core_D_Img(R2F32P(x, y, x + w, y + h), R2F32P(0, 0, image_w, image_h), image->texture, V4F32(1, 1, 1, alpha));
-}
+// Overlays are sized with the page (view.h), but not below this part of full
+// size: in a small window the slides can be read small, a list of keys not.
+#define _FR_MIN_OVERLAY_SCALE 0.7f
 
 internal void
-_FR_DrawSlide(App_State* app_state) {
-   Vec2F32 window_dim = Dim2F32(Core_WM_ClientRectFromWindow(app_state->window));
+_FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
+   DECK_Deck* deck = app_state->deck;
 
-   // The background, which is all there is when the deck is empty or the
-   // slide's file could not be loaded.
-   Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1), V4F32(0.05f, 0.05f, 0.06f, 1.0f));
-
-   // The slide showing is asked for first: that is what loads it, and what
-   // releases the slides far from it.
-   IMG_Image* image = DECK_ImageFromSlide(app_state->deck, app_state->slide_idx);
+   // The slide showing is asked for first: that is what loads its picture,
+   // and what releases the pictures of slides far from it.
+   IMG_Image* image = DECK_ImageFromSlide(deck, app_state->slide_idx);
 
    // How far through the fade this frame is, 0 to 1. The clock starts here,
    // after the load above, and not at the key press: decoding a big photo can
@@ -220,43 +250,168 @@ _FR_DrawSlide(App_State* app_state) {
       }
    }
 
-   if (window_dim.x > 0 && window_dim.y > 0) {
-      // The slide being left is only drawn if its image is still loaded. It
-      // is after a step to a neighbour. After a jump across the deck it has
-      // been released, and the new slide fades in over the background alone.
-      if (app_state->fade_active) {
-         IMG_Image* from_image = DECK_LoadedImageFromSlide(app_state->deck, app_state->fade_from_idx);
-         if (from_image != 0) {
-            _FR_DrawImageFit(from_image, window_dim, 1.0f - fade_t);
-         }
-      }
-      if (image != 0) {
-         _FR_DrawImageFit(image, window_dim, fade_t);
-      }
+   // The slide being left is drawn with its picture only if that is still
+   // loaded. It is after a step to a neighbour. After a jump across the deck
+   // it has been released, and the slide goes without it. fade_from_idx past
+   // the last slide is no slide: the new one fades in over the background.
+   if (app_state->fade_active && app_state->fade_from_idx < deck->slide_count) {
+      IMG_Image* from_image = DECK_LoadedImageFromSlide(deck, app_state->fade_from_idx);
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, &deck->slides[app_state->fade_from_idx], from_image,
+                     window_dim, 1.0f - fade_t);
+   }
+   if (app_state->slide_idx < deck->slide_count) {
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, &deck->slides[app_state->slide_idx], image,
+                     window_dim, fade_t);
+   }
+}
 
-      // While playing, a thin bar along the bottom that fills as the slide's
-      // turn runs out - which is also what shows that it is playing at all.
-      if (app_state->playing && app_state->deck->slide_count > 1) {
-         F32 play_seconds = (F32)(NowTimeUS() - app_state->play_from_us) / 1000000.0f;
-         F32 play_t = Clamp(0, play_seconds / _FR_PLAY_SECONDS, 1);
-         F32 bar_h = 3.0f;
-         Core_D_Rect(R2F32P(0, window_dim.y - bar_h, window_dim.x * play_t, window_dim.y), R2F32P(0, 0, 1, 1),
-                     V4F32(1, 1, 1, 0.5f));
+// What is drawn over the slide: the play bar, the slide's number, the list of
+// keys - and, with no slides at all, what to do about that.
+internal void
+_FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
+   DECK_Deck* deck = app_state->deck;
+   TXT_Fonts* fonts = &app_state->fonts;
+   F32        scale = Max(VIEW_ScaleFromWindowDim(window_dim), _FR_MIN_OVERLAY_SCALE);
+   Temp       scratch = ScratchBegin(0, 0);
+
+   //- bgz: no slides
+   if (deck->slide_count == 0) {
+      String8 lines[] = {
+          Str8Lit("No slides"),
+          Str8Lit("Drop a folder of images, or a text deck (.md), on this window"),
+      };
+      F32 sizes[] = {40.0f * scale, 22.0f * scale};
+      Vec4F32 colors[] = {V4F32(1, 1, 1, 0.9f), V4F32(1, 1, 1, 0.55f)};
+
+      F32 y = window_dim.y * 0.5f - TXT_LineHeight(fonts->bold, sizes[0]);
+      for (U64 i = 0; i < ArrayCount(lines); i += 1) {
+         FNT_Tag font = (i == 0) ? fonts->bold : fonts->regular;
+         F32     w = TXT_Width(font, sizes[i], lines[i]);
+         TXT_Draw(font, sizes[i], V2F32((window_dim.x - w) * 0.5f, y), colors[i], lines[i]);
+         y += TXT_LineHeight(font, sizes[i]) * 1.2f;
       }
    }
+
+   //- bgz: playing
+   //
+   // A thin bar along the bottom that fills as the slide's turn runs out -
+   // which is also what shows that it is playing at all.
+   if (app_state->playing && deck->slide_count > 1) {
+      F32 play_seconds = (F32)(NowTimeUS() - app_state->play_from_us) / 1000000.0f;
+      F32 play_t = Clamp(0, play_seconds / _FR_PLAY_SECONDS, 1);
+      F32 bar_h = 3.0f;
+      Core_D_Rect(R2F32P(0, window_dim.y - bar_h, window_dim.x * play_t, window_dim.y), R2F32P(0, 0, 1, 1),
+                  V4F32(1, 1, 1, 0.5f));
+   }
+
+   //- bgz: the slide's number, and the name of the file it is from
+   if (app_state->show_info && deck->slide_count != 0) {
+      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+      String8     name = Str8SkipLastSlash(deck->file.size != 0 ? deck->file : slide->image_path);
+      String8     text = PushStr8F(scratch.arena, "%llu / %llu   %S", (unsigned long long)(app_state->slide_idx + 1),
+                                   (unsigned long long)deck->slide_count, name);
+
+      F32 px = 18.0f * scale;
+      F32 pad = 8.0f * scale;
+      F32 w = TXT_Width(fonts->regular, px, text);
+      F32 h = TXT_LineHeight(fonts->regular, px);
+      F32 x = window_dim.x - w - pad * 3.0f;
+      F32 y = window_dim.y - h - pad * 3.0f;
+
+      // On a dark panel, since it may be over a bright picture.
+      Core_D_Rect(R2F32P(x - pad, y - pad * 0.5f, x + w + pad, y + h + pad * 0.5f), R2F32P(0, 0, 1, 1),
+                  V4F32(0, 0, 0, 0.55f));
+      TXT_Draw(fonts->regular, px, V2F32(x, y), V4F32(1, 1, 1, 0.85f), text);
+   }
+
+   //- bgz: the list of keys
+   if (app_state->show_help) {
+      // Pairs: the keys, then what they do.
+      String8 rows[][2] = {
+          {Str8Lit("Right, Down, Space, Enter, click"), Str8Lit("Next slide")},
+          {Str8Lit("Left, Up, Backspace, right click"), Str8Lit("Previous slide")},
+          {Str8Lit("Mouse wheel"), Str8Lit("Next and previous slide")},
+          {Str8Lit("Home, End"), Str8Lit("First and last slide")},
+          {Str8Lit("P"), Str8Lit("Play and pause")},
+          {Str8Lit("F, F11, Alt+Enter"), Str8Lit("Fullscreen")},
+          {Str8Lit("I"), Str8Lit("Slide number")},
+          {Str8Lit("H, F1"), Str8Lit("This list")},
+          {Str8Lit("Esc"), Str8Lit("Leave fullscreen, or quit")},
+          {Str8Lit("Drop a folder or file"), Str8Lit("Open it")},
+      };
+
+      F32 px = 20.0f * scale;
+      F32 row_h = TXT_LineHeight(fonts->regular, px) * 1.25f;
+      F32 pad = 28.0f * scale;
+      F32 column_gap = 36.0f * scale;
+
+      // As wide as the widest of each column.
+      F32 key_w = 0;
+      F32 what_w = 0;
+      for (U64 i = 0; i < ArrayCount(rows); i += 1) {
+         key_w = Max(key_w, TXT_Width(fonts->bold, px, rows[i][0]));
+         what_w = Max(what_w, TXT_Width(fonts->regular, px, rows[i][1]));
+      }
+
+      F32 panel_w = pad + key_w + column_gap + what_w + pad;
+      F32 panel_h = pad + row_h * (F32)ArrayCount(rows) + pad;
+      F32 panel_x = (window_dim.x - panel_w) * 0.5f;
+      F32 panel_y = (window_dim.y - panel_h) * 0.5f;
+
+      R_Rect2DInst* panel = Core_D_Rect(R2F32P(panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
+                                        R2F32P(0, 0, 1, 1), V4F32(0.02f, 0.02f, 0.03f, 0.88f));
+      for (U64 i = 0; i < ArrayCount(panel->corner_radii); i += 1) {
+         panel->corner_radii[i] = 10.0f * scale;
+      }
+      panel->edge_softness = 1.0f;
+
+      F32 y = panel_y + pad;
+      for (U64 i = 0; i < ArrayCount(rows); i += 1) {
+         TXT_Draw(fonts->bold, px, V2F32(panel_x + pad, y), V4F32(1, 1, 1, 0.95f), rows[i][0]);
+         TXT_Draw(fonts->regular, px, V2F32(panel_x + pad + key_w + column_gap, y), V4F32(1, 1, 1, 0.7f), rows[i][1]);
+         y += row_h;
+      }
+   }
+
+   ScratchEnd(scratch);
 }
 
 ////////////////////////////////
 //~ bgz: the frame
 
+// The font cache's turn of the frame, before any text is measured or drawn.
+internal void
+_FR_BeginText(App_State* app_state, Vec2F32 window_dim) {
+   // Text is drawn at sizes that follow the window's (view.h), and the font
+   // cache keeps every glyph of every size it has drawn, in textures. Left
+   // alone, dragging the window's edge would fill it with sizes never used
+   // again. So a new window size empties it: what this frame draws is put
+   // back in as it is drawn.
+   if (window_dim.x != app_state->text_window_dim.x || window_dim.y != app_state->text_window_dim.y) {
+      app_state->text_window_dim = window_dim;
+      Core_FNT_Reset();
+   }
+
+   // Lets go of the last frame's measured strings.
+   Core_FNT_Frame();
+}
+
 internal void
 FrameWork(App_State* app_state) {
    _FR_HandleInput(app_state);
 
+   Vec2F32 window_dim = Dim2F32(Core_WM_ClientRectFromWindow(app_state->window));
+   _FR_BeginText(app_state, window_dim);
+
    Core_D_BeginFrame();
    D_Bucket* bucket = Core_D_BucketMake();
    Core_D_BucketScope(bucket) {
-      _FR_DrawSlide(app_state);
+      // The background, which is all there is behind a slide that does not
+      // fill the window.
+      Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1), V4F32(0.05f, 0.05f, 0.06f, 1.0f));
+
+      _FR_DrawSlide(app_state, window_dim);
+      _FR_DrawOverlays(app_state, window_dim);
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);
 }

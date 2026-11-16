@@ -1,46 +1,107 @@
 ////////////////////////////////
 //~ bgz: deck
 //
-// The slides, in the order they are shown. Today a deck is a folder: every
-// image file directly in it is a slide, in order of file name - slide2 before
-// slide10. Opening one image file opens its folder, starting at that image.
+// The slides, in the order they are shown. A deck is opened from one of:
+//
+//  - A folder of images. Every image file directly in it is a slide, in order
+//    of file name - slide2 before slide10. Opening one image file opens its
+//    folder, starting at that image.
+//
+//  - A text file (.md or .txt) that says what is on each slide - the format
+//    is below. A folder with a slides.md in it opens as that file.
 //
 // A slide's image is loaded the first time it is asked for, not when the deck
 // is opened, and only the slides around the one showing are kept: a folder of
 // photos is far more than fits in video memory at once.
+//
+//- bgz: the text format
+//
+// A small part of Markdown, read a line at a time:
+//
+//    # Title            starts a new slide, with this title
+//    ---                starts a new slide with no title
+//    ## Heading         a heading inside the slide
+//    - point            a bullet. Two more spaces in front for each level in
+//    * point            (up to DECK_MAX_BULLET_LEVEL)
+//    ![](picture.png)   the slide's picture, found from the text file's folder.
+//                       A slide has one: the first
+//    anything else      a paragraph. Each line is its own
+//    (an empty line)    a little more room before what follows
+//
+// A slide with only a title shows it large, in the middle. A slide with only
+// a picture shows it filling the window, as a folder of images does.
 
 #ifndef DECK_H
 #define DECK_H
 
+#define DECK_MAX_BULLET_LEVEL 3
+
+typedef enum DECK_ItemKind {
+   DECK_ItemKind_Text,
+   DECK_ItemKind_Bullet,
+   DECK_ItemKind_Heading,
+} DECK_ItemKind;
+
+// One line of a slide's body.
+typedef struct DECK_Item DECK_Item;
+struct DECK_Item {
+   DECK_Item*    next;
+   DECK_ItemKind kind;
+   String8       text;
+   U32           level;      // bullets: 0 is outermost
+   B32           gap_before; // an empty line came before it
+};
+
 typedef struct DECK_Slide DECK_Slide;
 struct DECK_Slide {
-   String8   path;
-   IMG_Image image;      // zero until loaded
+   String8   image_path;  // empty: the slide has no picture
+   IMG_Image image;       // zero until loaded
    B32       load_failed; // tried once and could not be: not tried again
+
+   // Empty and zero for a slide that is only a picture.
+   String8    title;
+   DECK_Item* first_item;
+   DECK_Item* last_item;
+   U64        item_count;
 };
 
 typedef struct DECK_Deck DECK_Deck;
 struct DECK_Deck {
-   Arena*      arena; // the deck's own: everything it points to is on it
-   String8     folder;
+   Arena*      arena;  // the deck's own: everything it points to is on it
+   String8     folder; // of the images, or that the text file is in
    DECK_Slide* slides;
    U64         slide_count;
+
+   // For a deck from a text file. Empty and zero for a folder of images.
+   String8   file;
+   DenseTime file_modified; // as it was when read
 };
 
 // Never 0. A folder that is missing, or has no images in it, gives a deck
 // with no slides.
 internal DECK_Deck* DECK_OpenFolder(String8 folder);
 
-// As DECK_OpenFolder, for a path that is either a folder or one image file. A
-// file opens the folder it is in, and first_slide_out is given its slide's
-// index, which is where to start. For a folder that is 0.
+// Reads a deck from a text file. Never 0: a file that is missing or has
+// nothing in it gives a deck with no slides.
+internal DECK_Deck* DECK_OpenFile(String8 file);
+
+// Opens whichever kind of deck path is: a text file, a folder, or one image
+// file. An image opens the folder it is in, and first_slide_out is given its
+// slide's index, which is where to start. For the others that is 0.
 internal DECK_Deck* DECK_OpenPath(String8 path, U64* first_slide_out);
+
+// Whether a deck from a text file has had that file written since it was
+// read. Always 0 for a folder of images.
+internal B32 DECK_FileHasChanged(DECK_Deck* deck);
+
+// Whether there is anything on the slide but its picture.
+internal B32 DECK_SlideHasText(DECK_Slide* slide);
 
 // Releases every image the deck has loaded, and the deck itself.
 internal void DECK_Close(DECK_Deck* deck);
 
 // The image of a slide, loaded now if it is not yet. 0 if there is no such
-// slide or its file could not be loaded. Slides more than one away from this
+// slide, it has no picture, or the file could not be loaded. Slides more than one away from this
 // one have their images released.
 internal IMG_Image* DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx);
 
