@@ -226,10 +226,16 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
 
       U64 hash_count = 0;
       while (hash_count < line.size && line.str[hash_count] == '#') hash_count += 1;
-      B32 is_heading = (hash_count > 0 && hash_count < line.size && line.str[hash_count] == ' ');
+      // The space after the #s can be left out: "#Title" is a title too. And
+      // a # with nothing after it yet is a title being written: the slide
+      // starts as soon as the # is typed.
+      B32 is_heading = (hash_count > 0);
       B32 is_title = (is_heading && hash_count == 1);
 
-      B32 is_bullet = (line.size >= 2 && (line.str[0] == '-' || line.str[0] == '*') && line.str[1] == ' ');
+      // A - with nothing after it yet is a bullet being written: it shows as
+      // its dot, not as a paragraph that reads "-".
+      B32 is_bullet = ((line.size >= 2 && (line.str[0] == '-' || line.str[0] == '*') && line.str[1] == ' ') ||
+                       (line.size == 1 && (line.str[0] == '-' || line.str[0] == '*')));
 
       // ![anything](path) and nothing else on the line.
       String8 image_path = {0};
@@ -276,7 +282,7 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
             item->text = _DECK_Trim(Str8Skip(line, hash_count));
          } else if (is_bullet) {
             item->kind = DECK_ItemKind_Bullet;
-            item->text = _DECK_Trim(Str8Skip(line, 2));
+            item->text = _DECK_Trim(Str8Skip(line, 1));
             item->level = (U32)Min(indent / 2, DECK_MAX_BULLET_LEVEL);
          } else {
             item->kind = DECK_ItemKind_Text;

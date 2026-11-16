@@ -976,7 +976,7 @@ ED_Draw(ED_Editor* editor, Arena* arena, ED_Box box) {
          String8 line = Str8(editor->text + first, line_end - first);
 
          Vec4F32 color = V4F32(0.84f, 0.86f, 0.90f, 1.0f);
-         if (line.size >= 2 && line.str[0] == '#' && line.str[1] == ' ') {
+         if (line.size >= 2 && line.str[0] == '#' && line.str[1] != '#') {
             color = V4F32(1.00f, 0.80f, 0.40f, 1.0f); // a new slide
          } else if (line.size >= 3 && line.str[0] == '-' && line.str[1] == '-' && line.str[2] == '-') {
             color = V4F32(1.00f, 0.80f, 0.40f, 1.0f); // a new slide

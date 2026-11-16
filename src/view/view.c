@@ -127,19 +127,26 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, Rng2F32 rect, F32 
          F32 text_x = rect.min.x + indent * (F32)(item->level + 1);
 
          if (do_draw) {
-            // A round dot, level with the middle of the first line.
-            F32 dot = px * 0.26f;
-            F32 dot_x = text_x - indent * 0.62f;
-            F32 dot_y = y + TXT_LineHeight(fonts->regular, px) * 0.54f - dot * 0.5f;
+            // A round dot, level with the middle of the first line. Not under
+            // 4 pixels across, or in the small preview it all but vanishes.
+            F32 dot = Max(px * 0.28f, 4.0f);
+            F32 dot_x = (F32)(S32)(text_x - indent * 0.62f);
+            F32 dot_y = (F32)(S32)(y + TXT_LineHeight(fonts->regular, px) * 0.54f - dot * 0.5f);
 
             R_Rect2DInst* inst = Core_D_Rect(R2F32P(dot_x, dot_y, dot_x + dot, dot_y + dot), R2F32P(0, 0, 1, 1),
                                              _VIEW_COLOR_ACCENT(alpha));
             for (U64 i = 0; i < ArrayCount(inst->corner_radii); i += 1) {
                inst->corner_radii[i] = dot * 0.5f;
             }
-            inst->edge_softness = 1.0f;
+            // The soft edge is taken out of the dot, so a small dot gets a
+            // thin one or there is nothing left of it.
+            inst->edge_softness = Min(1.0f, dot * 0.1f);
          }
 
+         // A bullet with no text yet still takes up its line.
+         if (item->text.size == 0) {
+            y += TXT_LineHeight(fonts->regular, px);
+         }
          y = _VIEW_Lines(arena, fonts->regular, px, item->text, text_x, y, rect.max.x - text_x, _VIEW_COLOR_BODY(alpha),
                          do_draw);
       } break;

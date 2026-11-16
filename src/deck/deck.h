@@ -21,6 +21,7 @@
 // A small part of Markdown, read a line at a time:
 //
 //    # Title            starts a new slide, with this title
+//                       (the space after the # or ## can be left out)
 //    ---                starts a new slide with no title
 //    ## Heading         a heading inside the slide
 //    - point            a bullet. Two more spaces in front for each level in
