@@ -131,3 +131,14 @@ DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
 
    return result;
 }
+
+internal IMG_Image*
+DECK_LoadedImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
+   IMG_Image* result = 0;
+
+   if (slide_idx < deck->slide_count && IMG_IsLoaded(&deck->slides[slide_idx].image)) {
+      result = &deck->slides[slide_idx].image;
+   }
+
+   return result;
+}

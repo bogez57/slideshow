@@ -36,4 +36,8 @@ internal DECK_Deck* DECK_OpenFolder(String8 folder);
 // one have their images released.
 internal IMG_Image* DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx);
 
+// The image of a slide only if it is loaded already, else 0. Loads nothing
+// and releases nothing.
+internal IMG_Image* DECK_LoadedImageFromSlide(DECK_Deck* deck, U64 slide_idx);
+
 #endif // DECK_H
