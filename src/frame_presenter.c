@@ -200,9 +200,9 @@ PRES_Draw(App_State* app_state) {
       F32 gap = (F32)(S32)Max(pad * 0.4f, 2.0f);
 
       // Along the bottom, every slide, small. A window too short to spare
-      // the room has none.
+      // the room has none: what is above it needs about 300 pixels.
       F32 strip_h = (F32)(S32)Clamp(36.0f, window_dim.y * 0.12f, 160.0f);
-      if (window_dim.y < strip_h * 5.0f) {
+      if (window_dim.y - strip_h - pad * 3.0f < 300.0f) {
          strip_h = 0;
       }
       F32     columns_max_y = window_dim.y - pad - ((strip_h != 0) ? strip_h + pad : 0);
@@ -243,9 +243,13 @@ PRES_Draw(App_State* app_state) {
                Str8ListPush(scratch.arena, &notes, Str8Lit("None on this slide. A line of  @note Say this  adds one."));
                notes_color = color_dim;
             }
+            // A line that does not fit whole is left out, and the rest after it.
             for (String8Node* note = notes.first; note != 0; note = note->next) {
                String8List lines = TXT_Wrap(scratch.arena, fonts->regular, notes_px, note->string, Dim2F32(left).x);
                for (String8Node* line = lines.first; line != 0; line = line->next) {
+                  if (y + line_h > left.max.y) {
+                     break;
+                  }
                   TXT_Draw(fonts->regular, notes_px, V2F32(left.min.x, y), notes_color, line->string);
                   y += line_h;
                }
@@ -258,14 +262,50 @@ PRES_Draw(App_State* app_state) {
          // in a small window what does not fit is cut off, not drawn over
          // the left.
          Core_D_PushClip(right);
+         F32 right_w = Dim2F32(right).x;
+         F32 right_h = Dim2F32(right).y;
+
+         // Where in the deck, and how long it has been: worked out first, for
+         // the room they take under the next slide. Both shrink to fit across
+         // the column.
+         String8 count = PushStr8F(scratch.arena, "Slide %llu of %llu", (unsigned long long)(slide_idx + 1),
+                                   (unsigned long long)deck->slide_count);
+         F32 count_w = TXT_Width(fonts->regular, count_px, count);
+         if (count_w > right_w && count_w > 0) {
+            count_px = (F32)(S32)Max(count_px * right_w / count_w, 8.0f);
+         }
+         F32 count_h = TXT_LineHeight(fonts->regular, count_px);
+
+         // A stopped clock stands at the time it was stopped.
+         B32     is_paused = (app_state->presenter_paused_us != 0);
+         U64     clock_now_us = is_paused ? app_state->presenter_paused_us : NowTimeUS();
+         U64     seconds = (clock_now_us - app_state->presenter_started_us) / 1000000;
+         String8 clock = (seconds >= 3600)
+                             ? PushStr8F(scratch.arena, "%llu:%02llu:%02llu", (unsigned long long)(seconds / 3600),
+                                         (unsigned long long)((seconds / 60) % 60), (unsigned long long)(seconds % 60))
+                             : PushStr8F(scratch.arena, "%02llu:%02llu", (unsigned long long)(seconds / 60),
+                                         (unsigned long long)(seconds % 60));
+         F32 clock_w = TXT_Width(fonts->bold, clock_px, clock);
+         if (clock_w > right_w && clock_w > 0) {
+            clock_px = (F32)(S32)Max(clock_px * right_w / clock_w, 8.0f);
+            clock_w = TXT_Width(fonts->bold, clock_px, clock);
+         }
+         F32 clock_h = TXT_LineHeight(fonts->bold, clock_px);
+
+         // All that goes under the next slide, top to bottom: the buttons,
+         // the count, the clock, its buttons, the hint.
+         F32 under_h = gap * 1.5f + button_h + pad + count_h * 1.5f + clock_h * 1.1f + button_h + gap * 1.5f + label_h;
+
          F32 y = right.min.y;
          TXT_Draw(fonts->bold, label_px, V2F32(right.min.x, y), color_dim, Str8Lit("Next"));
          y += label_h * 1.4f;
 
-         // No taller than leaves the count and the clock room under it.
-         F32 next_w = Dim2F32(right).x;
+         // No taller than leaves what goes under it room, nor than a bit over
+         // a third of the column. In a window too short for both, it keeps a
+         // little and what is under it goes, from the bottom up.
+         F32 next_w = right_w;
          F32 next_h = next_w * VIEW_PAGE_H / VIEW_PAGE_W;
-         F32 next_max_h = Max(Dim2F32(right).y * 0.38f, 1.0f);
+         F32 next_max_h = Max(Min(right_h * 0.38f, right_h - label_h * 1.4f - under_h), Max(right_h * 0.15f, 1.0f));
          if (next_h > next_max_h) {
             next_h = next_max_h;
             next_w = next_h * VIEW_PAGE_W / VIEW_PAGE_H;
@@ -300,60 +340,44 @@ PRES_Draw(App_State* app_state) {
          }
          y = next_rect.max.y + gap * 1.5f;
 
+         // Each row under it is drawn only if it fits whole: half a button
+         // cut off at the bottom is neither readable nor safe to click.
+
          //- bgz: back and on, side by side, as wide as the column
-         F32 right_w = Dim2F32(right).x;
-         {
-            F32 half_w = (F32)(S32)((right_w - gap) * 0.5f);
+         F32 half_w = (F32)(S32)((right_w - gap) * 0.5f);
+         if (y + button_h <= right.max.y) {
             _PRES_Button(app_state, R2F32P(right.min.x, y, right.min.x + half_w, y + button_h), Str8Lit("Previous"),
                          button_px, mouse, has_prev, PRES_HitKind_Slide, has_prev ? slide_idx - 1 : 0);
             _PRES_Button(app_state, R2F32P(right.min.x + half_w + gap, y, right.max.x, y + button_h), Str8Lit("Next"),
                          button_px, mouse, has_next, PRES_HitKind_Slide, slide_idx + 1);
-            y += button_h + pad;
          }
+         y += button_h + pad;
 
          //- bgz: where in the deck, and how long it has been
-         // The count and the clock shrink to fit across the column.
-         String8 count = PushStr8F(scratch.arena, "Slide %llu of %llu", (unsigned long long)(slide_idx + 1),
-                                   (unsigned long long)deck->slide_count);
-         F32 count_w = TXT_Width(fonts->regular, count_px, count);
-         if (count_w > right_w && count_w > 0) {
-            count_px = (F32)(S32)Max(count_px * right_w / count_w, 8.0f);
+         if (y + count_h <= right.max.y) {
+            TXT_Draw(fonts->regular, count_px, V2F32(right.min.x, y), color_text, count);
          }
-         TXT_Draw(fonts->regular, count_px, V2F32(right.min.x, y), color_text, count);
-         y += TXT_LineHeight(fonts->regular, count_px) * 1.5f;
+         y += count_h * 1.5f;
 
-         // A stopped clock stands at the time it was stopped.
-         B32     is_paused = (app_state->presenter_paused_us != 0);
-         U64     clock_now_us = is_paused ? app_state->presenter_paused_us : NowTimeUS();
-         U64     seconds = (clock_now_us - app_state->presenter_started_us) / 1000000;
-         String8 clock = (seconds >= 3600)
-                             ? PushStr8F(scratch.arena, "%llu:%02llu:%02llu", (unsigned long long)(seconds / 3600),
-                                         (unsigned long long)((seconds / 60) % 60), (unsigned long long)(seconds % 60))
-                             : PushStr8F(scratch.arena, "%02llu:%02llu", (unsigned long long)(seconds / 60),
-                                         (unsigned long long)(seconds % 60));
-         F32 clock_w = TXT_Width(fonts->bold, clock_px, clock);
-         if (clock_w > right_w && clock_w > 0) {
-            clock_px = (F32)(S32)Max(clock_px * right_w / clock_w, 8.0f);
-         }
          // Stopped, it is dim. A click on it stops it and starts it, as the
          // button under it does.
-         F32 clock_h = TXT_LineHeight(fonts->bold, clock_px);
-         TXT_Draw(fonts->bold, clock_px, V2F32(right.min.x, y), is_paused ? color_dim : color_clock, clock);
-         _PRES_PushHit(app_state, PRES_HitKind_Clock, R2F32P(right.min.x, y, right.min.x + Min(clock_w, right_w), y + clock_h),
-                       0);
+         if (y + clock_h <= right.max.y) {
+            TXT_Draw(fonts->bold, clock_px, V2F32(right.min.x, y), is_paused ? color_dim : color_clock, clock);
+            _PRES_PushHit(app_state, PRES_HitKind_Clock,
+                          R2F32P(right.min.x, y, right.min.x + Min(clock_w, right_w), y + clock_h), 0);
+         }
          y += clock_h * 1.1f;
 
-         {
-            F32 half_w = (F32)(S32)((right_w - gap) * 0.5f);
+         if (y + button_h <= right.max.y) {
             _PRES_Button(app_state, R2F32P(right.min.x, y, right.min.x + half_w, y + button_h),
                          is_paused ? Str8Lit("Resume") : Str8Lit("Pause"), button_px, mouse, 1, PRES_HitKind_Clock, 0);
             _PRES_Button(app_state, R2F32P(right.min.x + half_w + gap, y, right.max.x, y + button_h), Str8Lit("Reset"),
                          button_px, mouse, 1, PRES_HitKind_ClockReset, 0);
-            y += button_h + gap * 1.5f;
          }
+         y += button_h + gap * 1.5f;
 
          String8List hint = TXT_Wrap(scratch.arena, fonts->regular, label_px, Str8Lit("V closes this window"), right_w);
-         for (String8Node* line = hint.first; line != 0; line = line->next) {
+         for (String8Node* line = hint.first; line != 0 && y + label_h <= right.max.y; line = line->next) {
             TXT_Draw(fonts->regular, label_px, V2F32(right.min.x, y), color_dim, line->string);
             y += label_h;
          }
