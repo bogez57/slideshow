@@ -57,13 +57,33 @@ internal String8 FR_CurrentNotice(App_State* app_state);
 // which it warns about instead.
 internal void FR_RequestQuit(App_State* app_state);
 
+//- bgz: sizes of what is not a slide
+//
+// The screens' sizes are for a window 900 pixels tall, and grow with a taller
+// one - a large or dense screen - up to twice, but do not shrink with a
+// shorter: how many pixels a unit is.
+internal F32 FR_UIScale(Vec2F32 window_dim);
+
+// The UI layer's font size for text px pixels tall, as the hand-drawn text
+// of that size (TXT_Draw) is drawn: the font cache's points, whole ones.
+internal F32 FR_UIFontSize(F32 px);
+
 //- bgz: the edit screen (frame_edit.c)
+//
+// Input for the keys and the hand-drawn parts: the text, the preview, the
+// small slides. EDIT_Build builds the UI parts - the Format panel, the list
+// of pictures, the status line - in FrameWork's UI build. Not interactive:
+// drawn, but taking no clicks or wheel, as when the open screen is over it.
 internal void EDIT_Input(App_State* app_state, Vec2F32 window_dim);
+internal void EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive);
 internal void EDIT_Draw(App_State* app_state, Vec2F32 window_dim);
 
 //- bgz: the open screen (frame_open.c)
+//
+// Input for its keys; OPEN_Build builds the panel, in FrameWork's UI build,
+// and takes its clicks and wheel.
 internal void OPEN_Show(App_State* app_state);
 internal void OPEN_Input(App_State* app_state, Vec2F32 window_dim);
-internal void OPEN_Draw(App_State* app_state, Vec2F32 window_dim);
+internal void OPEN_Build(App_State* app_state, Vec2F32 window_dim);
 
 #endif // FRAME_H

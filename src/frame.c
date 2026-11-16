@@ -2,10 +2,12 @@
 //~ bgz: one frame's work
 //
 // FrameWork is everything between the renderer's begin and end of a frame
-// (main.c): read this frame's input and the clock, then draw the screen that
-// is up - the presentation, which is in this file, or the edit screen
-// (frame_edit.c). It also runs with no events at all, when Windows asks for a
-// repaint during a resize - see _Main_RepaintFrame in main.c.
+// (main.c): read this frame's input and the clock, build the UI layer's tree
+// (the open screen, the edit screen's panels), then draw the screen that is
+// up - the presentation, which is in this file, or the edit screen
+// (frame_edit.c) - and the UI's tree over it. It also runs with no events at
+// all, when Windows asks for a repaint during a resize - see
+// _Main_RepaintFrame in main.c.
 
 ////////////////////////////////
 //~ bgz: what the two screens share
@@ -721,9 +723,15 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
 // hand. Ported from the editor's frame.c (_FR_ProcessEvents,
 // _FR_BeginUIBuild, _FR_DrawUITree).
 //
-// The UI reads the same events the hand-drawn screens do, so a click on a UI
-// box is also seen by the screen under it - until those screens are built
-// with the UI too, a UI box goes where the screen takes no clicks.
+// Built with it: the open screen (OPEN_Build, frame_open.c) and the edit
+// screen's Format panel, list of pictures and status line (EDIT_Build,
+// frame_edit.c). The text editor, the slides and the small slides are drawn
+// by hand.
+//
+// The UI's events are what the screens' own input (EDIT_Input, OPEN_Input)
+// left: a click that took is eaten there. The hand-drawn parts and the UI
+// parts do not overlap, so neither gets the other's clicks; while the open
+// screen is up, the edit screen's input does not run at all.
 
 // This frame's window events as the UI's. Selects the UI's state first: the
 // list is on UI_BuildArena, which is the selected state's, and lasts until
@@ -756,8 +764,7 @@ _FR_UIEventsFromEvents(App_State* app_state) {
             // (the editor's frame.c).
             if (event->delta.y != 0) {
                kind = UI_EventKind_Scroll;
-            }
-         } break;
+            }         } break;
       }
 
       UI_Event ui_event = zero_struct;
@@ -774,16 +781,30 @@ _FR_UIEventsFromEvents(App_State* app_state) {
    return ui_events;
 }
 
+internal F32
+FR_UIScale(Vec2F32 window_dim) {
+   return Clamp(1.0f, window_dim.y / 900.0f, 2.0f);
+}
+
+internal F32
+FR_UIFontSize(F32 px) {
+   // As text.c's _TXT_PointsFromPx: the UI hands its size to the same font
+   // cache, which takes points, 72 to an inch where pixels are 96.
+   return Max((F32)(S32)(px * 0.75f), 1.0f);
+}
+
 // Starts the frame's UI build: the theme, the icons, and the fonts every box
 // starts from.
 internal void
-_FR_BeginUI(App_State* app_state, UI_EventList* ui_events) {
-   // The colours, by tag: the editor's palette (ui_colors.h) and the part of
-   // its table the basic widgets ask for. A box asks under the tags pushed
-   // with UI_ColorTag, and the pattern with the most of them wins.
+_FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
+   // The colours, by tag. A box asks under the tags pushed with UI_ColorTag,
+   // and the pattern with the most of them wins; a pattern counts only if
+   // the box has all of its tags. The first part is the editor's palette
+   // (ui_colors.h), for what the basic widgets ask for; the rest are the
+   // slideshow's own colours, the ones its hand-drawn screens use.
    static UI_ThemePattern theme_patterns[] = {
        //  tags          slot                      colour
-       {"", UI_ColorSlot_Text, UI_FG},
+       {"", UI_ColorSlot_Text, {{0.84f, 0.86f, 0.90f, 1.00f}}},
        {"", UI_ColorSlot_Background, UI_BG_1},
        {"", UI_ColorSlot_Border, UI_TRANSPARENT},
        {"", UI_ColorSlot_Selection, UI_ACCENT_BG},
@@ -791,18 +812,33 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events) {
        {"selected", UI_ColorSlot_Background, UI_ACCENT_BG},
        {"weak", UI_ColorSlot_Text, UI_FG_WEAK},
        {"soft", UI_ColorSlot_Text, UI_FG_SOFT},
-       {"dim", UI_ColorSlot_Text, UI_FG_DIM},
        {"error", UI_ColorSlot_Text, UI_ERROR},
        {"warning", UI_ColorSlot_Text, UI_WARNING},
        {"highlight", UI_ColorSlot_Text, UI_HIGHLIGHT},
        {"button", UI_ColorSlot_Background, UI_BG_4},
        {"button", UI_ColorSlot_Text, UI_FG},
-       {"button hot", UI_ColorSlot_Background, UI_BG_3},
        {"popup", UI_ColorSlot_Background, UI_BG_3},
        {"popup", UI_ColorSlot_Border, UI_LINE},
        {"menu", UI_ColorSlot_Background, UI_TRANSPARENT},
        {"scroll track", UI_ColorSlot_Background, UI_TRANSPARENT},
        {"scroll thumb", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.18f}}},
+
+       //- bgz: the slideshow's panels: the open screen (frame_open.c), the
+       // edit screen's Format panel and status line (frame_edit.c)
+       {"backdrop", UI_ColorSlot_Background, {{0.00f, 0.00f, 0.00f, 0.60f}}}, // over what is behind the open screen
+       {"panel", UI_ColorSlot_Background, {{0.11f, 0.115f, 0.135f, 1.00f}}},
+       {"panel_bar", UI_ColorSlot_Background, {{0.16f, 0.17f, 0.20f, 1.00f}}}, // title, foot, status line
+       {"header", UI_ColorSlot_Background, {{0.14f, 0.15f, 0.17f, 1.00f}}},    // the Format panel's
+       {"header hot", UI_ColorSlot_Background, {{0.17f, 0.18f, 0.21f, 1.00f}}},
+       {"row", UI_ColorSlot_Background, UI_TRANSPARENT},                       // a list's row: the panel shows through
+       {"row hot", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.07f}}},   // under the mouse
+       {"dim", UI_ColorSlot_Text, {{0.84f, 0.86f, 0.90f, 0.55f}}},             // what a row is, hints, keys
+       {"notice", UI_ColorSlot_Text, {{1.00f, 0.85f, 0.50f, 1.00f}}},          // FR_Notice's
+       {"deck", UI_ColorSlot_Text, {{1.00f, 0.80f, 0.40f, 1.00f}}},            // a deck to open
+       {"folder", UI_ColorSlot_Text, {{0.55f, 0.75f, 1.00f, 1.00f}}},
+       {"action", UI_ColorSlot_Text, {{0.60f, 0.85f, 0.60f, 1.00f}}},          // Browse, New deck, Present
+       {"syntax", UI_ColorSlot_Text, {{1.00f, 0.80f, 0.40f, 1.00f}}},          // a Format line, as it is written
+       {"picture", UI_ColorSlot_Text, {{0.60f, 0.85f, 0.60f, 1.00f}}},         // a picture's name
    };
    static UI_Theme theme = {theme_patterns, ArrayCount(theme_patterns)};
 
@@ -838,15 +874,23 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events) {
    }
    app_state->ui_last_frame_us = now_us;
 
+   // Hover and press come in fast, as raddebugger's do: the scroll bar's thumb
+   // widens under the mouse by them (_UI_DrawScrollThumb). The rest is not
+   // used here.
    UI_AnimationInfo animation_info = {0};
+   animation_info.hot_animation_rate = 1.0f - PowF32(2.0f, -60.0f * dt);
+   animation_info.active_animation_rate = animation_info.hot_animation_rate;
    UI_BeginBuild(app_state->window, ui_events, &icon_info, &theme, &animation_info, dt, dt);
 
-   // The slideshow has no code font: everything is in its regular one.
-   // Smoothed both ways, as the editor draws its proportional UI font.
+   // The slideshow's regular font, at the hand-drawn screens' text size
+   // (15 pixels at FR_UIScale 1, as the edit screen's), and drawn as they
+   // draw it (text.c's _TXT_RASTER_FLAGS), so the two look alike side by
+   // side. Panels push their own sizes and fonts where they differ.
    FNT_Tag font = app_state->fonts.regular;
    UI_PushFont(font);
-   UI_PushFontSize(12);
-   UI_SetLabelFont(font, FNT_RasterFlag_Smooth | FNT_RasterFlag_Hinted);
+   UI_PushFontSize(FR_UIFontSize((F32)(S32)(15.0f * FR_UIScale(window_dim))));
+   UI_PushTextRasterFlags(_TXT_RASTER_FLAGS);
+   UI_SetLabelFont(font, _TXT_RASTER_FLAGS);
 
    // A ctx menu builds with the stack's bottom value, which is whatever was
    // last pushed on the empty stack. Pinned here, or a UI_PrefWidth(UI_Pct(..))
@@ -854,25 +898,6 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events) {
    // (the editor's frame.c).
    UI_PushPrefWidth(UI_TopPrefWidth());
    UI_PushPrefHeight(UI_TopPrefHeight());
-}
-
-// TEMPORARY - a proof that the UI layer builds, lays out, draws and takes
-// clicks. Remove it once a real panel is built with the UI. A button in the
-// edit screen's top right corner, above the preview's page, where that
-// screen takes no clicks.
-internal void
-_FR_BuildUIProof(App_State* app_state, Vec2F32 window_dim) {
-   F32 w = 90.0f;
-   F32 h = 24.0f;
-   F32 pad = 6.0f;
-   UI_SetNextRect(R2F32P(window_dim.x - w - pad, pad, window_dim.x - pad, pad + h));
-   UI_SetNextColorTag(Str8Lit("button"));
-   UI_CornerRadius(4.0f) {
-      UI_Signal signal = UI_Button(Str8Lit("UI ok###ui proof"));
-      if (UI_Clicked(signal)) {
-         FR_Notice(app_state, Str8Lit("The UI layer took the click."));
-      }
-   }
 }
 
 // Draws the UI's box tree into the draw bucket that is open, over whatever
@@ -1008,14 +1033,27 @@ FrameWork(App_State* app_state) {
    }
 
    // The UI tree, built after the screens' own input, against the screen
-   // that input left up. UI_EndBuild lays it out; it is drawn below.
+   // that input left up. UI_EndBuild lays it out; it is drawn below, over
+   // what the screens draw by hand.
+   //
+   // What is built first is drawn on top and asked for clicks first, so the
+   // open screen comes first: its backdrop takes every click and turn of the
+   // wheel that misses its panel. Under it, the edit screen's panels are
+   // built only to be seen.
    {
       UI_EventList ui_events = _FR_UIEventsFromEvents(app_state);
-      _FR_BeginUI(app_state, &ui_events);
+      _FR_BeginUI(app_state, &ui_events, window_dim);
 
-      // TEMPORARY - see _FR_BuildUIProof.
-      if (app_state->is_editing && !app_state->show_open) {
-         _FR_BuildUIProof(app_state, window_dim);
+      // What the panels show is text as it is - paths, names, "## Heading" -
+      // never a box's key: the UI would show only what is before a ##.
+      UI_FlagsAdd(UI_BoxFlag_DisableIDString) {
+         if (app_state->show_open) {
+            OPEN_Build(app_state, window_dim);
+         }
+         // Asked after: a deck opened from the open screen is up already.
+         if (app_state->is_editing) {
+            EDIT_Build(app_state, window_dim, !app_state->show_open);
+         }
       }
 
       UI_EndBuild();
@@ -1036,11 +1074,8 @@ FrameWork(App_State* app_state) {
          _FR_DrawOverlays(app_state, window_dim);
       }
 
-      if (app_state->show_open) {
-         OPEN_Draw(app_state, window_dim);
-      }
-
-      // Last: over everything drawn by hand.
+      // Last, over everything drawn by hand: the open screen, and the edit
+      // screen's Format panel and status line.
       _FR_DrawUITree(app_state);
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);

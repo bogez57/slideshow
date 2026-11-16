@@ -27,10 +27,16 @@
 // the folders and text decks in it. Clicking a
 // folder goes into it. Clicking anything else opens it and closes the panel.
 //
+// The rows are made here (_OPEN_Scan) and the panel is built with the UI
+// layer (OPEN_Build, called from FrameWork's UI build): a dimmed backdrop
+// over the whole window, and on it the panel, its rows a UI_ScrollRows list.
+// OPEN_Input has the keys; the clicks and the wheel are the panel's, and
+// while it is up nothing under it gets either.
+//
 //    open the panel   Ctrl+O, on either screen
-//    close it         Esc, or Ctrl+O again
+//    close it         Esc, Ctrl+O again, or a click beside the panel
 //    folder above     Backspace, or the .. line
-//    through the list the mouse wheel
+//    through the list the mouse wheel, or the scroll bar
 
 ////////////////////////////////
 //~ bgz: the rows
@@ -185,7 +191,7 @@ internal void
 _OPEN_GoToFolder(App_State* app_state, String8 folder) {
    // folder may be in the arena the scan clears: the scan copies it first.
    app_state->open_folder = folder;
-   app_state->open_first_row = 0;
+   MemoryZeroStruct(&app_state->open_scroll); // a new folder's list starts at its top
    _OPEN_Scan(app_state);
 }
 
@@ -217,17 +223,16 @@ struct _OPEN_Layout {
    F32     ui_px; // the size of the text
    Rng2F32 panel;
    Rng2F32 title;
-   Rng2F32 rows;  // where the rows are, all that fit
+   Rng2F32 rows;  // where the list of rows is
    Rng2F32 foot;
    F32     row_h;
-   U64     rows_fit;
 };
 
 internal _OPEN_Layout
 _OPEN_LayoutFromWindowDim(Vec2F32 window_dim) {
    _OPEN_Layout result = {0};
 
-   F32 ui = Clamp(1.0f, window_dim.y / 900.0f, 2.0f);
+   F32 ui = FR_UIScale(window_dim);
    result.ui = ui;
    result.ui_px = (F32)(S32)(16.0f * ui);
    result.row_h = (F32)(S32)(30.0f * ui);
@@ -244,20 +249,8 @@ _OPEN_LayoutFromWindowDim(Vec2F32 window_dim) {
    result.title = R2F32P(x, y, x + w, y + title_h);
    result.foot = R2F32P(x, y + h - foot_h, x + w, y + h);
    result.rows = R2F32P(x, result.title.max.y, x + w, Max(result.foot.min.y, result.title.max.y));
-   result.rows_fit = (U64)(Dim2F32(result.rows).y / result.row_h);
 
    return result;
-}
-
-internal Rng2F32
-_OPEN_RowRect(_OPEN_Layout* layout, U64 shown_idx) {
-   F32 y = layout->rows.min.y + layout->row_h * (F32)shown_idx;
-   return R2F32P(layout->rows.min.x, y, layout->rows.max.x, y + layout->row_h);
-}
-
-internal U64
-_OPEN_MaxFirstRow(App_State* app_state, _OPEN_Layout* layout) {
-   return (app_state->open_row_count > layout->rows_fit) ? app_state->open_row_count - layout->rows_fit : 0;
 }
 
 ////////////////////////////////
@@ -318,11 +311,13 @@ _OPEN_PickRow(App_State* app_state, OPEN_Row* row) {
    ScratchEnd(scratch);
 }
 
+// The keys, and what comes to the window rather than to the panel: a close, a
+// file dropped. The clicks and the wheel are the panel's (OPEN_Build).
 internal void
 OPEN_Input(App_State* app_state, Vec2F32 window_dim) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;
-   _OPEN_Layout  layout = _OPEN_LayoutFromWindowDim(window_dim);
+   UnusedVariable(window_dim);
 
    U64 scan_us = (U64)(_OPEN_SCAN_SECONDS * 1000000.0f);
    if (app_state->open_scanned_us == 0 || NowTimeUS() - app_state->open_scanned_us >= scan_us) {
@@ -347,16 +342,6 @@ OPEN_Input(App_State* app_state, Vec2F32 window_dim) {
          FR_RequestQuit(app_state);
       }
 
-      // The wheel moves through the rows, three a notch.
-      if (event->kind == WM_EventKind_Scroll && event->delta.y != 0) {
-         U64 max_first = _OPEN_MaxFirstRow(app_state, &layout);
-         if (event->delta.y > 0) {
-            app_state->open_first_row = Min(app_state->open_first_row + 3, max_first);
-         } else {
-            app_state->open_first_row = (app_state->open_first_row > 3) ? app_state->open_first_row - 3 : 0;
-         }
-      }
-
       // Something dropped on the window is opened, as it is anywhere else.
       if (event->kind == WM_EventKind_FileDrop && event->strings.first != 0) {
          if (FR_OpenPath(app_state, event->strings.first->string)) {
@@ -364,147 +349,168 @@ OPEN_Input(App_State* app_state, Vec2F32 window_dim) {
             return;
          }
       }
-
-      if (event->kind == WM_EventKind_Press && event->key == WM_Key_LeftMouseButton) {
-         if (!Contains2F32(layout.panel, event->pos)) {
-            // A click beside the panel closes it.
-            app_state->show_open = 0;
-            return;
-         }
-         for (U64 i = 0; i < layout.rows_fit; i += 1) {
-            U64 row_idx = app_state->open_first_row + i;
-            if (row_idx < app_state->open_row_count && Contains2F32(_OPEN_RowRect(&layout, i), event->pos)) {
-               _OPEN_PickRow(app_state, &app_state->open_rows[row_idx]);
-               break;
-            }
-         }
-         // One click a frame: the rows may not be the ones it was aimed at.
-         break;
-      }
    }
-
-   app_state->open_first_row = Min(app_state->open_first_row, _OPEN_MaxFirstRow(app_state, &layout));
 }
 
 ////////////////////////////////
-//~ bgz: drawing
+//~ bgz: the panel, in the UI layer
+//
+//    backdrop    the whole window, dimmed: a click on it closes the panel, and
+//                it takes every click and turn of the wheel that misses the
+//                panel, so nothing underneath gets them
+//       panel    title, the rows (UI_ScrollRows), foot
+//
+// Built first in the frame's UI build, so it is drawn over everything else
+// and asked for clicks first.
+
+// A strip across the panel with a line of text in it: the title, the foot.
+internal void
+_OPEN_BuildBar(Rng2F32 rect, F32 pad, String8 color_tag, String8 text, char* key) {
+   UI_SetNextPrefWidth(UI_Px(Dim2F32(rect).x, 1));
+   UI_SetNextPrefHeight(UI_Px(Dim2F32(rect).y, 1));
+   UI_SetNextChildLayoutAxis(Axis2_X);
+   UI_SetNextColorTag(Str8Lit("panel_bar"));
+   UI_Box* bar = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###open %s", key);
+   UI_Parent(bar) UI_PrefHeight(UI_Pct(1, 1)) {
+      UI_Spacer(UI_Px(pad, 1));
+      UI_SetNextPrefWidth(UI_Pct(1, 0));
+      UI_SetNextColorTag(color_tag);
+      UI_Label(text);
+   }
+}
 
 internal void
-OPEN_Draw(App_State* app_state, Vec2F32 window_dim) {
-   TXT_Fonts*   fonts = &app_state->fonts;
+OPEN_Build(App_State* app_state, Vec2F32 window_dim) {
    _OPEN_Layout layout = _OPEN_LayoutFromWindowDim(window_dim);
    F32          ui = layout.ui;
-   F32          px = layout.ui_px;
-   Vec2F32      mouse = Core_WM_MouseFromWindow(app_state->window);
+   F32          pad = 18.0f * ui;
+   F32          indent = 22.0f * ui;
    Temp         scratch = ScratchBegin(0, 0);
 
-   Vec4F32 color_text = V4F32(0.84f, 0.86f, 0.90f, 1.0f);
-   Vec4F32 color_dim = V4F32(0.84f, 0.86f, 0.90f, 0.55f);
-   Vec4F32 color_deck = V4F32(1.00f, 0.80f, 0.40f, 1.0f);
-   Vec4F32 color_folder = V4F32(0.55f, 0.75f, 1.00f, 1.0f);
-   Vec4F32 color_action = V4F32(0.60f, 0.85f, 0.60f, 1.0f);
+   // The row clicked, if one was. It is acted on once the panel is built:
+   // going into a folder makes the rows again, under the loop building them.
+   OPEN_Row* picked = 0;
 
-   // What is behind goes dark, and the panel is on top of that.
-   Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1), V4F32(0, 0, 0, 0.6f));
-   Core_D_Rect(layout.panel, R2F32P(0, 0, 1, 1), V4F32(0.11f, 0.115f, 0.135f, 1.0f));
-   Core_D_Rect(layout.title, R2F32P(0, 0, 1, 1), V4F32(0.16f, 0.17f, 0.20f, 1.0f));
-   Core_D_Rect(layout.foot, R2F32P(0, 0, 1, 1), V4F32(0.16f, 0.17f, 0.20f, 1.0f));
+   UI_SetNextRect(R2F32P(0, 0, window_dim.x, window_dim.y));
+   UI_SetNextColorTag(Str8Lit("backdrop"));
+   UI_Box* backdrop = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clickable | UI_BoxFlag_Scroll,
+                                             "###open backdrop");
 
-   Core_D_PushClip(layout.panel);
+   UI_Parent(backdrop) UI_FontSize(FR_UIFontSize(layout.ui_px)) {
+      UI_SetNextFixedX(layout.panel.min.x);
+      UI_SetNextFixedY(layout.panel.min.y);
+      UI_SetNextPrefWidth(UI_Px(Dim2F32(layout.panel).x, 1));
+      UI_SetNextPrefHeight(UI_Px(Dim2F32(layout.panel).y, 1));
+      UI_SetNextChildLayoutAxis(Axis2_Y);
+      UI_SetNextColorTag(Str8Lit("panel"));
+      UI_Box* panel = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clickable | UI_BoxFlag_Scroll |
+                                                 UI_BoxFlag_Clip,
+                                             "###open panel");
 
-   F32 pad = 18.0f * ui;
-   F32 indent = 22.0f * ui;
-   F32 text_h = TXT_LineHeight(fonts->regular, px);
+      UI_Parent(panel) {
+         //- bgz: the title
+         UI_Font(app_state->fonts.bold) UI_FontSize(FR_UIFontSize((F32)(S32)(20.0f * ui))) {
+            _OPEN_BuildBar(layout.title, pad, Str8Lit(""), Str8Lit("Open a deck"), "title");
+         }
 
-   //- bgz: the title
-   {
-      F32 title_px = (F32)(S32)(20.0f * ui);
-      F32 title_h = TXT_LineHeight(fonts->bold, title_px);
-      TXT_Draw(fonts->bold, title_px,
-               V2F32(layout.title.min.x + pad, layout.title.min.y + (Dim2F32(layout.title).y - title_h) * 0.5f), color_text,
-               Str8Lit("Open a deck"));
-   }
+         //- bgz: the rows
+         //
+         // What a row is, by its colour - and for the ones that are not a
+         // name, said beside it. A label row says what the rows under it are,
+         // and takes no clicks.
+         UI_ScrollRowsFlags scroll_flags = UI_ScrollRowsFlag_RowClicks;
+         UI_ScrollRowsFrame rows_frame = UI_ScrollRowsBegin(&app_state->open_scroll, Dim2F32(layout.rows),
+                                                            (S64)app_state->open_row_count, layout.row_h, 0,
+                                                            scroll_flags, "###open rows");
+         UI_ScrollRowsEnd(&app_state->open_scroll, &rows_frame, 0, scroll_flags);
 
-   //- bgz: the rows
-   for (U64 i = 0; i < layout.rows_fit; i += 1) {
-      U64 row_idx = app_state->open_first_row + i;
-      if (row_idx >= app_state->open_row_count) {
-         break;
-      }
-      OPEN_Row* row = &app_state->open_rows[row_idx];
-      Rng2F32   rect = _OPEN_RowRect(&layout, i);
-      F32       y = rect.min.y + (layout.row_h - text_h) * 0.5f;
+         UI_Parent(rows_frame.rows_box) UI_ColorTag(Str8Lit("row")) {
+            for (S64 row_idx = rows_frame.first_row; row_idx < rows_frame.last_row; row_idx += 1) {
+               OPEN_Row* row = &app_state->open_rows[row_idx];
+               B32       is_label = (row->kind == OPEN_RowKind_Label);
 
-      if (row->kind == OPEN_RowKind_Label) {
-         TXT_Draw(fonts->bold, px, V2F32(rect.min.x + pad, y), color_dim, row->label);
-         continue;
-      }
+               UI_BoxFlags flags = is_label ? 0 : (UI_BoxFlag_Clickable | UI_BoxFlag_DrawBackground);
+               UI_Box*     row_box = UI_ListRow(layout.row_h, 0, flags, "###open row %lld", row_idx);
 
-      if (Contains2F32(rect, mouse)) {
-         Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.07f));
-      }
+               String8 color_tag = Str8Lit("");
+               String8 what = {0};
+               switch (row->kind) {
+                  case OPEN_RowKind_Label: {
+                     color_tag = Str8Lit("dim");
+                  } break;
+                  case OPEN_RowKind_Recent:
+                  case OPEN_RowKind_Deck: {
+                     color_tag = Str8Lit("deck");
+                  } break;
+                  case OPEN_RowKind_Folder: {
+                     color_tag = Str8Lit("folder");
+                  } break;
+                  case OPEN_RowKind_Up: {
+                     color_tag = Str8Lit("folder");
+                     what = (row->path.size != 0) ? PushStr8F(scratch.arena, "the folder above: %S", row->path)
+                                                  : Str8Lit("the list of drives");
+                  } break;
+                  case OPEN_RowKind_Browse: {
+                     color_tag = Str8Lit("action");
+                     what = Str8Lit("Windows' own open window");
+                  } break;
+                  case OPEN_RowKind_New: {
+                     color_tag = Str8Lit("action");
+                     what = PushStr8F(scratch.arena, "makes %S, ready to write in", Str8SkipLastSlash(row->path));
+                  } break;
+                  case OPEN_RowKind_Present: {
+                     color_tag = Str8Lit("action");
+                     what = Str8Lit("as a slideshow, in name order");
+                  } break;
+               }
 
-      // What the row is, by its colour - and for the ones that are not a
-      // name, said beside it.
-      Vec4F32 color = color_text;
-      String8 what = {0};
-      switch (row->kind) {
-         default: {
-         } break;
-         case OPEN_RowKind_Recent:
-         case OPEN_RowKind_Deck: {
-            color = color_deck;
-         } break;
-         case OPEN_RowKind_Folder: {
-            color = color_folder;
-         } break;
-         case OPEN_RowKind_Up: {
-            color = color_folder;
-            what = (row->path.size != 0) ? PushStr8F(scratch.arena, "the folder above: %S", row->path) : Str8Lit("the list of drives");
-         } break;
-         case OPEN_RowKind_Browse: {
-            color = color_action;
-            what = Str8Lit("Windows' own open window");
-         } break;
-         case OPEN_RowKind_New: {
-            color = color_action;
-            what = PushStr8F(scratch.arena, "makes %S, ready to write in", Str8SkipLastSlash(row->path));
-         } break;
-         case OPEN_RowKind_Present: {
-            color = color_action;
-            what = Str8Lit("as a slideshow, in name order");
-         } break;
-      }
+               UI_Parent(row_box) UI_PrefHeight(UI_Pct(1, 1)) UI_Font(is_label ? app_state->fonts.bold : UI_TopFont()) {
+                  UI_Spacer(UI_Px(is_label ? pad : pad + indent, 1));
+                  UI_SetNextPrefWidth(UI_TextDim(1, 1));
+                  UI_SetNextColorTag(color_tag);
+                  UI_Label(row->label);
+                  if (what.size != 0) {
+                     UI_Spacer(UI_Px(18.0f * ui, 1));
+                     UI_SetNextPrefWidth(UI_TextDim(1, 0));
+                     UI_SetNextColorTag(Str8Lit("dim"));
+                     UI_Label(what);
+                  }
+               }
 
-      F32 x = rect.min.x + pad + indent;
-      TXT_Draw(fonts->regular, px, V2F32(x, y), color, row->label);
-      if (what.size != 0) {
-         F32 label_w = TXT_Width(fonts->regular, px, row->label);
-         TXT_Draw(fonts->regular, px, V2F32(x + label_w + 18.0f * ui, y), color_dim, what);
-      }
-   }
+               if (!is_label) {
+                  UI_Signal signal = UI_SignalFromBox(row_box);
+                  if (UI_Hovering(signal)) {
+                     row_box->background_color = UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Background);
+                  }
+                  if (UI_Clicked(signal)) {
+                     picked = row;
+                  }
+               }
+            }
+         }
 
-   //- bgz: the foot: a notice if one is up, else what can be done
-   {
-      F32     y = layout.foot.min.y + (Dim2F32(layout.foot).y - text_h) * 0.5f;
-      String8 notice = FR_CurrentNotice(app_state);
-      if (notice.size != 0) {
-         TXT_Draw(fonts->regular, px, V2F32(layout.foot.min.x + pad, y), V4F32(1.0f, 0.85f, 0.5f, 1.0f), notice);
-      } else {
-         String8 left = Str8Lit("Click to open. Backspace: folder above. Esc closes.");
-         TXT_Draw(fonts->regular, px, V2F32(layout.foot.min.x + pad, y), color_dim, left);
-
-         if (app_state->open_row_count > layout.rows_fit) {
-            U64     last = Min(app_state->open_first_row + layout.rows_fit, app_state->open_row_count);
-            String8 more = PushStr8F(scratch.arena, "%llu-%llu of %llu, wheel for more",
-                                     (unsigned long long)(app_state->open_first_row + 1), (unsigned long long)last,
-                                     (unsigned long long)app_state->open_row_count);
-            F32     more_w = TXT_Width(fonts->regular, px, more);
-            TXT_Draw(fonts->regular, px, V2F32(layout.foot.max.x - pad - more_w, y), color_dim, more);
+         //- bgz: the foot: a notice if one is up, else what can be done
+         String8 notice = FR_CurrentNotice(app_state);
+         if (notice.size != 0) {
+            _OPEN_BuildBar(layout.foot, pad, Str8Lit("notice"), notice, "foot");
+         } else {
+            _OPEN_BuildBar(layout.foot, pad, Str8Lit("dim"),
+                           Str8Lit("Click to open. Wheel or bar to scroll. Backspace: folder above. Esc closes."), "foot");
          }
       }
+
+      // After the rows have had theirs: a click or the wheel on the rest of
+      // the panel stops here, and does not close it.
+      UI_SignalFromBox(panel);
    }
 
-   Core_D_PopClip();
+   // Last: whatever missed the panel. A click closes it.
+   UI_Signal backdrop_signal = UI_SignalFromBox(backdrop);
+   if (picked != 0) {
+      _OPEN_PickRow(app_state, picked);
+   } else if (UI_Clicked(backdrop_signal)) {
+      app_state->show_open = 0;
+   }
+
    ScratchEnd(scratch);
 }

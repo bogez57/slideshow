@@ -40,7 +40,10 @@ None.
 In the slideshow (this copy, from the editor project's src\editor\ui):
 
 - main.c: `UI_StateAlloc` at startup, stored in `app_state.ui_state`, and the icon font (`data\fonts\Icons.ttf`) in `app_state.ui_icon_font`. Defines `PRIVATE` ahead of the UI headers.
-- frame.c: `_FR_UIEventsFromEvents`, `_FR_BeginUI` (theme table, icons, fonts), `UI_EndBuild`, and `_FR_DrawUITree`, which draws the tree last into the frame's one draw bucket. The "UI ok" button (`_FR_BuildUIProof`) is a temporary proof.
+- frame.c: `_FR_UIEventsFromEvents`, `_FR_BeginUI` (the theme table - the editor's palette plus the slideshow's tags: `backdrop`, `panel`, `panel_bar`, `header`, `row`, `row hot`, `dim`, `notice`, `deck`, `folder`, `action`, `syntax`, `picture` - the icons, the regular font at `FR_UIFontSize(15 * FR_UIScale)`, drawn Smooth like the hand-drawn text, and hover/press animation rates), `UI_EndBuild`, and `_FR_DrawUITree`, which draws the tree last into the frame's one draw bucket. FrameWork builds the open screen first (on top, first for clicks), then the edit screen's panels, under `UI_BoxFlag_DisableIDString` so text with `##` in it shows whole.
+- frame_open.c: `OPEN_Build`: a clickable backdrop (closes the panel, takes what misses it), the panel, its rows in `UI_ScrollRowsBegin`/`End` (`app_state.open_scroll`) as `UI_ListRow`s, colour by row kind; hover sets the row's background from `row hot`.
+- frame_edit.c: `EDIT_Build`: the Format panel's header, its lines as `UI_ListRow`s, the list of pictures in `UI_ScrollRows` (`app_state.pictures_scroll`), and the status line. Not interactive while the open screen is over it.
+- ui_basic_widgets.c, changed here only: `UI_ScrollBar` gives the thumb the pushed background colour. The thumb is drawn by `_UI_DrawScrollThumb` in its background colour, which a box without `UI_BoxFlag_DrawBackground` is never given, so it was not seen. The editor's copy has the same code.
 
 In the editor, where this came from:
 

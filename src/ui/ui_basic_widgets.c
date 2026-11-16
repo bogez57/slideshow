@@ -794,6 +794,9 @@ UI_ScrollBar(Axis2 axis, UI_Size off_axis_size, UI_ScrollPt pt, Rng1S64 idx_rang
             scroller_box = UI_BuildBoxFromStringf(UI_BoxFlag_Clickable, "##_scroller_%i", axis);
             scroller_sig = UI_SignalFromBox(scroller_box);
             UI_BoxEquipCustomDraw(scroller_box, _UI_DrawScrollThumb, 0);
+            // bgz (slideshow): the thumb is drawn in its background colour, and
+            // a box without DrawBackground is never given one - it was clear.
+            scroller_box->background_color = UI_TopBackgroundColor();
          }
 
          // rjf: space after

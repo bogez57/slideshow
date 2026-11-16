@@ -89,11 +89,11 @@ struct App_State {
    // Edit screen: the list of pictures to pick from, open in place of the
    // format panel's lines. The names are of the files in the deck's folder,
    // looked up again every so often while the list is open.
-   B32          show_pictures;
-   Arena*       pictures_arena;
-   String8Array pictures;
-   U64          pictures_scanned_us;
-   U64          pictures_first_row; // scrolled to
+   B32           show_pictures;
+   Arena*        pictures_arena;
+   String8Array  pictures;
+   U64           pictures_scanned_us;
+   UI_ScrollRows pictures_scroll; // where the list is scrolled to (EDIT_Build)
 
    // A line of text shown for a few seconds: something saved, something
    // refused. Always a string that lasts (a literal).
@@ -115,13 +115,13 @@ struct App_State {
 
    // The open screen (frame_open.c): over whichever screen is up, the decks
    // opened lately and what is in a folder, to pick a deck from.
-   B32          show_open;
-   Arena*       open_arena;      // open_folder and the rows
-   String8      open_folder;     // whole, from the drive. Empty: the list of drives
-   OPEN_Row*    open_rows;
-   U64          open_row_count;
-   U64          open_first_row;  // scrolled to
-   U64          open_scanned_us; // when the folder was last read. 0: read it now
+   B32           show_open;
+   Arena*        open_arena;      // open_folder and the rows
+   String8       open_folder;     // whole, from the drive. Empty: the list of drives
+   OPEN_Row*     open_rows;
+   U64           open_row_count;
+   UI_ScrollRows open_scroll;     // where the rows are scrolled to (OPEN_Build)
+   U64           open_scanned_us; // when the folder was last read. 0: read it now
 
    // The decks opened lately, the latest first, as whole paths. Kept in a
    // file beside the program from one run to the next (FR_LoadRecents).

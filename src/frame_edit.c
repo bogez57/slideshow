@@ -22,9 +22,14 @@
 // one writes it into the text at the cursor, ready to be typed over.
 //
 // Clicking the picture line there opens, in the panel's place, the list of
-// the pictures in the deck's folder: clicking one puts it on the slide.
-// Dropping an image file on the window does the same, copying the file into
-// the deck's folder first if it is not there.
+// the pictures in the deck's folder, which scrolls: clicking one puts it on
+// the slide. Dropping an image file on the window does the same, copying the
+// file into the deck's folder first if it is not there.
+//
+// The Format panel, the list of pictures and the status line are built with
+// the UI layer (EDIT_Build, called from FrameWork's UI build), and take their
+// own clicks and wheel there. The text, the preview, the small slides and
+// the + are drawn by hand (EDIT_Draw), and their clicks are EDIT_Input's.
 //
 // The slide in the preview can be clicked: on its title, a line of its body
 // or its picture, and the cursor goes to that line of the text, with the
@@ -40,7 +45,8 @@
 //    save             Ctrl+S
 //    format panel     F1 opens and closes it
 //    fullscreen       F11 or Alt+Return. Esc leaves it
-//    pictures         click the picture line under Format. Esc closes the list
+//    pictures         click the picture line under Format. Esc closes the list,
+//                     the wheel or the scroll bar moves through it
 //    edit a piece     click it in the preview
 //    add a picture    drop an image on the window
 //    add a slide      click the + at the end of the row of small slides
@@ -103,9 +109,7 @@ internal _EDIT_Layout
 _EDIT_LayoutFromWindowDim(App_State* app_state, Vec2F32 window_dim) {
    _EDIT_Layout result = {0};
 
-   // Sizes are for a window 900 pixels tall, and grow with a taller one - a
-   // large or dense screen - but do not shrink with a shorter.
-   F32 ui = Clamp(1.0f, window_dim.y / 900.0f, 2.0f);
+   F32 ui = FR_UIScale(window_dim);
    result.ui = ui;
    result.ui_px = (F32)(S32)(15.0f * ui);
    result.mono_px = (F32)(S32)(17.0f * ui);
@@ -158,12 +162,6 @@ _EDIT_LayoutFromWindowDim(App_State* app_state, Vec2F32 window_dim) {
    }
 
    return result;
-}
-
-internal Rng2F32
-_EDIT_FormatRowRect(_EDIT_Layout* layout, U64 row_idx) {
-   F32 y = layout->format_rows.min.y + 4.0f * layout->ui + layout->format_row_h * (F32)row_idx;
-   return R2F32P(layout->format_rows.min.x, y, layout->format_rows.max.x, y + layout->format_row_h);
 }
 
 // Where a slide's small picture is in the row. With more slides than fit, the
@@ -328,10 +326,6 @@ _EDIT_ScanPictures(App_State* app_state) {
    ArenaClear(app_state->pictures_arena);
    app_state->pictures = DECK_PictureNamesFromFolder(app_state->pictures_arena, app_state->deck->folder);
    app_state->pictures_scanned_us = NowTimeUS();
-
-   U64 row_count = ArrayCount(_edit_format_rows);
-   U64 max_first = (app_state->pictures.count > row_count) ? app_state->pictures.count - row_count : 0;
-   app_state->pictures_first_row = Min(app_state->pictures_first_row, max_first);
 }
 
 // Makes name the picture of the slide the cursor is on: in place of the
@@ -428,6 +422,17 @@ _EDIT_ClickIn(App_State* app_state, Rng2F32 rect) {
    return result;
 }
 
+// F1, or a click on the Format panel's header: closes the list of pictures
+// if that is what is open, else opens and closes the panel.
+internal void
+_EDIT_ToggleFormat(App_State* app_state) {
+   if (app_state->show_pictures) {
+      app_state->show_pictures = 0;
+   } else {
+      app_state->show_format = !app_state->show_format;
+   }
+}
+
 internal void
 EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    WM_EventList* events = &app_state->events;
@@ -471,14 +476,11 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       }
    }
 
-   // The header closes the list of pictures if that is what is open, else
-   // opens and closes the panel.
-   if (Core_WM_KeyPress(events, window, 0, WM_Key_F1) || _EDIT_ClickIn(app_state, layout.format_header)) {
-      if (app_state->show_pictures) {
-         app_state->show_pictures = 0;
-      } else {
-         app_state->show_format = !app_state->show_format;
-      }
+   // As a click on the Format panel's header does (EDIT_Build): closes the
+   // list of pictures if that is what is open, else opens and closes the
+   // panel.
+   if (Core_WM_KeyPress(events, window, 0, WM_Key_F1)) {
+      _EDIT_ToggleFormat(app_state);
       layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
    }
 
@@ -499,55 +501,14 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
 
    B32 present_pressed = Core_WM_KeyPress(events, window, 0, WM_Key_F5);
 
-   //- bgz: the panel: the list of pictures, or the format's lines
-   U64 panel_row_count = ArrayCount(_edit_format_rows);
+   //- bgz: the list of pictures, kept up with the folder while it is open
+   //
+   // Its clicks and wheel, and the Format lines', are taken where they are
+   // built (EDIT_Build).
    if (app_state->show_format && app_state->show_pictures) {
       U64 scan_us = (U64)(_EDIT_PICTURES_SCAN_SECONDS * 1000000.0f);
       if (NowTimeUS() - app_state->pictures_scanned_us >= scan_us) {
          _EDIT_ScanPictures(app_state);
-      }
-
-      // The wheel, over the list, moves through it a row a notch.
-      if (Contains2F32(layout.format_rows, Core_WM_MouseFromWindow(window))) {
-         WM_Event* next_event = 0;
-         for (WM_Event* event = events->first; event != 0; event = next_event) {
-            next_event = event->next;
-            if (event->kind == WM_EventKind_Scroll) {
-               U64 max_first = (app_state->pictures.count > panel_row_count) ? app_state->pictures.count - panel_row_count : 0;
-               if (event->delta.y > 0 && app_state->pictures_first_row < max_first) {
-                  app_state->pictures_first_row += 1;
-               } else if (event->delta.y < 0 && app_state->pictures_first_row > 0) {
-                  app_state->pictures_first_row -= 1;
-               }
-               Core_WM_EatEvent(events, event);
-            }
-         }
-      }
-
-      // A click on a name puts that picture on the slide, and closes the list.
-      for (U64 i = 0; i < panel_row_count; i += 1) {
-         U64 picture_idx = app_state->pictures_first_row + i;
-         if (_EDIT_ClickIn(app_state, _EDIT_FormatRowRect(&layout, i)) && picture_idx < app_state->pictures.count) {
-            _EDIT_PutPicture(app_state, app_state->pictures.v[picture_idx]);
-            app_state->show_pictures = 0;
-            break;
-         }
-      }
-   } else if (app_state->show_format) {
-      // A click writes the line - or, on the picture line, opens the list.
-      for (U64 i = 0; i < panel_row_count; i += 1) {
-         if (_EDIT_ClickIn(app_state, _EDIT_FormatRowRect(&layout, i))) {
-            _EDIT_FormatRow* row = &_edit_format_rows[i];
-            if (row->opens_pictures) {
-               app_state->show_pictures = 1;
-               app_state->pictures_first_row = 0;
-               _EDIT_ScanPictures(app_state);
-            } else {
-               ED_InsertLine(editor, row->insert, row->select_start, row->select_end);
-               editor->last_input_us = NowTimeUS();
-            }
-            break;
-         }
       }
    }
 
@@ -622,6 +583,223 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
 }
 
 ////////////////////////////////
+//~ bgz: the Format panel and the status line, in the UI layer
+//
+//    column      under the text, the left side's width, to the window's bottom
+//       header   "Format: ...": a click opens and closes the panel (as F1)
+//       rows     the format's lines - or, in their place, the list of
+//                pictures (UI_ScrollRows), while it is open
+//       status   a notice if one is up, else the file's name and the keys
+
+// A line of text across a box, at the left, with optional text at the right.
+internal void
+_EDIT_BuildBarText(F32 pad, String8 left_tag, String8 left, FNT_Tag left_font, String8 right) {
+   UI_PrefHeight(UI_Pct(1, 1)) {
+      UI_Spacer(UI_Px(pad, 1));
+      UI_SetNextPrefWidth(UI_Pct(1, 0));
+      UI_SetNextColorTag(left_tag);
+      UI_SetNextFont(left_font);
+      UI_Label(left);
+      if (right.size != 0) {
+         UI_SetNextPrefWidth(UI_TextDim(1, 1));
+         UI_SetNextColorTag(Str8Lit("dim"));
+         UI_Label(right);
+      }
+      UI_Spacer(UI_Px(pad, 1));
+   }
+}
+
+internal void
+EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
+   ED_Editor*   editor = app_state->editor;
+   TXT_Fonts*   fonts = &app_state->fonts;
+   _EDIT_Layout layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
+   F32          ui = layout.ui;
+   F32          pad = 12.0f * ui;
+   F32          left_w = Dim2F32(layout.status).x;
+   B32          shows_pictures = (app_state->show_format && app_state->show_pictures);
+   Temp         scratch = ScratchBegin(0, 0);
+
+   // What a click asked for, done once everything is built: it changes the
+   // text, and the panel's own layout.
+   B32 toggle_format = 0;
+   S64 format_picked = -1;
+   S64 picture_picked = -1;
+
+   UI_BoxFlags click_flags = interactive ? UI_BoxFlag_Clickable : 0;
+
+   UI_SetNextRect(R2F32P(0, layout.format_header.min.y, left_w, layout.status.max.y));
+   UI_SetNextChildLayoutAxis(Axis2_Y);
+   UI_SetNextColorTag(Str8Lit("panel"));
+   UI_Box* column = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###edit format column");
+
+   UI_Parent(column) UI_FontSize(FR_UIFontSize(layout.ui_px)) {
+      //- bgz: the header
+      {
+         String8 left = Str8Lit("Format: what can be written (click or F1 to open)");
+         String8 right = Str8Lit("F1");
+         if (shows_pictures) {
+            left = Str8Lit("Pictures: click one to put it on this slide");
+            right = Str8Lit("Esc closes");
+         } else if (app_state->show_format) {
+            left = Str8Lit("Format: click a line to write it into the text");
+            right = Str8Lit("F1 closes");
+         }
+
+         UI_SetNextPrefWidth(UI_Px(left_w, 1));
+         UI_SetNextPrefHeight(UI_Px(Dim2F32(layout.format_header).y, 1));
+         UI_SetNextChildLayoutAxis(Axis2_X);
+         UI_SetNextColorTag(Str8Lit("header"));
+         UI_Box* header = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip | click_flags,
+                                                 "###edit format header");
+         UI_Parent(header) {
+            _EDIT_BuildBarText(pad, Str8Lit(""), left, fonts->bold, right);
+         }
+         if (interactive) {
+            UI_Signal signal = UI_SignalFromBox(header);
+            if (UI_Hovering(signal)) {
+               // Asked by its own tag: the tags pushed here are the column's.
+               header->background_color = UI_ThemeColor(Str8Lit("header hot"), UI_ColorSlot_Background);
+            }
+            toggle_format = UI_Clicked(signal);
+         }
+      }
+
+      //- bgz: the rows: the format's lines, or the list of pictures
+      if (app_state->show_format) {
+         F32 rows_h = Dim2F32(layout.format_rows).y;
+         F32 row_h = layout.format_row_h;
+         F32 edge = 4.0f * ui; // above the first row and below the last
+
+         UI_SetNextPrefWidth(UI_Px(left_w, 1));
+         UI_SetNextPrefHeight(UI_Px(rows_h, 1));
+         UI_SetNextChildLayoutAxis(Axis2_Y);
+         UI_Box* rows_box = UI_BuildBoxFromStringf(UI_BoxFlag_Clip, "###edit format rows");
+
+         UI_Parent(rows_box) UI_ColorTag(Str8Lit("row")) {
+            UI_Spacer(UI_Px(edge, 1));
+
+            if (shows_pictures && app_state->pictures.count == 0) {
+               UI_SetNextPrefWidth(UI_Px(left_w, 1));
+               UI_SetNextPrefHeight(UI_Px(row_h, 1));
+               UI_Row {
+                  _EDIT_BuildBarText(pad, Str8Lit("dim"),
+                                     Str8Lit("No pictures in the deck's folder yet. Drop one on the window to add it."),
+                                     UI_TopFont(), Str8Zero());
+               }
+            } else if (shows_pictures) {
+               //- bgz: the names of the folder's pictures, however many there are
+               UI_ScrollRowsFlags scroll_flags = UI_ScrollRowsFlag_RowClicks;
+               UI_ScrollRowsFrame frame = UI_ScrollRowsBegin(&app_state->pictures_scroll,
+                                                             V2F32(left_w, Max(rows_h - edge * 2.0f, row_h)),
+                                                             (S64)app_state->pictures.count, row_h, 0, scroll_flags,
+                                                             "###edit pictures");
+               UI_ScrollRowsEnd(&app_state->pictures_scroll, &frame, 0, scroll_flags);
+               UI_Parent(frame.rows_box) {
+                  for (S64 i = frame.first_row; i < frame.last_row; i += 1) {
+                     UI_Box* row = UI_ListRow(row_h, 0, UI_BoxFlag_DrawBackground | click_flags, "###edit picture %lld", i);
+                     UI_Parent(row) {
+                        _EDIT_BuildBarText(pad, Str8Lit("picture"), app_state->pictures.v[i], fonts->mono, Str8Zero());
+                     }
+                     if (interactive) {
+                        UI_Signal signal = UI_SignalFromBox(row);
+                        if (UI_Hovering(signal)) {
+                           row->background_color = UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Background);
+                        }
+                        if (UI_Clicked(signal)) {
+                           picture_picked = i;
+                        }
+                     }
+                  }
+               }
+            } else {
+               //- bgz: the format's lines. What each does starts where the
+               // longest way of writing one ends.
+               F32 syntax_w = 0;
+               for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
+                  syntax_w = Max(syntax_w, TXT_Width(fonts->mono, layout.ui_px, _edit_format_rows[i].syntax));
+               }
+
+               for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
+                  _EDIT_FormatRow* format_row = &_edit_format_rows[i];
+                  UI_Box* row = UI_ListRow(row_h, 0, UI_BoxFlag_DrawBackground | click_flags, "###edit format row %llu",
+                                           (unsigned long long)i);
+                  UI_Parent(row) UI_PrefHeight(UI_Pct(1, 1)) {
+                     UI_Spacer(UI_Px(pad, 1));
+                     UI_SetNextPrefWidth(UI_Px(syntax_w, 1));
+                     UI_SetNextFont(fonts->mono);
+                     UI_SetNextColorTag(Str8Lit("syntax"));
+                     UI_Label(format_row->syntax);
+                     UI_Spacer(UI_Px(18.0f * ui, 1));
+                     UI_SetNextPrefWidth(UI_Pct(1, 0));
+                     UI_SetNextColorTag(Str8Lit("dim"));
+                     UI_Label(format_row->what);
+                  }
+                  if (interactive) {
+                     UI_Signal signal = UI_SignalFromBox(row);
+                     if (UI_Hovering(signal)) {
+                        row->background_color = UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Background);
+                     }
+                     if (UI_Clicked(signal)) {
+                        format_picked = (S64)i;
+                     }
+                  }
+               }
+            }
+         }
+      }
+
+      //- bgz: the status line: a notice if one is up, else the file and keys
+      {
+         UI_SetNextPrefWidth(UI_Px(left_w, 1));
+         UI_SetNextPrefHeight(UI_Px(Dim2F32(layout.status).y, 1));
+         UI_SetNextChildLayoutAxis(Axis2_X);
+         UI_SetNextColorTag(Str8Lit("panel_bar"));
+         UI_Box* status = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###edit status");
+         UI_Parent(status) {
+            String8 notice = FR_CurrentNotice(app_state);
+            if (notice.size != 0) {
+               _EDIT_BuildBarText(pad, Str8Lit("notice"), notice, UI_TopFont(), Str8Zero());
+            } else {
+               String8 name = Str8SkipLastSlash(Str8(editor->file.str, editor->file.size));
+               String8 left = PushStr8F(scratch.arena, "%S%s", name, ED_HasUnsavedChanges(editor) ? "  (not saved)" : "");
+               _EDIT_BuildBarText(pad, Str8Lit(""), left, UI_TopFont(), Str8Lit("Ctrl+O open    Ctrl+S save    F5 present"));
+            }
+         }
+      }
+   }
+
+   //- bgz: what was clicked
+   //
+   // The deck is made again from the text at once, so the preview drawn this
+   // frame is of the text as it now is.
+   if (toggle_format) {
+      _EDIT_ToggleFormat(app_state);
+   }
+   if (picture_picked >= 0 && (U64)picture_picked < app_state->pictures.count) {
+      _EDIT_PutPicture(app_state, app_state->pictures.v[picture_picked]);
+      app_state->show_pictures = 0;
+   }
+   if (format_picked >= 0) {
+      _EDIT_FormatRow* row = &_edit_format_rows[format_picked];
+      if (row->opens_pictures) {
+         app_state->show_pictures = 1;
+         MemoryZeroStruct(&app_state->pictures_scroll); // the list starts at its top
+         _EDIT_ScanPictures(app_state);
+      } else {
+         ED_InsertLine(editor, row->insert, row->select_start, row->select_end);
+         editor->last_input_us = NowTimeUS();
+      }
+   }
+   if (picture_picked >= 0 || format_picked >= 0) {
+      FR_SyncDeck(app_state);
+      app_state->slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
+   }
+
+   ScratchEnd(scratch);
+}
+
+////////////////////////////////
 //~ bgz: drawing
 
 internal void
@@ -638,114 +816,9 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
    Vec4F32 color_dim = V4F32(0.84f, 0.86f, 0.90f, 0.55f);
    Vec4F32 color_syntax = V4F32(1.00f, 0.80f, 0.40f, 1.0f);
 
-   //- bgz: the text
+   //- bgz: the text. The Format panel and the status line under it are the
+   // UI's (EDIT_Build), drawn after this.
    ED_Draw(editor, app_state->frame_arena, layout.editor_box);
-
-   //- bgz: the format panel
-   {
-      F32 text_h = TXT_LineHeight(fonts->regular, layout.ui_px);
-      F32 pad = 12.0f * ui;
-
-      Core_D_PushClip(R2F32P(layout.format_header.min.x, layout.format_header.min.y, layout.status.max.x, layout.status.max.y));
-
-      B32 header_is_hot = Contains2F32(layout.format_header, mouse);
-      Core_D_Rect(layout.format_header, R2F32P(0, 0, 1, 1),
-                  header_is_hot ? V4F32(0.17f, 0.18f, 0.21f, 1.0f) : V4F32(0.14f, 0.15f, 0.17f, 1.0f));
-
-      F32     header_y = layout.format_header.min.y + (Dim2F32(layout.format_header).y - text_h) * 0.5f;
-      B32     shows_pictures = (app_state->show_format && app_state->show_pictures);
-      String8 header_left = Str8Lit("Format: what can be written (click or F1 to open)");
-      String8 header_right = Str8Lit("F1");
-      if (shows_pictures) {
-         header_left = Str8Lit("Pictures: click one to put it on this slide");
-         header_right = Str8Lit("Esc closes");
-      } else if (app_state->show_format) {
-         header_left = Str8Lit("Format: click a line to write it into the text");
-         header_right = Str8Lit("F1 closes");
-      }
-      TXT_Draw(fonts->bold, layout.ui_px, V2F32(layout.format_header.min.x + pad, header_y), color_text, header_left);
-      F32 header_right_w = TXT_Width(fonts->regular, layout.ui_px, header_right);
-      TXT_Draw(fonts->regular, layout.ui_px, V2F32(layout.format_header.max.x - pad - header_right_w, header_y),
-               color_dim, header_right);
-
-      if (app_state->show_format) {
-         Core_D_Rect(layout.format_rows, R2F32P(0, 0, 1, 1), V4F32(0.11f, 0.115f, 0.135f, 1.0f));
-
-         F32 mono_h = TXT_LineHeight(fonts->mono, layout.ui_px);
-         U64 row_count = ArrayCount(_edit_format_rows);
-
-         if (shows_pictures && app_state->pictures.count == 0) {
-            Rng2F32 rect = _EDIT_FormatRowRect(&layout, 0);
-            TXT_Draw(fonts->regular, layout.ui_px, V2F32(rect.min.x + pad, rect.min.y + (Dim2F32(rect).y - text_h) * 0.5f),
-                     color_dim, Str8Lit("No pictures in the deck's folder yet. Drop one on the window to add it."));
-         } else if (shows_pictures) {
-            //- bgz: the names of the folder's pictures, as many as there are rows
-            for (U64 i = 0; i < row_count; i += 1) {
-               U64 picture_idx = app_state->pictures_first_row + i;
-               if (picture_idx >= app_state->pictures.count) {
-                  break;
-               }
-               Rng2F32 rect = _EDIT_FormatRowRect(&layout, i);
-               if (Contains2F32(rect, mouse)) {
-                  Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.07f));
-               }
-               TXT_Draw(fonts->mono, layout.ui_px, V2F32(rect.min.x + pad, rect.min.y + (Dim2F32(rect).y - mono_h) * 0.5f),
-                        V4F32(0.60f, 0.85f, 0.60f, 1.0f), app_state->pictures.v[picture_idx]);
-            }
-
-            // More than fit: which of them these are, at the right of the
-            // first row, where a name would have to be very long to reach.
-            if (app_state->pictures.count > row_count) {
-               Rng2F32 rect = _EDIT_FormatRowRect(&layout, 0);
-               U64     last = Min(app_state->pictures_first_row + row_count, app_state->pictures.count);
-               String8 more = PushStr8F(scratch.arena, "%llu-%llu of %llu, wheel for more",
-                                        (unsigned long long)(app_state->pictures_first_row + 1), (unsigned long long)last,
-                                        (unsigned long long)app_state->pictures.count);
-               F32     more_w = TXT_Width(fonts->regular, layout.ui_px, more);
-               TXT_Draw(fonts->regular, layout.ui_px,
-                        V2F32(rect.max.x - pad - more_w, rect.min.y + (Dim2F32(rect).y - text_h) * 0.5f), color_dim, more);
-            }
-         } else {
-            // What each does starts where the longest way of writing one ends.
-            F32 syntax_w = 0;
-            for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
-               syntax_w = Max(syntax_w, TXT_Width(fonts->mono, layout.ui_px, _edit_format_rows[i].syntax));
-            }
-
-            for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
-               _EDIT_FormatRow* row = &_edit_format_rows[i];
-               Rng2F32          rect = _EDIT_FormatRowRect(&layout, i);
-               if (Contains2F32(rect, mouse)) {
-                  Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.07f));
-               }
-               F32 row_h = Dim2F32(rect).y;
-               TXT_Draw(fonts->mono, layout.ui_px, V2F32(rect.min.x + pad, rect.min.y + (row_h - mono_h) * 0.5f),
-                        color_syntax, row->syntax);
-               TXT_Draw(fonts->regular, layout.ui_px,
-                        V2F32(rect.min.x + pad + syntax_w + 18.0f * ui, rect.min.y + (row_h - text_h) * 0.5f), color_dim,
-                        row->what);
-            }
-         }
-      }
-
-      //- bgz: the status line: a notice if one is up, else the file and keys
-      Core_D_Rect(layout.status, R2F32P(0, 0, 1, 1), V4F32(0.16f, 0.17f, 0.20f, 1.0f));
-      F32     status_y = layout.status.min.y + (Dim2F32(layout.status).y - text_h) * 0.5f;
-      String8 notice = FR_CurrentNotice(app_state);
-      if (notice.size != 0) {
-         TXT_Draw(fonts->regular, layout.ui_px, V2F32(layout.status.min.x + pad, status_y),
-                  V4F32(1.0f, 0.85f, 0.5f, 1.0f), notice);
-      } else {
-         String8 name = Str8SkipLastSlash(Str8(editor->file.str, editor->file.size));
-         String8 left = PushStr8F(scratch.arena, "%S%s", name, ED_HasUnsavedChanges(editor) ? "  (not saved)" : "");
-         String8 right = Str8Lit("Ctrl+O open    Ctrl+S save    F5 present");
-         F32     right_w = TXT_Width(fonts->regular, layout.ui_px, right);
-         TXT_Draw(fonts->regular, layout.ui_px, V2F32(layout.status.min.x + pad, status_y), color_text, left);
-         TXT_Draw(fonts->regular, layout.ui_px, V2F32(layout.status.max.x - pad - right_w, status_y), color_dim, right);
-      }
-
-      Core_D_PopClip();
-   }
 
    //- bgz: the preview
    app_state->preview_hit_count = 0; // made again below, if a slide is drawn
