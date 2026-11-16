@@ -40,6 +40,13 @@ struct App_State {
    TXT_Fonts fonts;
    Vec2F32   text_window_dim; // the window's size when the font cache was last emptied
 
+   // The UI layer (src\ui): its box cache, hot and active boxes, and so on,
+   // made once at the start. A UI tree is built inside FrameWork every frame,
+   // between _FR_BeginUI and UI_EndBuild (frame.c).
+   UI_State* ui_state;
+   FNT_Tag   ui_icon_font;     // raddebugger's icon font, data\fonts\Icons.ttf. The zero tag without it: no icons
+   U64       ui_last_frame_us; // when the last UI build began, for its animations. 0: none yet
+
    B32 show_info; // the slide's number and name, in the corner
    B32 show_help; // the list of keys
 

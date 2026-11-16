@@ -713,6 +713,255 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
 }
 
 ////////////////////////////////
+//~ bgz: the UI layer
+//
+// The editor project's UI library (src\ui), built once a frame in FrameWork:
+// _FR_BeginUI, then the boxes, then UI_EndBuild, which lays them out. The
+// tree is drawn by _FR_DrawUITree, last, over everything the screens drew by
+// hand. Ported from the editor's frame.c (_FR_ProcessEvents,
+// _FR_BeginUIBuild, _FR_DrawUITree).
+//
+// The UI reads the same events the hand-drawn screens do, so a click on a UI
+// box is also seen by the screen under it - until those screens are built
+// with the UI too, a UI box goes where the screen takes no clicks.
+
+// This frame's window events as the UI's. Selects the UI's state first: the
+// list is on UI_BuildArena, which is the selected state's, and lasts until
+// the next UI_EndBuild.
+internal UI_EventList
+_FR_UIEventsFromEvents(App_State* app_state) {
+   UI_SelectState(app_state->ui_state);
+
+   UI_EventList ui_events = {0};
+   for (WM_Event* event = app_state->events.first; event != 0; event = event->next) {
+      UI_EventKind kind = UI_EventKind_Null;
+      switch (event->kind) {
+         default: {
+         } break;
+         case WM_EventKind_Press: {
+            kind = UI_EventKind_Press;
+         } break;
+         case WM_EventKind_Release: {
+            kind = UI_EventKind_Release;
+         } break;
+         case WM_EventKind_MouseMove: {
+            kind = UI_EventKind_MouseMove;
+         } break;
+         case WM_EventKind_Text: {
+            kind = UI_EventKind_Text;
+         } break;
+         case WM_EventKind_Scroll: {
+            // Not a sideways wheel: with Shift held the UI turns one into an
+            // up and down one, and a touchpad sends a steady trickle of them
+            // (the editor's frame.c).
+            if (event->delta.y != 0) {
+               kind = UI_EventKind_Scroll;
+            }
+         } break;
+      }
+
+      UI_Event ui_event = zero_struct;
+      ui_event.kind = kind;
+      ui_event.key = event->key;
+      ui_event.modifiers = event->modifiers;
+      ui_event.string = event->character ? Str8From32(UI_BuildArena(), Str32(&event->character, 1)) : Str8Zero();
+      ui_event.pos = event->pos;
+      ui_event.timestamp_us = event->timestamp_us;
+      ui_event.delta_2f32 = event->delta;
+      UI_EventListPush(UI_BuildArena(), &ui_events, &ui_event);
+   }
+
+   return ui_events;
+}
+
+// Starts the frame's UI build: the theme, the icons, and the fonts every box
+// starts from.
+internal void
+_FR_BeginUI(App_State* app_state, UI_EventList* ui_events) {
+   // The colours, by tag: the editor's palette (ui_colors.h) and the part of
+   // its table the basic widgets ask for. A box asks under the tags pushed
+   // with UI_ColorTag, and the pattern with the most of them wins.
+   static UI_ThemePattern theme_patterns[] = {
+       //  tags          slot                      colour
+       {"", UI_ColorSlot_Text, UI_FG},
+       {"", UI_ColorSlot_Background, UI_BG_1},
+       {"", UI_ColorSlot_Border, UI_TRANSPARENT},
+       {"", UI_ColorSlot_Selection, UI_ACCENT_BG},
+       {"", UI_ColorSlot_Cursor, UI_FG},
+       {"selected", UI_ColorSlot_Background, UI_ACCENT_BG},
+       {"weak", UI_ColorSlot_Text, UI_FG_WEAK},
+       {"soft", UI_ColorSlot_Text, UI_FG_SOFT},
+       {"dim", UI_ColorSlot_Text, UI_FG_DIM},
+       {"error", UI_ColorSlot_Text, UI_ERROR},
+       {"warning", UI_ColorSlot_Text, UI_WARNING},
+       {"highlight", UI_ColorSlot_Text, UI_HIGHLIGHT},
+       {"button", UI_ColorSlot_Background, UI_BG_4},
+       {"button", UI_ColorSlot_Text, UI_FG},
+       {"button hot", UI_ColorSlot_Background, UI_BG_3},
+       {"popup", UI_ColorSlot_Background, UI_BG_3},
+       {"popup", UI_ColorSlot_Border, UI_LINE},
+       {"menu", UI_ColorSlot_Background, UI_TRANSPARENT},
+       {"scroll track", UI_ColorSlot_Background, UI_TRANSPARENT},
+       {"scroll thumb", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.18f}}},
+   };
+   static UI_Theme theme = {theme_patterns, ArrayCount(theme_patterns)};
+
+   // The UI's icons - scroll arrows, carets, check boxes - are single
+   // characters of raddebugger's icon font, the ones raddbg uses.
+   UI_IconInfo icon_info = {0};
+   icon_info.icon_font = app_state->ui_icon_font;
+   icon_info.icon_kind_text_map[UI_IconKind_RightArrow] = Str8Lit("8");
+   icon_info.icon_kind_text_map[UI_IconKind_DownArrow] = Str8Lit("0");
+   icon_info.icon_kind_text_map[UI_IconKind_LeftArrow] = Str8Lit("7");
+   icon_info.icon_kind_text_map[UI_IconKind_UpArrow] = Str8Lit("9");
+   icon_info.icon_kind_text_map[UI_IconKind_RightCaret] = Str8Lit(">");
+   icon_info.icon_kind_text_map[UI_IconKind_DownCaret] = Str8Lit("v");
+   icon_info.icon_kind_text_map[UI_IconKind_LeftCaret] = Str8Lit("<");
+   icon_info.icon_kind_text_map[UI_IconKind_UpCaret] = Str8Lit("^");
+   icon_info.icon_kind_text_map[UI_IconKind_CheckHollow] = Str8Lit("!");
+   icon_info.icon_kind_text_map[UI_IconKind_CheckFilled] = Str8Lit("1");
+   icon_info.icon_kind_text_map[UI_IconKind_WindowMinimize] = Str8Lit(")");
+   icon_info.icon_kind_text_map[UI_IconKind_WindowMaximize] = Str8Lit("n");
+   icon_info.icon_kind_text_map[UI_IconKind_WindowRestore] = Str8Lit("(");
+   icon_info.icon_kind_text_map[UI_IconKind_WindowClose] = Str8Lit("x");
+   icon_info.icon_kind_text_map[UI_IconKind_FolderClosed] = Str8Lit("C");
+   icon_info.icon_kind_text_map[UI_IconKind_FolderOpen] = Str8Lit("B");
+   icon_info.icon_kind_text_map[UI_IconKind_File] = Str8Lit("f");
+
+   // The time since the last build, for hover fades and scroll glides. A
+   // long gap - the first frame, or a wait inside a drag of the window -
+   // counts as one frame at 60 a second, so nothing jumps.
+   U64 now_us = NowTimeUS();
+   F32 dt = 1.0f / 60.0f;
+   if (app_state->ui_last_frame_us != 0 && now_us - app_state->ui_last_frame_us < 250000) {
+      dt = (F32)(now_us - app_state->ui_last_frame_us) / 1000000.0f;
+   }
+   app_state->ui_last_frame_us = now_us;
+
+   UI_AnimationInfo animation_info = {0};
+   UI_BeginBuild(app_state->window, ui_events, &icon_info, &theme, &animation_info, dt, dt);
+
+   // The slideshow has no code font: everything is in its regular one.
+   // Smoothed both ways, as the editor draws its proportional UI font.
+   FNT_Tag font = app_state->fonts.regular;
+   UI_PushFont(font);
+   UI_PushFontSize(12);
+   UI_SetLabelFont(font, FNT_RasterFlag_Smooth | FNT_RasterFlag_Hinted);
+
+   // A ctx menu builds with the stack's bottom value, which is whatever was
+   // last pushed on the empty stack. Pinned here, or a UI_PrefWidth(UI_Pct(..))
+   // anywhere earlier in the frame makes the menu's root as wide as the window
+   // (the editor's frame.c).
+   UI_PushPrefWidth(UI_TopPrefWidth());
+   UI_PushPrefHeight(UI_TopPrefHeight());
+}
+
+// TEMPORARY - a proof that the UI layer builds, lays out, draws and takes
+// clicks. Remove it once a real panel is built with the UI. A button in the
+// edit screen's top right corner, above the preview's page, where that
+// screen takes no clicks.
+internal void
+_FR_BuildUIProof(App_State* app_state, Vec2F32 window_dim) {
+   F32 w = 90.0f;
+   F32 h = 24.0f;
+   F32 pad = 6.0f;
+   UI_SetNextRect(R2F32P(window_dim.x - w - pad, pad, window_dim.x - pad, pad + h));
+   UI_SetNextColorTag(Str8Lit("button"));
+   UI_CornerRadius(4.0f) {
+      UI_Signal signal = UI_Button(Str8Lit("UI ok###ui proof"));
+      if (UI_Clicked(signal)) {
+         FR_Notice(app_state, Str8Lit("The UI layer took the click."));
+      }
+   }
+}
+
+// Draws the UI's box tree into the draw bucket that is open, over whatever
+// is already in it. The one place a box becomes draw commands, so a new
+// UI_BoxFlag is handled once, here. The editor's _FR_DrawUITree, less its
+// own Core_D_BeginFrame and bucket: the slideshow's frame has one bucket for
+// everything (FrameWork).
+internal void
+_FR_DrawUITree(App_State* app_state) {
+   for (UI_Box* box = UI_RootFromState(app_state->ui_state); !UI_BoxIsNil(box);) {
+      UI_BoxRec rec = UI_BoxRecDfPost(box, &ui_nil_box);
+
+      // Under the box, down and right of it, soft. raddebugger's sizes. Not
+      // for an empty box: the UI's own ctx menu root always has the flag.
+      if ((box->flags & UI_BoxFlag_DrawDropShadow) && box->rect.x1 > box->rect.x0 && box->rect.y1 > box->rect.y0) {
+         Vec4F32 shadow_color = {{0, 0, 0, 0.40f}};
+
+         // A box that is fading takes its shadow with it.
+         if (box->flags & UI_BoxFlag_DrawBackground) {
+            shadow_color.w *= Min(1.0f, box->background_color.w);
+         }
+         Rng2F32       shadow_rect = R2F32P(box->rect.x0 - 6, box->rect.y0 - 2, box->rect.x1 + 6, box->rect.y1 + 10);
+         R_Rect2DInst* inst = Core_D_Rect(shadow_rect, R2F32(V2F32(0, 0), V2F32(1, 1)), shadow_color);
+         inst->edge_softness = 12.0f;
+         for EachEnumVal(Corner, corner) {
+            inst->corner_radii[corner] = box->corner_radii[corner] + 6.0f;
+         }
+      }
+
+      if (box->flags & UI_BoxFlag_DrawBackground) {
+         R_Rect2DInst* inst = Core_D_Rect(box->rect, R2F32(V2F32(0, 0), V2F32(1, 1)), box->background_color);
+         MemoryCopyArray(inst->corner_radii, box->corner_radii);
+      }
+
+      // A pixel outside the rect, so a rounded corner's is that much wider.
+      if (box->flags & UI_BoxFlag_DrawBorder) {
+         R_Rect2DInst* inst = Core_D_Rect(Pad2F32(box->rect, 1.0f), R2F32(V2F32(0, 0), V2F32(1, 1)), box->border_color);
+         inst->border_thickness = 1.0f;
+         for EachEnumVal(Corner, corner) {
+            inst->corner_radii[corner] = box->corner_radii[corner] > 0 ? box->corner_radii[corner] + 1.0f : 0;
+         }
+      }
+
+      if (box->flags & UI_BoxFlag_DrawText) {
+         Vec2F32 text_pos = UI_BoxTextPosition(box);
+         F32     max_x = box->rect.x1 - text_pos.x;
+         FNT_Run ellipses_run = {0};
+         Core_D_TruncatedFancyRunList(text_pos, &box->display_fruns, max_x, ellipses_run);
+      }
+
+      if (box->custom_draw != 0) {
+         box->custom_draw(box, box->custom_draw_user_data);
+      }
+
+      // A UI_BoxFlag_Clip box keeps everything under it inside its rect, and
+      // inside any clip above it. Pushed here, on the way down to its
+      // children, and popped below once the walk has left them.
+      if (box->flags & UI_BoxFlag_Clip) {
+         Rng2F32 top_clip = Core_D_TopClip();
+         Rng2F32 new_clip = box->rect;
+
+         // A zero clip is "none", not a rect at the origin to intersect with.
+         if (top_clip.x1 != 0 || top_clip.y1 != 0) {
+            new_clip = Intersect2F32(new_clip, top_clip);
+         }
+         Core_D_PushClip(new_clip);
+      }
+
+      // Pop the clip of every box this step finishes: this one, unless it has
+      // children still to draw (the last of them pops it), and each ancestor
+      // the walk climbs out of - rec.pop_count of them.
+      {
+         S32 pop_idx = 0;
+         for (UI_Box* b = box; !UI_BoxIsNil(b) && pop_idx <= rec.pop_count; b = b->parent) {
+            pop_idx += 1;
+            if (b == box && rec.push_count != 0) {
+               continue;
+            }
+            if (b->flags & UI_BoxFlag_Clip) {
+               Core_D_PopClip();
+            }
+         }
+      }
+
+      box = rec.next;
+   }
+}
+
+////////////////////////////////
 //~ bgz: the frame
 
 // The font cache's turn of the frame, before any text is measured or drawn.
@@ -758,6 +1007,20 @@ FrameWork(App_State* app_state) {
       _FR_PresentInput(app_state);
    }
 
+   // The UI tree, built after the screens' own input, against the screen
+   // that input left up. UI_EndBuild lays it out; it is drawn below.
+   {
+      UI_EventList ui_events = _FR_UIEventsFromEvents(app_state);
+      _FR_BeginUI(app_state, &ui_events);
+
+      // TEMPORARY - see _FR_BuildUIProof.
+      if (app_state->is_editing && !app_state->show_open) {
+         _FR_BuildUIProof(app_state, window_dim);
+      }
+
+      UI_EndBuild();
+   }
+
    Core_D_BeginFrame();
    D_Bucket* bucket = Core_D_BucketMake();
    Core_D_BucketScope(bucket) {
@@ -775,6 +1038,9 @@ FrameWork(App_State* app_state) {
       if (app_state->show_open) {
          OPEN_Draw(app_state, window_dim);
       }
+
+      // Last: over everything drawn by hand.
+      _FR_DrawUITree(app_state);
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);
 

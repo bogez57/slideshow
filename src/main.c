@@ -28,6 +28,13 @@
 // bgz lib
 #include "bgz_inc.h"
 
+// The UI library - the editor project's own (src\editor\ui there), copied in
+// as app code and built on bgz's draw and font cache. Its file-private
+// functions are marked PRIVATE, which the editor defines in its state_ops.h;
+// the slideshow has no state ops, so it is defined here, ahead of the UI.
+#define PRIVATE static
+#include "ui/ui_inc.h"
+
 ////////////////////////////////
 //~ bgz: headers / public types
 
@@ -42,6 +49,18 @@
 ////////////////////////////////
 //~ bgz: implementations
 
+// The UI times its passes with raddebugger's ProfScope. With no profiler
+// built in - the slideshow has none - that is DeferLoop((0), ProfEnd()), and
+// the (0) is an unused value. The editor builds with Spall, so it never sees
+// this. Only that warning, and only for the UI.
+#if defined(__clang__)
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wunused-value"
+#endif
+#include "ui/ui_inc.c"
+#if defined(__clang__)
+# pragma clang diagnostic pop
+#endif
 #include "image/image.c"
 #include "text/text.c"
 #include "deck/deck.c"
@@ -137,6 +156,18 @@ _EntryPoint(CmdLine* cmdline) {
    FR_OpenLogFile(&app_state);
 
    app_state.fonts = TXT_OpenFonts();
+
+   // The UI layer's state, selected for the rest of the run: there is only
+   // the one. The icon font is found beside the program, not from the
+   // folder it was started in.
+   app_state.ui_state = UI_StateAlloc();
+   UI_SelectState(app_state.ui_state);
+   {
+      Temp    scratch = ScratchBegin(0, 0);
+      String8 icon_font_path = PushStr8F(scratch.arena, "%S\\..\\data\\fonts\\Icons.ttf", GetProcessInfo()->binary_path);
+      app_state.ui_icon_font = FilePathExists(icon_font_path) ? Core_FNT_TagFromPath(icon_font_path) : Core_FNT_TagZero();
+      ScratchEnd(scratch);
+   }
 
    // What to show: the first thing on the command line that is not an
    // option - a folder, an image or a text deck. With nothing there, the
