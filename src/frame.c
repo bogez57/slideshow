@@ -374,6 +374,7 @@ FR_SyncDeck(App_State* app_state) {
 //    play / pause     P
 //    fullscreen       F, F11 or Alt+Return. Esc leaves it
 //    slide number     I
+//    notes            N: the slide's @note lines and what comes next
 //    this list        H or F1
 //    edit             F5 or Esc, for a text deck: back to the edit screen
 //    open             drop a folder, an image or a text deck (.md, .txt) on the
@@ -408,6 +409,9 @@ _FR_PresentInput(App_State* app_state) {
    //- bgz: overlays
    if (Core_WM_KeyPress(events, window, 0, WM_Key_I)) {
       app_state->show_info = !app_state->show_info;
+   }
+   if (Core_WM_KeyPress(events, window, 0, WM_Key_N)) {
+      app_state->show_notes = !app_state->show_notes;
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_H) || Core_WM_KeyPress(events, window, 0, WM_Key_F1)) {
       app_state->show_help = !app_state->show_help;
@@ -646,6 +650,55 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
       TXT_Draw(fonts->regular, px, V2F32(x, y), V4F32(1, 1, 1, 0.85f), text);
    }
 
+   //- bgz: the notes: the slide's @note lines and the next slide's title, on a
+   // strip along the bottom - for whoever presents, on a screen only they see
+   if (app_state->show_notes && deck->slide_count != 0) {
+      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+      F32         px = 22.0f * scale;
+      F32         small_px = 17.0f * scale;
+      F32         pad = 18.0f * scale;
+      F32         line_h = TXT_LineHeight(fonts->regular, px);
+      F32         small_h = TXT_LineHeight(fonts->regular, small_px);
+      F32         text_w = Max(window_dim.x - pad * 2.0f, 1.0f);
+
+      // What comes next: the next slide's title, or that this is the last.
+      String8 next = Str8Lit("Next: the end");
+      if (app_state->slide_idx + 1 < deck->slide_count) {
+         DECK_Slide* next_slide = &deck->slides[app_state->slide_idx + 1];
+         String8     next_name = next_slide->title;
+         if (next_name.size == 0) {
+            next_name = (next_slide->image_path.size != 0) ? Str8SkipLastSlash(next_slide->image_path)
+                                                           : Str8Lit("a slide with no title");
+         }
+         next = PushStr8F(scratch.arena, "Next: %S", next_name);
+      }
+
+      // The notes' lines, wrapped, to know how tall the strip is.
+      String8List lines = {0};
+      for (String8Node* note = slide->notes.first; note != 0; note = note->next) {
+         String8List wrapped = TXT_Wrap(scratch.arena, fonts->regular, px, note->string, text_w);
+         for (String8Node* line = wrapped.first; line != 0; line = line->next) {
+            Str8ListPush(scratch.arena, &lines, line->string);
+         }
+      }
+      if (lines.node_count == 0) {
+         Str8ListPush(scratch.arena, &lines, Str8Lit("No notes on this slide. A line of  @note Say this  adds one."));
+      }
+
+      F32 strip_h = pad + line_h * (F32)lines.node_count + pad * 0.5f + small_h + pad;
+      F32 strip_y = window_dim.y - strip_h;
+      Core_D_Rect(R2F32P(0, strip_y, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1), V4F32(0.02f, 0.02f, 0.03f, 0.86f));
+
+      F32 y = strip_y + pad;
+      B32 has_notes = (slide->notes.node_count != 0);
+      for (String8Node* line = lines.first; line != 0; line = line->next) {
+         TXT_Draw(fonts->regular, px, V2F32(pad, y), has_notes ? V4F32(1, 1, 1, 0.95f) : V4F32(1, 1, 1, 0.5f), line->string);
+         y += line_h;
+      }
+      y += pad * 0.5f;
+      TXT_Draw(fonts->regular, small_px, V2F32(pad, y), V4F32(1.0f, 0.85f, 0.5f, 0.9f), next);
+   }
+
    //- bgz: the list of keys
    if (app_state->show_help) {
       // Pairs: the keys, then what they do.
@@ -657,6 +710,7 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
           {Str8Lit("P"), Str8Lit("Play and pause")},
           {Str8Lit("F, F11, Alt+Enter"), Str8Lit("Fullscreen")},
           {Str8Lit("I"), Str8Lit("Slide number")},
+          {Str8Lit("N"), Str8Lit("Notes, and what comes next")},
           {Str8Lit("H, F1"), Str8Lit("This list")},
           {Str8Lit("F5, Esc"), Str8Lit("Back to editing (a text deck)")},
           {Str8Lit("Esc"), Str8Lit("Leave fullscreen, or quit")},

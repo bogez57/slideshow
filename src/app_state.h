@@ -48,6 +48,7 @@ struct App_State {
    U64       ui_last_frame_us; // when the last UI build began, for its animations. 0: none yet
 
    B32 show_info; // the slide's number and name, in the corner
+   B32 show_notes; // the slide's notes and what comes next, along the bottom
    B32 show_help; // the list of keys
 
    // What is logged (LogInfoF, LogUserErrorF) is gathered a frame at a time

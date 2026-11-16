@@ -34,6 +34,8 @@
 //                       with no such line), picture-left, picture-behind (the
 //                       picture fills the slide, behind the words) or center
 //                       (every line in the middle, bullets without their dots)
+//    @note Say this     a note for whoever presents, on the slide it is in: not
+//                       drawn on the slide, shown beside it on request
 //    anything else      a paragraph. Each line is its own
 //    (an empty line)    a little more room before what follows
 //
@@ -103,6 +105,10 @@ struct DECK_Slide {
    DECK_Layout layout;
    B32         has_layout_line;
    Rng1U64     layout_line;
+
+   // The slide's @note lines, in order: for whoever presents, not on the
+   // slide.
+   String8List notes;
 
    // Empty and zero for a slide that is only a picture.
    String8    title;

@@ -97,10 +97,19 @@ center puts every line in the middle of the slide
 - Fifteen
 - Sixteen
 
+# Notes to yourself
+
+@note This line is a note: it is not on the slide.
+@note While presenting, N shows a slide's notes and the title of the next slide.
+
+- A line of @note is for whoever presents
+- It never shows on the slide
+- Press N while presenting to see the notes
+
 # Keys
 
 - F5 presents, and F5 or Esc comes back to the text
 - Ctrl+S saves
-- While presenting, H shows every key
+- While presenting, H shows every key and N the notes
 
 # The end

@@ -290,9 +290,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          continue;
       }
 
-      //- bgz: @theme and @layout: about the deck or the slide, not on it
+      //- bgz: @theme, @layout and @note: about the deck or the slide, not on it
       //
-      // Only those two: any other line that starts with an @ is a paragraph.
+      // Only those three: any other line that starts with an @ is a paragraph.
       // A name that is not one of the names gives the first, as no line would.
       if (line.str[0] == '@') {
          U64 word_end = 0;
@@ -310,6 +310,13 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
                      deck->theme = (DECK_Theme)i;
                   }
                }
+            }
+            continue;
+         }
+         if (Str8Match(word, Str8Lit("@note"), StringMatchFlag_CaseInsensitive)) {
+            // A note with no slide to be on - above the first - is dropped.
+            if (slide != 0 && name.size != 0) {
+               Str8ListPush(arena, &slide->notes, name);
             }
             continue;
          }

@@ -87,6 +87,7 @@ global _EDIT_FormatRow _edit_format_rows[] = {
     {Str8LitComp("  - point"), Str8LitComp("an inner bullet. Shift+Tab moves it out"), Str8LitComp("  - point"), 4, 9},
     {Str8LitComp("![](picture.png)"), Str8LitComp("the slide's picture. Click to pick one"), Str8LitComp("![](picture.png)"), 4, 15, _EDIT_FormatAction_Pictures},
     {Str8LitComp("Any other line"), Str8LitComp("a paragraph. An empty line adds room"), Str8LitComp("Text"), 0, 4},
+    {Str8LitComp("@note Say this"), Str8LitComp("a note to yourself. N shows notes while presenting"), Str8LitComp("@note Say this"), 6, 14},
     // What these two do is said in EDIT_Build, with what the deck and the slide have now.
     {Str8LitComp("@theme"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Theme},
     {Str8LitComp("@layout"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Layout},
@@ -216,17 +217,16 @@ _EDIT_ThumbRect(_EDIT_Layout* layout, U64 slide_count, U64 slide_showing, U64 sl
 //~ bgz: slides, as pieces of the text
 //
 // A slide's piece of the text is from its text_pos to the next slide's: its
-// # Title or --- line and everything under it. The first slide's begins at
-// the text's beginning, whatever is there. The deck has to be of the text as
-// it is: FR_SyncDeck first.
+// # Title or --- line and everything under it. What is above the first
+// slide - @theme and other lines that are about the deck, empty lines - is
+// no slide's, and stays where it is when slides move. The deck has to be of
+// the text as it is: FR_SyncDeck first.
 
 internal Rng1U64
 _EDIT_TextRangeFromSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
    Rng1U64 result = R1U64(0, editor->size);
    if (slide_idx < deck->slide_count) {
-      if (slide_idx != 0) {
-         result.min = Min(deck->slides[slide_idx].text_pos, editor->size);
-      }
+      result.min = Min(deck->slides[slide_idx].text_pos, editor->size);
       if (slide_idx + 1 < deck->slide_count) {
          result.max = Clamp(result.min, deck->slides[slide_idx + 1].text_pos, editor->size);
       }
@@ -277,21 +277,6 @@ _EDIT_MoveSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx, B32 to_later)
       // as more of the slide before, so it is given a --- to start with.
       B32 first_starts_itself = 0;
       for (U64 i = 0; i < first.size; i += 1) {
-         // An @theme or @layout line is not what starts it: the line after
-         // is. (Any other line with an @ is a paragraph.)
-         if (first.str[i] == '@') {
-            U64 word_end = i;
-            while (word_end < first.size && first.str[word_end] != ' ' && first.str[word_end] != '\t' &&
-                   first.str[word_end] != '\n') {
-               word_end += 1;
-            }
-            String8 word = Str8Substr(first, R1U64(i, word_end));
-            if (Str8Match(word, Str8Lit("@theme"), StringMatchFlag_CaseInsensitive) ||
-                Str8Match(word, Str8Lit("@layout"), StringMatchFlag_CaseInsensitive)) {
-               while (i < first.size && first.str[i] != '\n') i += 1;
-               continue;
-            }
-         }
          if (first.str[i] != ' ' && first.str[i] != '\t' && first.str[i] != '\n') {
             first_starts_itself = (first.str[i] == '#' || first.str[i] == '-');
             if (first.str[i] == '-') {
