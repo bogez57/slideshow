@@ -1,0 +1,8 @@
+# Build output: the exe, bgz.dll and everything else the builds write
+/bin/
+
+# bgz own build output (src/bgz/.gitignore has this too)
+/src/bgz/_bin/
+
+# Profile captures
+*.spall
