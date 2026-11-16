@@ -139,6 +139,11 @@ CondVarAlloc(void) {
    return result;
 }
 
+exported void
+CondVarRelease(CondVar cv) {
+   cond_var_release(cv);
+}
+
 exported B32
 CondVarWait(CondVar cv, Mutex mutex, U64 endt_us) {
    B32 result = cond_var_wait(cv, mutex, endt_us);

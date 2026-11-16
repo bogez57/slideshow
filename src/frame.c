@@ -375,6 +375,8 @@ FR_SyncDeck(App_State* app_state) {
 //    fullscreen       F, F11 or Alt+Return. Esc leaves it
 //    slide number     I
 //    notes            N: the slide's @note lines and what comes next
+//    video            K plays and pauses the slide's video, J and L go back
+//                     and on 5 seconds (frame_video.c)
 //    presenter view   V: a second window with the slide, the next one, the
 //                     notes and a clock (frame_presenter.c)
 //    this list        H or F1
@@ -417,6 +419,14 @@ _FR_PresentInput(App_State* app_state) {
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_V)) {
       app_state->toggle_presenter = 1;
+   }
+
+   //- bgz: the slide's video, if it has one (frame_video.c)
+   {
+      VID_Video* video = DECK_VideoFromSlide(app_state->deck, app_state->slide_idx);
+      if (video != 0 && FR_VideoKeys(app_state, video)) {
+         app_state->video_key_us = now_us;
+      }
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_H) || Core_WM_KeyPress(events, window, 0, WM_Key_F1)) {
       app_state->show_help = !app_state->show_help;
@@ -601,6 +611,18 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
       VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], image,
                      window_rect, fade_t, 0);
    }
+   // The slide's video has its strip of controls along the bottom of the
+   // slide for a moment after one of its keys, and while it is paused -
+   // once it has been started: not in the frame or two before it is.
+   VID_Video* video = DECK_VideoFromSlide(deck, app_state->slide_idx);
+   if (video != 0 && app_state->video_auto_slide == app_state->slide_idx + 1) {
+      U64 strip_us = (U64)(FR_VIDEO_STRIP_SECONDS * 1000000.0f);
+      B32 key_was_recent = (app_state->video_key_us != 0 && NowTimeUS() - app_state->video_key_us < strip_us);
+      if (!VID_IsPlaying(video) || key_was_recent) {
+         FR_VideoDrawStrip(app_state, video, VIEW_PageRectFromRect(window_rect), FR_UIScale(window_dim),
+                           Core_WM_MouseFromWindow(app_state->window));
+      }
+   }
 }
 
 // What is drawn over the slide: the play bar, the slide's number, the list of
@@ -724,6 +746,8 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
           {Str8Lit("I"), Str8Lit("Slide number")},
           {Str8Lit("N"), Str8Lit("Notes, and what comes next")},
           {Str8Lit("V"), Str8Lit("Presenter view, in a second window")},
+          {Str8Lit("K"), Str8Lit("Play or pause the slide's video")},
+          {Str8Lit("J / L"), Str8Lit("Video back or on 5 seconds")},
           {Str8Lit("H, F1"), Str8Lit("This list")},
           {Str8Lit("F5, Esc"), Str8Lit("Back to editing (a text deck)")},
           {Str8Lit("Esc"), Str8Lit("Leave fullscreen, or quit")},
@@ -1105,6 +1129,9 @@ FrameWork(App_State* app_state) {
    } else {
       _FR_PresentInput(app_state);
    }
+
+   // After the input, which may have changed the slide or the screen.
+   FR_VideoUpdate(app_state);
 
    // The UI tree, built after the screens' own input, against the screen
    // that input left up. UI_EndBuild lays it out; it is drawn below, over

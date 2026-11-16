@@ -32,6 +32,7 @@ typedef enum PRES_HitKind {
    PRES_HitKind_Slide, // go to slide_idx
    PRES_HitKind_Clock, // stop the clock, or let it run again
    PRES_HitKind_ClockReset, // back to 00:00
+   PRES_HitKind_Video, // play the slide's video, or pause it
 } PRES_HitKind;
 
 typedef struct PRES_Hit {
@@ -66,6 +67,13 @@ struct App_State {
    B32 show_info; // the slide's number and name, in the corner
    B32 show_notes; // the slide's notes and what comes next, along the bottom
    B32 show_help; // the list of keys
+
+   // A slide's video (frame_video.c). video_auto_slide: the slide whose
+   // video was started because the presentation came to it, plus one. 0:
+   // none. video_key_us: when one of the video's keys was last pressed while
+   // presenting - its strip of controls shows for a moment after.
+   U64 video_auto_slide;
+   U64 video_key_us;
 
    // The presenter's window (frame_presenter.c): a second window, for the
    // screen only whoever presents sees, with the slide, the one after it,

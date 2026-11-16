@@ -90,6 +90,12 @@ internal void OPEN_Build(App_State* app_state, Vec2F32 window_dim);
 
 // Opens the window if it is closed and closes it if it is open. Between
 // frames only (main.c).
+// A slide's video: frame_video.c.
+internal void FR_VideoDrawStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 mouse);
+internal B32  FR_VideoClickStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 pos);
+internal B32  FR_VideoKeys(App_State* app_state, VID_Video* video);
+internal void FR_VideoUpdate(App_State* app_state);
+
 internal void PRES_Toggle(App_State* app_state);
 
 // Takes the window's events off this frame's: its close, and its keys, which

@@ -77,7 +77,7 @@ DECK_PictureNamesFromFolder(Arena* arena, String8 folder) {
       // The folder's own images.
       FileIter* it = FileIterBegin(scratch.arena, folder, FileIterFlag_SkipFolders | FileIterFlag_SkipHiddenFiles);
       for (FileInfo info = {0}; FileIterNext(scratch.arena, it, &info);) {
-         if (IMG_NameIsImage(info.name)) {
+         if ((IMG_NameIsImage(info.name) || VID_NameIsVideo(info.name))) {
             Str8ListPush(arena, &names, PushStr8Copy(arena, info.name));
          }
       }
@@ -95,7 +95,7 @@ DECK_PictureNamesFromFolder(Arena* arena, String8 folder) {
          String8 sub_folder = PushStr8F(scratch.arena, "%S\\%S", folder, node->string);
          it = FileIterBegin(scratch.arena, sub_folder, FileIterFlag_SkipFolders | FileIterFlag_SkipHiddenFiles);
          for (FileInfo info = {0}; FileIterNext(scratch.arena, it, &info);) {
-            if (IMG_NameIsImage(info.name)) {
+            if ((IMG_NameIsImage(info.name) || VID_NameIsVideo(info.name))) {
                Str8ListPush(arena, &names, PushStr8F(arena, "%S/%S", node->string, info.name));
             }
          }
@@ -469,7 +469,9 @@ DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
          }
          if (IMG_IsLoaded(&src_slide->image)) {
             dst_slide->image = src_slide->image;
+            dst_slide->video = src_slide->video; // a video goes on playing from where it is
             MemoryZeroStruct(&src_slide->image);
+            src_slide->video = 0;
             break;
          }
          // A file that could not be loaded is not tried again either.
@@ -539,10 +541,65 @@ DECK_OpenPath(String8 path, U64* first_slide_out) {
    return deck;
 }
 
+// The slide's picture, loaded if it is not and can be: an image decoded, a
+// video opened, paused at its start.
+internal void
+_DECK_LoadSlideImage(DECK_Slide* slide) {
+   if (!IMG_IsLoaded(&slide->image) && !slide->load_failed && slide->image_path.size != 0) {
+      if (VID_NameIsVideo(slide->image_path)) {
+         slide->video = VID_Open(slide->image_path);
+         if (slide->video != 0) {
+            slide->image.texture = VID_Texture(slide->video);
+            slide->image.size = VID_Size(slide->video);
+         }
+      } else {
+         slide->image = IMG_LoadFromPath(slide->image_path);
+      }
+      slide->load_failed = !IMG_IsLoaded(&slide->image);
+   }
+}
+
+internal void
+_DECK_ReleaseSlideImage(DECK_Slide* slide) {
+   if (slide->video != 0) {
+      // The texture is the player's, and goes with it.
+      VID_Close(slide->video);
+      slide->video = 0;
+      MemoryZeroStruct(&slide->image);
+   } else {
+      IMG_Release(&slide->image);
+   }
+}
+
+internal VID_Video*
+DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx) {
+   VID_Video* result = (slide_idx < deck->slide_count) ? deck->slides[slide_idx].video : 0;
+   return result;
+}
+
+internal B32
+DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx) {
+   B32 result = 0;
+   if (slide_idx < deck->slide_count) {
+      DECK_Slide* slide = &deck->slides[slide_idx];
+      result = (slide->image_path.size != 0 && !slide->load_failed && VID_NameIsVideo(slide->image_path));
+   }
+   return result;
+}
+
+internal void
+DECK_UpdateVideos(DECK_Deck* deck) {
+   for (U64 i = 0; i < deck->slide_count; i += 1) {
+      if (deck->slides[i].video != 0) {
+         VID_Update(deck->slides[i].video);
+      }
+   }
+}
+
 internal void
 DECK_Close(DECK_Deck* deck) {
    for (U64 i = 0; i < deck->slide_count; i += 1) {
-      IMG_Release(&deck->slides[i].image);
+      _DECK_ReleaseSlideImage(&deck->slides[i]);
    }
    ArenaRelease(deck->arena);
 }
@@ -557,15 +614,12 @@ DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
       for (U64 i = 0; i < deck->slide_count; i += 1) {
          B32 is_near = (i + 1 >= slide_idx && i <= slide_idx + 1);
          if (!is_near) {
-            IMG_Release(&deck->slides[i].image);
+            _DECK_ReleaseSlideImage(&deck->slides[i]);
          }
       }
 
       DECK_Slide* slide = &deck->slides[slide_idx];
-      if (!IMG_IsLoaded(&slide->image) && !slide->load_failed && slide->image_path.size != 0) {
-         slide->image = IMG_LoadFromPath(slide->image_path);
-         slide->load_failed = !IMG_IsLoaded(&slide->image);
-      }
+      _DECK_LoadSlideImage(slide);
       if (IMG_IsLoaded(&slide->image)) {
          result = &slide->image;
       }
@@ -580,10 +634,7 @@ DECK_LoadImageOfSlide(DECK_Deck* deck, U64 slide_idx) {
 
    if (slide_idx < deck->slide_count) {
       DECK_Slide* slide = &deck->slides[slide_idx];
-      if (!IMG_IsLoaded(&slide->image) && !slide->load_failed && slide->image_path.size != 0) {
-         slide->image = IMG_LoadFromPath(slide->image_path);
-         slide->load_failed = !IMG_IsLoaded(&slide->image);
-      }
+      _DECK_LoadSlideImage(slide);
       if (IMG_IsLoaded(&slide->image)) {
          result = &slide->image;
       }

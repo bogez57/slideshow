@@ -114,6 +114,12 @@ PRES_Input(App_State* app_state) {
                         app_state->presenter_paused_us = now_us;
                      }
                   } break;
+                  case PRES_HitKind_Video: {
+                     VID_Video* video = DECK_VideoFromSlide(app_state->deck, app_state->slide_idx);
+                     if (video != 0) {
+                        VID_SetPlaying(video, !VID_IsPlaying(video));
+                     }
+                  } break;
                   default: break;
                }
             }
@@ -375,6 +381,19 @@ PRES_Draw(App_State* app_state) {
                          button_px, mouse, 1, PRES_HitKind_ClockReset, 0);
          }
          y += button_h + gap * 1.5f;
+
+         // The slide's video, if it has one: played and paused from here too.
+         {
+            VID_Video* video = DECK_VideoFromSlide(deck, slide_idx);
+            if (video != 0) {
+               if (y + button_h <= right.max.y) {
+                  _PRES_Button(app_state, R2F32P(right.min.x, y, right.max.x, y + button_h),
+                               VID_IsPlaying(video) ? Str8Lit("Pause video") : Str8Lit("Play video"), button_px, mouse, 1,
+                               PRES_HitKind_Video, 0);
+               }
+               y += button_h + gap * 1.5f;
+            }
+         }
 
          String8List hint = TXT_Wrap(scratch.arena, fonts->regular, label_px, Str8Lit("V closes this window"), right_w);
          for (String8Node* line = hint.first; line != 0 && y + label_h <= right.max.y; line = line->next) {

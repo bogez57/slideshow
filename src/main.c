@@ -39,6 +39,8 @@
 //~ bgz: headers / public types
 
 #include "image/image.h"
+#include "video/video.h"
+#include "video/video_decoder.h"
 #include "text/text.h"
 #include "deck/deck.h"
 #include "view/view.h"
@@ -62,10 +64,13 @@
 # pragma clang diagnostic pop
 #endif
 #include "image/image.c"
+#include "video/video.c"
+#include "video/video_ffmpeg.c" // the decoder: the one file to change for another (video_decoder.h)
 #include "text/text.c"
 #include "deck/deck.c"
 #include "view/view.c"
 #include "editor/editor.c"
+#include "frame_video.c"
 #include "frame_edit.c"
 #include "frame_open.c"
 #include "frame_presenter.c"

@@ -28,6 +28,8 @@
 //    * point            (up to DECK_MAX_BULLET_LEVEL)
 //    ![](picture.png)   the slide's picture, found from the text file's folder.
 //                       A slide has one: the first
+//    ![](clip.mp4)      the same line with a video file: the slide's picture is
+//                       the video, playing (src\video)
 //    @theme light       the whole deck's colours: dark (as with no such line),
 //                       light, blue or paper. Anywhere in the file
 //    @layout center     how the slide it is in is laid out: picture-right (as
@@ -91,6 +93,12 @@ struct DECK_Slide {
    String8   image_path;  // empty: the slide has no picture
    IMG_Image image;       // zero until loaded
    B32       load_failed; // tried once and could not be: not tried again
+
+   // A picture that is a video file (VID_NameIsVideo) is played, not
+   // decoded once: video is its player, open for as long as image is
+   // loaded, and image is the player's texture - so a video is drawn as a
+   // picture is, by code that does not know the difference.
+   VID_Video* video;
 
    // Where in the deck's text the slide begins: the start of its first line.
    // 0 in a folder of images.
@@ -171,7 +179,7 @@ internal DECK_Deck* DECK_OpenPath(String8 path, U64* first_slide_out);
 // Whether there is anything on the slide but its picture.
 internal B32 DECK_SlideHasText(DECK_Slide* slide);
 
-// The names of the image files in a folder and in the folders directly inside
+// The names of the image and video files in a folder and in the folders directly inside
 // it, as a slide's ![](...) line would name them from a text file there:
 // "hills.png", "pictures/bars.jpg". In order of name, on arena.
 internal String8Array DECK_PictureNamesFromFolder(Arena* arena, String8 folder);
@@ -187,6 +195,14 @@ internal IMG_Image* DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx);
 // The same, but releases nothing: for a second look at a slide close to the
 // one DECK_ImageFromSlide was last asked for (the presenter's next slide).
 internal IMG_Image* DECK_LoadImageOfSlide(DECK_Deck* deck, U64 slide_idx);
+
+// A slide's video while it is open - as long as its image is loaded - else 0.
+internal VID_Video* DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx);
+// Whether the slide's picture is a video file, open or not. Not one that
+// could not be opened.
+internal B32 DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx);
+// Once a frame: every open video's VID_Update.
+internal void DECK_UpdateVideos(DECK_Deck* deck);
 
 // The image of a slide only if it is loaded already, else 0. Loads nothing
 // and releases nothing.

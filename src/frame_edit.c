@@ -515,6 +515,30 @@ _EDIT_ToggleFormat(App_State* app_state) {
    }
 }
 
+// Where the slide's video is drawn in the preview, if the slide showing has
+// one that is open: the place the preview last drew its picture. 0 if not,
+// or if the text has changed since the preview was drawn.
+internal VID_Video*
+_EDIT_PreviewVideo(App_State* app_state, Rng2F32* rect_out) {
+   VID_Video* result = 0;
+   DECK_Deck* deck = app_state->deck;
+   VID_Video* video = DECK_VideoFromSlide(deck, app_state->slide_idx);
+
+   if (video != 0 && app_state->editor != 0 && app_state->editor->edit_count == app_state->preview_hits_edit_count) {
+      Rng1U64 range = deck->slides[app_state->slide_idx].image_range;
+      for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
+         VIEW_Hit* hit = &app_state->preview_hits[i];
+         if (hit->text_range.min == range.min && hit->text_range.max == range.max) {
+            *rect_out = hit->rect;
+            result = video;
+            break;
+         }
+      }
+   }
+
+   return result;
+}
+
 internal void
 EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    WM_EventList* events = &app_state->events;
@@ -524,12 +548,12 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       if (event->kind == WM_EventKind_WindowClose) {
          FR_RequestQuit(app_state);
       }
-      // Of several things dropped at once, the first is used. An image is a
-      // picture for the slide. Anything else is a deck to open.
+      // Of several things dropped at once, the first is used. An image or a
+      // video is a picture for the slide. Anything else is a deck to open.
       if (event->kind == WM_EventKind_FileDrop && event->strings.first != 0) {
          String8 path = event->strings.first->string;
          B32     is_folder = !!(PropertiesFromFilePath(path).flags & FilePropertyFlag_IsFolder);
-         if (!is_folder && IMG_NameIsImage(path)) {
+         if (!is_folder && (IMG_NameIsImage(path) || VID_NameIsVideo(path))) {
             _EDIT_DropPicture(app_state, path);
          } else {
             FR_OpenPath(app_state, path);
@@ -609,6 +633,22 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    //
    // Before anything this frame can have changed the text: where the pieces
    // are from was worked out for the text as it was drawn.
+   // The video's strip of controls first: it is over the picture, and a
+   // click on it is not a click on the picture.
+   {
+      Rng2F32    video_rect = {0};
+      VID_Video* video = _EDIT_PreviewVideo(app_state, &video_rect);
+      if (video != 0) {
+         for (WM_Event* event = events->first; event != 0; event = event->next) {
+            if (event->kind == WM_EventKind_Press && event->key == WM_Key_LeftMouseButton &&
+                FR_VideoClickStrip(app_state, video, video_rect, layout.ui, event->pos)) {
+               Core_WM_EatEvent(events, event);
+               break;
+            }
+         }
+      }
+   }
+
    if (editor->edit_count == app_state->preview_hits_edit_count) {
       for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
          VIEW_Hit* hit = &app_state->preview_hits[i];
@@ -1007,6 +1047,14 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                F32 mark_w = Max(2.0f, (F32)(S32)(3.0f * ui));
                Core_D_Rect(R2F32P(rect.min.x - mark_w, rect.min.y, rect.min.x, rect.max.y), R2F32P(0, 0, 1, 1),
                            VIEW_ColorsFromTheme(deck->theme).accent);
+            }
+         }
+         // The slide's video: its strip of controls, over the bottom of it.
+         {
+            Rng2F32    video_rect = {0};
+            VID_Video* video = _EDIT_PreviewVideo(app_state, &video_rect);
+            if (video != 0) {
+               FR_VideoDrawStrip(app_state, video, video_rect, ui, mouse);
             }
          }
          caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Alt+Left / Alt+Right moves it",

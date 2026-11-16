@@ -39,6 +39,7 @@ exported void      MutexTake(Mutex mutex);
 exported void      MutexDrop(Mutex mutex);
 
 exported CondVar   CondVarAlloc(void);
+exported void      CondVarRelease(CondVar cv);
 exported B32       CondVarWait(CondVar cv, Mutex mutex, U64 endt_us);
 exported void      CondVarSignal(CondVar cv);
 exported void      CondVarBroadcast(CondVar cv);

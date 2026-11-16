@@ -1,0 +1,71 @@
+# video
+
+A video file played into a texture, which a slide draws where a picture would
+go. No sound yet.
+
+## The parts
+
+```
+the app (deck, frame_video.c, presenter)
+        |  uses only video.h
+        v
+video.h / video.c          the player: decode thread, frame queue, clock, texture
+        |  uses only video_decoder.h
+        v
+video_decoder.h            what a decoder is: five functions
+        ^
+        |  defines them
+video_ffmpeg.c             the decoder there is, done with FFmpeg
+```
+
+- **`video.h`** is all the rest of the program sees: `VID_Open`, `VID_Close`,
+  `VID_Texture`, `VID_Size`, `VID_Duration`, `VID_Position`, `VID_IsPlaying`,
+  `VID_SetPlaying`, `VID_Seek`, `VID_Update`, `VID_NameIsVideo`. Only bgz types.
+- **`video.c`** is the player. It knows nothing of files or codecs. A thread
+  decodes a few frames ahead into a queue; `VID_Update`, once a frame on the
+  main thread, moves the clock on and copies the frame that is due into the
+  texture.
+- **`video_decoder.h`** is the seam: `VID_DecoderOpen`, `VID_DecoderClose`,
+  `VID_DecoderNextFrame`, `VID_DecoderSeek`, and the `VID_DecoderInfo` that open
+  fills in. Plain, one call at a time, no threads of its own to answer for.
+- **`video_ffmpeg.c`** is those functions done with FFmpeg. It is the only
+  file that includes FFmpeg's headers.
+
+## Changing the decoder
+
+1. Write `video_<other>.c` that defines the functions in `video_decoder.h`.
+2. In `src\main.c`, include it in place of `video/video_ffmpeg.c`.
+3. In `build.bat`, take out the `ffmpeg` block and what it adds to the
+   include path and the link line, and add what the new one needs.
+
+Nothing else changes: the player, the deck and the screens don't know which
+decoder is there.
+
+## How a slide gets a video
+
+A slide's picture line with a video file in it, `![](clip.mp4)`, makes the
+slide's picture a video. The deck (`deck.c`) opens a `VID_Video` for it where
+it would decode an image, and gives the slide's `IMG_Image` the player's
+texture, so the view draws a video exactly as it draws a picture. When it
+plays and its controls are in `src\frame_video.c`.
+
+## FFmpeg
+
+`src\third_party\ffmpeg` has FFmpeg as it is given out by the BtbN builds
+(`ffmpeg-master-latest-win64-lgpl-shared`, version `N-128959-g4dbee3b241`,
+2026-11-16): `include`, `lib` (import libraries) and `bin` (the DLLs, which
+`build.bat` copies next to the exe). Only what playing needs is there:
+avformat, avcodec, avutil, swscale, and swresample, which avcodec loads.
+
+It is the LGPL build, used as separate DLLs and not changed. `LICENSE.txt` is
+its licence. A program that ships with these DLLs has to say that it uses
+FFmpeg and under which licence, and let the DLLs be replaced.
+
+## Not done yet
+
+- Sound. The plan is the same split: `audio.h` and one file behind it that
+  plays through Windows (WASAPI), with the player's clock following the sound.
+- Decoding on the graphics card. All decoding is on the processor.
+- A video turned on its side by its file's rotation mark (some phone videos)
+  is shown as stored, not turned upright.
+- Looping.
