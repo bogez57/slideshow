@@ -84,7 +84,8 @@ struct App_State {
    // text beside a preview, or the presentation (frame.c). Only a deck with
    // an editor has the edit screen.
    B32 is_editing;
-   B32 show_format; // edit screen: the list of what can be written is open
+   B32           show_format;   // edit screen: the list of what can be written is open
+   UI_ScrollRows format_scroll; // where that list is scrolled to, in a window too short for all of it (EDIT_Build)
 
    // Edit screen: the list of pictures to pick from, open in place of the
    // format panel's lines. The names are of the files in the deck's folder,

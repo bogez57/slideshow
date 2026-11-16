@@ -135,7 +135,15 @@ _EDIT_LayoutFromWindowDim(App_State* app_state, Vec2F32 window_dim) {
    F32 status_h = (F32)(S32)(30.0f * ui);
    F32 header_h = (F32)(S32)(30.0f * ui);
    F32 row_h = (F32)(S32)(26.0f * ui);
-   F32 rows_h = app_state->show_format ? row_h * (F32)ArrayCount(_edit_format_rows) + 8.0f * ui : 0;
+   // All the format's lines if they fit, but the text keeps at least half
+   // the window: in a short one the lines give way, two at the least, and
+   // scroll (EDIT_Build).
+   F32 rows_h = 0;
+   if (app_state->show_format) {
+      F32 all_rows_h = row_h * (F32)ArrayCount(_edit_format_rows) + 8.0f * ui;
+      F32 room_h = window_dim.y * 0.5f - header_h - status_h;
+      rows_h = Min(all_rows_h, Max(room_h, row_h * 2.0f + 8.0f * ui));
+   }
 
    F32 status_y = window_dim.y - status_h;
    F32 rows_y = status_y - rows_h;
@@ -805,7 +813,17 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
                   syntax_w = Max(syntax_w, TXT_Width(fonts->mono, layout.ui_px, _edit_format_rows[i].syntax));
                }
 
-               for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
+               // A list that scrolls, for a short window, where they do not
+               // all fit (_EDIT_LayoutFromWindowDim). With room for all, it
+               // has no bar and does not move.
+               UI_ScrollRowsFlags scroll_flags = UI_ScrollRowsFlag_RowClicks;
+               UI_ScrollRowsFrame frame = UI_ScrollRowsBegin(&app_state->format_scroll,
+                                                             V2F32(left_w, Max(rows_h - edge * 2.0f, row_h)),
+                                                             (S64)ArrayCount(_edit_format_rows), row_h, 0, scroll_flags,
+                                                             "###edit format lines");
+               UI_ScrollRowsEnd(&app_state->format_scroll, &frame, 0, scroll_flags);
+
+               UI_Parent(frame.rows_box) for (S64 i = frame.first_row; i < frame.last_row; i += 1) {
                   _EDIT_FormatRow* format_row = &_edit_format_rows[i];
 
                   // The theme's and the layout's rows say what there is now.
@@ -822,8 +840,7 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
                                           : DECK_LayoutName(DECK_Layout_PictureRight);
                      what = PushStr8F(app_state->frame_arena, "this slide's layout, now %S. Click for the next", now);
                   }
-                  UI_Box* row = UI_ListRow(row_h, 0, UI_BoxFlag_DrawBackground | click_flags, "###edit format row %llu",
-                                           (unsigned long long)i);
+                  UI_Box* row = UI_ListRow(row_h, 0, UI_BoxFlag_DrawBackground | click_flags, "###edit format row %lld", i);
                   UI_Parent(row) UI_PrefHeight(UI_Pct(1, 1)) {
                      UI_Spacer(UI_Px(pad, 1));
                      UI_SetNextPrefWidth(UI_Px(syntax_w, 1));
@@ -841,7 +858,7 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
                         row->background_color = UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Background);
                      }
                      if (UI_Clicked(signal)) {
-                        format_picked = (S64)i;
+                        format_picked = i;
                      }
                   }
                }
@@ -974,10 +991,13 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
             kept->rect = rect;
             kept->text_range = hit->text_range;
 
-            // Lit under the mouse. And a mark beside the piece the cursor is
-            // in: where typing goes.
+            // Lit under the mouse - a wash of the theme's body colour, which
+            // shows on a light theme as on a dark one. And a mark beside the
+            // piece the cursor is in: where typing goes.
             if (Contains2F32(rect, mouse) && !app_state->show_open) {
-               Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.10f));
+               Vec4F32 lit = VIEW_ColorsFromTheme(deck->theme).body;
+               lit.w = 0.12f;
+               Core_D_Rect(rect, R2F32P(0, 0, 1, 1), lit);
             }
             if (editor->cursor >= hit->text_range.min && editor->cursor <= hit->text_range.max) {
                F32 mark_w = Max(2.0f, (F32)(S32)(3.0f * ui));
