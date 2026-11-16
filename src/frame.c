@@ -275,6 +275,9 @@ FR_OpenPath(App_State* app_state, String8 path) {
    app_state->play_from_us = now_us;
    app_state->playing = 0;
    app_state->quit_warned = 0;
+   // The slide numbers are the new deck's: none of its videos was started.
+   app_state->video_auto_slide = 0;
+   app_state->video_key_us = 0;
 
    // A text deck opens on the edit screen. Its deck is made again from the
    // editor's text at the next FR_SyncDeck: 0 is no edit_count an editor has.

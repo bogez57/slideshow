@@ -62,7 +62,31 @@ struct VID_Decoder {
    F64     frame_s;      // how long a frame lasts, if the file says. Else 0
    F64     last_time_s;  // of the last frame given out
    B32     is_draining;  // the file's packets are all read: the codec is giving up what it holds
+
+   // Since the last seek: how many frames came out, and whether it was to
+   // the very start. A seek that lands past a file's last keyframe before
+   // the time - a .ts with one keyframe at its start does this - gives no
+   // frame at all, and is tried again from the start.
+   U64 frames_since_seek;
+   B32 seek_was_to_start;
 };
+
+// To the first byte of the file where the format can go there, which is
+// always before the first keyframe. Else to the first frame's time.
+internal void
+_VID_SeekToStart(VID_Decoder* decoder) {
+   int error = -1;
+   if (!(decoder->format->iformat->flags & AVFMT_NO_BYTE_SEEK)) {
+      error = av_seek_frame(decoder->format, decoder->stream_idx, 0, AVSEEK_FLAG_BYTE);
+   }
+   if (error < 0) {
+      av_seek_frame(decoder->format, decoder->stream_idx, decoder->start_ticks, AVSEEK_FLAG_BACKWARD);
+   }
+   avcodec_flush_buffers(decoder->codec);
+   decoder->is_draining = 0;
+   decoder->frames_since_seek = 0;
+   decoder->seek_was_to_start = 1;
+}
 
 // What FFmpeg has to say about one of its error codes.
 internal String8
@@ -91,6 +115,7 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, VID_DecoderInfo* info_o
    VID_Decoder* decoder = PushArray(arena, VID_Decoder, 1);
    decoder->path = PushStr8Copy(arena, path);
    decoder->stream_idx = -1;
+   decoder->seek_was_to_start = 1; // a file opened is at its start
 
    // Only what goes wrong, to the console. Why a file can't be played is
    // logged below, for the program's own log.
@@ -197,8 +222,14 @@ VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
    for (;;) {
       int error = avcodec_receive_frame(decoder->codec, decoder->frame);
       if (error == 0) {
+         decoder->frames_since_seek += 1;
          result = 1;
          break;
+      }
+      if (error == AVERROR_EOF && decoder->frames_since_seek == 0 && !decoder->seek_was_to_start) {
+         // A seek that found nothing to decode: from the start instead.
+         _VID_SeekToStart(decoder);
+         continue;
       }
       if (error != AVERROR(EAGAIN)) {
          // AVERROR_EOF: the end. Anything else: it can't go on.
@@ -269,6 +300,8 @@ VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
 
 internal void
 VID_DecoderSeek(VID_Decoder* decoder, F64 time_s) {
+   decoder->last_time_s = time_s;
+
    S64 ticks = decoder->start_ticks;
    if (decoder->seconds_per_tick > 0) {
       ticks += (S64)(time_s / decoder->seconds_per_tick);
@@ -276,14 +309,19 @@ VID_DecoderSeek(VID_Decoder* decoder, F64 time_s) {
 
    // To the last frame that can be decoded on its own at or before the
    // time: what is between it and the time is decoded and thrown away by
-   // the player.
-   int error = av_seek_frame(decoder->format, decoder->stream_idx, ticks, AVSEEK_FLAG_BACKWARD);
-   if (error < 0) {
-      // Some files can't be sought in. From the start is all that is left.
-      error = av_seek_frame(decoder->format, decoder->stream_idx, decoder->start_ticks, AVSEEK_FLAG_BACKWARD);
+   // the player. Some files can't be sought in: from the start is all that
+   // is left.
+   int error = -1;
+   if (time_s > 0) {
+      error = av_seek_frame(decoder->format, decoder->stream_idx, ticks, AVSEEK_FLAG_BACKWARD);
    }
-   // What the codec was holding is from where it was.
-   avcodec_flush_buffers(decoder->codec);
-   decoder->is_draining = 0;
-   decoder->last_time_s = time_s;
+   if (error < 0) {
+      _VID_SeekToStart(decoder);
+   } else {
+      // What the codec was holding is from where it was.
+      avcodec_flush_buffers(decoder->codec);
+      decoder->is_draining = 0;
+      decoder->frames_since_seek = 0;
+      decoder->seek_was_to_start = 0;
+   }
 }

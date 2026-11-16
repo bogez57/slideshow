@@ -312,6 +312,9 @@ VID_Update(VID_Video* video) {
       if (video->playing) {
          video->playing = 0;
          video->ended = 1;
+         // The last frame begins a frame before the end: the clock says
+         // the end, as the bar and the time should.
+         video->position_s = Max(video->position_s, video->info.duration_s);
       }
    }
 
