@@ -23,8 +23,7 @@
 
 #define _CRT_SECURE_NO_WARNINGS
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdio.h> // printf: what could not be opened or read, to the console
 
 // bgz lib
 #include "bgz_inc.h"

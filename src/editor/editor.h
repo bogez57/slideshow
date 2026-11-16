@@ -11,8 +11,12 @@
 // Lines too long for the box are wrapped, at spaces where there are any. The
 // font must be one whose characters are all the same width.
 //
-// Memory is the C runtime's (malloc), not an arena: the text and the undo
-// history grow, shrink and are let go of in no order an arena could follow.
+// Memory is two arenas of the editor's own, both released by ED_Close. One
+// has the editor and its text. The other has the undo history, whose copies
+// of the text come and go in no order an arena can follow: the ones let go
+// of are left where they are until they add up, and then the ones still
+// wanted are copied to a fresh arena and the old one is cleared
+// (_ED_HistoryTidy in editor.c).
 
 #ifndef EDITOR_H
 #define EDITOR_H
@@ -40,7 +44,8 @@ typedef enum ED_EditKind {
 
 typedef struct ED_Editor ED_Editor;
 struct ED_Editor {
-   String8   file;          // malloc'd
+   Arena*    arena;         // the editor, its file's name and its text
+   String8   file;
    B32       file_crlf;     // the file's line endings were \r\n
    DenseTime file_modified; // the file's time when read or written. 0: no file yet
 
@@ -60,6 +65,8 @@ struct ED_Editor {
    U64         undo_count;
    ED_Snapshot redo[ED_MAX_UNDO];
    U64         redo_count;
+   Arena*      history_arena; // the snapshots' text - and that of ones let go of since the last tidy
+   Arena*      history_spare; // empty: what the next tidy copies to
    ED_EditKind last_edit_kind;
    U64         last_edit_us;
 

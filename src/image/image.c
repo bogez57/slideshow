@@ -3,6 +3,25 @@
 //
 // See image.h.
 
+// stb_image's memory is an arena, not the C runtime's: while an image is
+// being decoded (IMG_LoadFromPath) everything stb_image asks for is pushed
+// on this one, nothing it frees is given back, and the caller lets go of it
+// all at once when the pixels have gone to the renderer.
+global Arena* _img_decode_arena = 0;
+
+internal void*
+_IMG_DecodeRealloc(void* old, U64 old_size, U64 new_size) {
+   void* result = ArenaPush(_img_decode_arena, new_size, 16, 0);
+   if (old != 0) {
+      MemoryCopy(result, old, Min(old_size, new_size));
+   }
+   return result;
+}
+
+#define STBI_MALLOC(size)                              ArenaPush(_img_decode_arena, (U64)(size), 16, 0)
+#define STBI_REALLOC_SIZED(old, old_size, new_size)    _IMG_DecodeRealloc((old), (U64)(old_size), (U64)(new_size))
+#define STBI_FREE(memory)                              ((void)(memory))
+
 // stb_image is held to its own warnings, not the app's. From memory only:
 // files are read with bgz (DataFromFilePath), so its stdio half is left out.
 #define STB_IMAGE_IMPLEMENTATION
@@ -44,6 +63,9 @@ IMG_LoadFromPath(String8 path) {
 
    String8 data = DataFromFilePath(scratch.arena, path);
 
+   // What stb_image allocates below goes with the scratch.
+   _img_decode_arena = scratch.arena;
+
    if (data.size == 0) {
       printf("Could not read %.*s\n", Str8VArg(path));
    }
@@ -72,14 +94,15 @@ IMG_LoadFromPath(String8 path) {
             printf("Could not decode %.*s: %s\n", Str8VArg(path), stbi_failure_reason());
          }
          else {
-            // Static: the renderer copies the pixels, so they are freed here.
+            // Static: the renderer copies the pixels, so they can go with
+            // the scratch.
             result.texture = Core_R_Tex2DAlloc(R_ResourceKind_Static, V2S32(width, height), R_Tex2DFormat_RGBA8, pixels);
             result.size = V2S32(width, height);
-            stbi_image_free(pixels);
          }
       }
    }
 
+   _img_decode_arena = 0;
    ScratchEnd(scratch);
    return result;
 }

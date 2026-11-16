@@ -12,23 +12,13 @@
 ////////////////////////////////
 //~ bgz: memory
 
-internal String8
-_ED_HeapCopy(String8 string) {
-   String8 result = {0};
-   result.str = (U8*)malloc(string.size + 1);
-   result.size = string.size;
-   MemoryCopy(result.str, string.str, string.size);
-   result.str[string.size] = 0;
-   return result;
-}
-
 // Text as the editor keeps it, from text as it comes from a file or the
 // clipboard: no \r, four spaces for a tab (the font cache has no width for
-// one), and no other control characters. malloc'd.
+// one), and no other control characters. On arena.
 internal String8
-_ED_CleanText(String8 string) {
+_ED_CleanText(Arena* arena, String8 string) {
    String8 result = {0};
-   result.str = (U8*)malloc(string.size * 4 + 1);
+   result.str = PushArrayNoZero(arena, U8, string.size * 4 + 1);
 
    for (U64 i = 0; i < string.size; i += 1) {
       U8 c = string.str[i];
@@ -53,7 +43,15 @@ _ED_Reserve(ED_Editor* editor, U64 size) {
    if (size > editor->cap) {
       U64 cap = Max(editor->cap * 2, 4096);
       while (cap < size) cap *= 2;
-      editor->text = (U8*)realloc(editor->text, cap);
+
+      // The text moves to new room twice the size, and its old room stays
+      // in the arena, unused: all the old rooms together are smaller than
+      // the new one.
+      U8* text = PushArrayNoZero(editor->arena, U8, cap);
+      if (editor->size != 0) {
+         MemoryCopy(text, editor->text, editor->size);
+      }
+      editor->text = text;
       editor->cap = cap;
    }
 }
@@ -64,7 +62,7 @@ _ED_Reserve(ED_Editor* editor, U64 size) {
 internal ED_Snapshot
 _ED_SnapshotMake(ED_Editor* editor) {
    ED_Snapshot result = {0};
-   result.text = (U8*)malloc(editor->size + 1);
+   result.text = PushArrayNoZero(editor->history_arena, U8, editor->size + 1);
    result.size = editor->size;
    MemoryCopy(result.text, editor->text, editor->size);
    result.cursor = editor->cursor;
@@ -81,11 +79,42 @@ _ED_SnapshotRestore(ED_Editor* editor, ED_Snapshot* snapshot) {
    editor->mark = snapshot->mark;
 }
 
+// A snapshot let go of leaves its text in the history arena. Once the arena
+// holds this much, and several times what the snapshots still wanted come
+// to, those are copied to the spare arena, this one is cleared, and the two
+// change places.
+#define _ED_HISTORY_TIDY_SIZE MB(4)
+
+internal void
+_ED_HistoryTidy(ED_Editor* editor) {
+   U64 wanted_size = 0;
+   for (U64 i = 0; i < editor->undo_count; i += 1) wanted_size += editor->undo[i].size + 1;
+   for (U64 i = 0; i < editor->redo_count; i += 1) wanted_size += editor->redo[i].size + 1;
+
+   if (wanted_size == 0) {
+      ArenaClear(editor->history_arena);
+   } else if (ArenaPos(editor->history_arena) > Max(_ED_HISTORY_TIDY_SIZE, wanted_size * 4)) {
+      Arena*       to = editor->history_spare;
+      ED_Snapshot* stacks[] = {editor->undo, editor->redo};
+      U64          counts[] = {editor->undo_count, editor->redo_count};
+      for (U64 stack_idx = 0; stack_idx < ArrayCount(stacks); stack_idx += 1) {
+         for (U64 i = 0; i < counts[stack_idx]; i += 1) {
+            ED_Snapshot* snapshot = &stacks[stack_idx][i];
+            U8*          text = PushArrayNoZero(to, U8, snapshot->size + 1);
+            MemoryCopy(text, snapshot->text, snapshot->size);
+            snapshot->text = text;
+         }
+      }
+      ArenaClear(editor->history_arena);
+      editor->history_spare = editor->history_arena;
+      editor->history_arena = to;
+   }
+}
+
 // Pushes onto one of the two stacks, letting go of the oldest when full.
 internal void
 _ED_SnapshotPush(ED_Snapshot* stack, U64* count, ED_Snapshot snapshot) {
    if (*count == ED_MAX_UNDO) {
-      free(stack[0].text);
       MemoryCopy(stack, stack + 1, sizeof(stack[0]) * (ED_MAX_UNDO - 1));
       *count -= 1;
    }
@@ -95,9 +124,7 @@ _ED_SnapshotPush(ED_Snapshot* stack, U64* count, ED_Snapshot snapshot) {
 
 internal void
 _ED_SnapshotsClear(ED_Snapshot* stack, U64* count) {
-   for (U64 i = 0; i < *count; i += 1) {
-      free(stack[i].text);
-   }
+   UnusedVariable(stack);
    *count = 0;
 }
 
@@ -112,6 +139,7 @@ _ED_BeforeEdit(ED_Editor* editor, ED_EditKind kind) {
       _ED_SnapshotPush(editor->undo, &editor->undo_count, _ED_SnapshotMake(editor));
    }
    _ED_SnapshotsClear(editor->redo, &editor->redo_count);
+   _ED_HistoryTidy(editor);
 
    editor->last_edit_kind = kind;
    editor->last_edit_us = now_us;
@@ -126,7 +154,7 @@ _ED_StepHistory(ED_Editor* editor, ED_Snapshot* from, U64* from_count, ED_Snapsh
 
       *from_count -= 1;
       _ED_SnapshotRestore(editor, &from[*from_count]);
-      free(from[*from_count].text);
+      _ED_HistoryTidy(editor);
 
       editor->edit_count += 1;
       editor->last_edit_kind = ED_EditKind_None;
@@ -576,11 +604,11 @@ _ED_Read(ED_Editor* editor) {
 
    editor->file_crlf = (Str8FindNeedle(data, 0, Str8Lit("\r\n"), 0) < data.size);
 
-   String8 text = _ED_CleanText(data);
+   String8 text = _ED_CleanText(scratch.arena, data);
+   editor->size = 0; // nothing of the old text to take along to new room
    _ED_Reserve(editor, text.size + 1);
    MemoryCopy(editor->text, text.str, text.size);
    editor->size = text.size;
-   free(text.str);
 
    editor->file_modified = PropertiesFromFilePath(editor->file).modified;
    editor->cursor = Min(editor->cursor, editor->size);
@@ -596,6 +624,7 @@ _ED_Read(ED_Editor* editor) {
 
    _ED_SnapshotsClear(editor->undo, &editor->undo_count);
    _ED_SnapshotsClear(editor->redo, &editor->redo_count);
+   _ED_HistoryTidy(editor);
    editor->last_edit_kind = ED_EditKind_None;
 
    ScratchEnd(scratch);
@@ -603,8 +632,12 @@ _ED_Read(ED_Editor* editor) {
 
 internal ED_Editor*
 ED_Open(String8 file) {
-   ED_Editor* editor = (ED_Editor*)calloc(1, sizeof(ED_Editor));
-   editor->file = _ED_HeapCopy(file);
+   Arena*     arena = ArenaAlloc();
+   ED_Editor* editor = PushArray(arena, ED_Editor, 1);
+   editor->arena = arena;
+   editor->history_arena = ArenaAlloc();
+   editor->history_spare = ArenaAlloc();
+   editor->file = PushStr8Copy(arena, file);
    _ED_Reserve(editor, 1);
    _ED_Read(editor);
    return editor;
@@ -612,11 +645,9 @@ ED_Open(String8 file) {
 
 internal void
 ED_Close(ED_Editor* editor) {
-   _ED_SnapshotsClear(editor->undo, &editor->undo_count);
-   _ED_SnapshotsClear(editor->redo, &editor->redo_count);
-   free(editor->text);
-   free(editor->file.str);
-   free(editor);
+   ArenaRelease(editor->history_arena);
+   ArenaRelease(editor->history_spare);
+   ArenaRelease(editor->arena); // the editor itself is on it
 }
 
 internal String8
@@ -634,9 +665,9 @@ ED_Save(ED_Editor* editor) {
    String8 data = ED_Text(editor);
 
    // The file's own line endings back.
-   U8* crlf_text = 0;
+   Temp scratch = ScratchBegin(0, 0);
    if (editor->file_crlf) {
-      crlf_text = (U8*)malloc(editor->size * 2 + 1);
+      U8* crlf_text = PushArrayNoZero(scratch.arena, U8, editor->size * 2 + 1);
       U64 size = 0;
       for (U64 i = 0; i < editor->size; i += 1) {
          if (editor->text[i] == '\n') {
@@ -655,7 +686,7 @@ ED_Save(ED_Editor* editor) {
       editor->file_modified = PropertiesFromFilePath(editor->file).modified;
    }
 
-   free(crlf_text);
+   ScratchEnd(scratch);
    return result;
 }
 
@@ -860,11 +891,10 @@ ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, WM_Window window
                } break;
 
                case WM_Key_V: {
-                  String8 text = _ED_CleanText(Core_WM_GetClipboardText(arena));
+                  String8 text = _ED_CleanText(arena, Core_WM_GetClipboardText(arena));
                   if (text.size != 0) {
                      ED_Insert(editor, text, ED_EditKind_Other);
                   }
-                  free(text.str);
                } break;
 
                case WM_Key_Z: {
