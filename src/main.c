@@ -23,7 +23,7 @@
 
 #define _CRT_SECURE_NO_WARNINGS
 
-#include <stdio.h> // printf: what could not be opened or read, to the console
+#include <stdio.h> // printf: the log, to the console as well as its file (FR_WriteLogs)
 
 // bgz lib
 #include "bgz_inc.h"
@@ -128,6 +128,14 @@ _EntryPoint(CmdLine* cmdline) {
    App_State app_state = {0};
    app_state.frame_arena = ArenaAlloc();
 
+   // The log, before anything that can have something to say. What is
+   // logged before the first frame is written just ahead of it, and after
+   // that each frame writes its own (FrameWork).
+   app_state.log = LogAlloc();
+   LogSelect(app_state.log);
+   LogScopeBegin();
+   FR_OpenLogFile(&app_state);
+
    app_state.fonts = TXT_OpenFonts();
 
    // What to show: the first thing on the command line that is not an
@@ -155,6 +163,12 @@ _EntryPoint(CmdLine* cmdline) {
    // The first frame, drawn and presented while the window is still hidden,
    // so it shows with its contents rather than blank. Without this, nothing
    // draws until the loop handles the WM_PAINT that showing it sends.
+   {
+      Temp temp = TempBegin(app_state.frame_arena);
+      FR_WriteLogs(&app_state, LogScopeEnd(app_state.frame_arena));
+      TempEnd(temp);
+   }
+
    g_repaint_app_state = &app_state;
    _Main_RunFrame(&app_state);
 
@@ -180,6 +194,11 @@ _EntryPoint(CmdLine* cmdline) {
    }
 
    g_repaint_app_state = 0;
+
+   if (app_state.deck_watch != 0) {
+      FileWatchClose(app_state.deck_watch);
+   }
+   FileClose(app_state.log_file);
 
    Core_R_Shutdown();
 }

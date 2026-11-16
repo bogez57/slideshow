@@ -12,6 +12,7 @@ typedef enum OPEN_RowKind {
    OPEN_RowKind_Label,   // says what the rows under it are. Not to be clicked
    OPEN_RowKind_Recent,  // a deck opened lately
    OPEN_RowKind_Up,      // the folder this one is in
+   OPEN_RowKind_Browse,  // Windows' own open-file window, starting in this folder
    OPEN_RowKind_New,     // a new text deck, in this folder
    OPEN_RowKind_Present, // this folder's pictures, as a deck
    OPEN_RowKind_Folder,
@@ -42,6 +43,13 @@ struct App_State {
    B32 show_info; // the slide's number and name, in the corner
    B32 show_help; // the list of keys
 
+   // What is logged (LogInfoF, LogUserErrorF) is gathered a frame at a time
+   // and written to local\logs\slideshow_log.txt beside the program, and to
+   // the console (FR_WriteLogs).
+   Log* log;
+   File log_file;
+   U64  log_file_off; // how much has been written to it
+
    // Set by a frame that wants fullscreen turned on or off. The main loop
    // does it between frames - see _EntryPoint (main.c).
    B32 toggle_fullscreen;
@@ -57,6 +65,13 @@ struct App_State {
    ED_Editor* editor;
    U64        parsed_edit_count; // the editor's edit_count the deck was made at
    U64        reload_checked_us; // when the file was last looked at for changes from outside
+
+   // The watch on the folder the text deck's file is in: something written
+   // there is when the file is looked at (FR_SyncDeck). 0 for a folder of
+   // images, and when the folder could not be watched - then the file is
+   // only looked at now and then.
+   Arena*     watch_arena;
+   FileWatch* deck_watch;
 
    // Which of the two screens is up: the edit screen (frame_edit.c), with the
    // text beside a preview, or the presentation (frame.c). Only a deck with

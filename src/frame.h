@@ -30,6 +30,17 @@ internal B32 FR_OpenPath(App_State* app_state, String8 path);
 // is not whole already is taken from the folder the program was started in.
 internal String8 FR_WholePath(Arena* arena, String8 path);
 
+// The program's own folder for what it keeps from run to run - the log, the
+// decks opened lately: local\ beside the program. Made if it is not there.
+internal String8 FR_LocalFolder(Arena* arena);
+
+// Starts the log's file for this run, keeping the last run's beside it.
+internal void FR_OpenLogFile(App_State* app_state);
+
+// Writes what a log scope gathered to the log's file and the console: what
+// went wrong marked !!!, warnings ???, the rest >>>.
+internal void FR_WriteLogs(App_State* app_state, LogScopeResult logs);
+
 // Reads the decks opened lately from their file beside the program. Once,
 // at the start.
 internal void FR_LoadRecents(App_State* app_state);

@@ -12,6 +12,7 @@
 //    |    C:\talks\intro\slides.md                  |
 //    |  C:\talks                                    |
 //    |    ..                    the folder above    |
+//    |    Browse...             Windows' window     |
 //    |    New deck here         makes slides.md     |
 //    |    Present the pictures  12 in this folder   |
 //    |    intro\                                    |
@@ -21,8 +22,9 @@
 //    +----------------------------------------------+
 //
 // The lines are the decks opened lately, then one folder: the folder above
-// it, what can be made of the folder itself - a new text deck in it, or its
-// pictures as a deck - and the folders and text decks in it. Clicking a
+// it, Windows' own open-file window (bgz's ShPickFile), what can be made of
+// the folder itself - a new text deck in it, or its pictures as a deck - and
+// the folders and text decks in it. Clicking a
 // folder goes into it. Clicking anything else opens it and closes the panel.
 //
 //    open the panel   Ctrl+O, on either screen
@@ -129,7 +131,7 @@ _OPEN_Scan(App_State* app_state) {
 
    //- bgz: the rows
    U64       recent_count = Min(app_state->recents.count, _OPEN_RECENTS_SHOWN);
-   U64       row_cap = recent_count + folders.count + decks.count + 8;
+   U64       row_cap = recent_count + folders.count + decks.count + 9;
    OPEN_Row* rows = PushArray(arena, OPEN_Row, row_cap);
    U64       row_count = 0;
 
@@ -152,6 +154,7 @@ _OPEN_Scan(App_State* app_state) {
       _OPEN_PushRow(arena, rows, &row_count, row_cap, OPEN_RowKind_Label, folder, Str8Zero());
       _OPEN_PushRow(arena, rows, &row_count, row_cap, OPEN_RowKind_Up, Str8Lit(".."), _OPEN_FolderAbove(folder));
 
+      _OPEN_PushRow(arena, rows, &row_count, row_cap, OPEN_RowKind_Browse, Str8Lit("Browse..."), folder);
       String8 new_name = _OPEN_NewDeckName(scratch.arena, folder);
       _OPEN_PushRow(arena, rows, &row_count, row_cap, OPEN_RowKind_New, Str8Lit("New deck here"),
                     _OPEN_PathInFolder(scratch.arena, folder, new_name));
@@ -275,6 +278,16 @@ _OPEN_PickRow(App_State* app_state, OPEN_Row* row) {
       case OPEN_RowKind_Up:
       case OPEN_RowKind_Folder: {
          _OPEN_GoToFolder(app_state, path);
+      } break;
+
+      case OPEN_RowKind_Browse: {
+         // bgz's shell: the system's window, which does not return until it
+         // is answered. Empty: every file is listed - a deck is .md or .txt,
+         // and a picture opens its folder.
+         String8 picked = ShPickFile(scratch.arena, Str8Lit("Open a deck"), path, Str8Zero());
+         if (picked.size != 0 && FR_OpenPath(app_state, picked)) {
+            app_state->show_open = 0;
+         }
       } break;
 
       case OPEN_RowKind_New: {
@@ -448,6 +461,10 @@ OPEN_Draw(App_State* app_state, Vec2F32 window_dim) {
          case OPEN_RowKind_Up: {
             color = color_folder;
             what = (row->path.size != 0) ? PushStr8F(scratch.arena, "the folder above: %S", row->path) : Str8Lit("the list of drives");
+         } break;
+         case OPEN_RowKind_Browse: {
+            color = color_action;
+            what = Str8Lit("Windows' own open window");
          } break;
          case OPEN_RowKind_New: {
             color = color_action;

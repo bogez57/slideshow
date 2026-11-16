@@ -13,8 +13,11 @@
 // One notch of a mouse wheel, in the units Windows reports it in.
 #define _FR_SCROLL_PER_SLIDE 120.0f
 
-// How often a text deck's file is looked at for having been written.
-#define _FR_RELOAD_CHECK_SECONDS 0.25f
+// How often a text deck's file is looked at for having been written when
+// nothing says it has been: the watch on its folder (FileWatchOpen) says so
+// at once, and this is for a folder that could not be watched, or a change
+// the watch missed.
+#define _FR_RELOAD_CHECK_SECONDS 2.0f
 
 internal void
 FR_Notice(App_State* app_state, String8 notice) {
@@ -80,16 +83,88 @@ FR_WholePath(Arena* arena, String8 path) {
 }
 
 ////////////////////////////////
+//~ bgz: the log
+
+internal String8
+FR_LocalFolder(Arena* arena) {
+   String8 result = PushStr8F(arena, "%S\\local", GetProcessInfo()->binary_path);
+   if (!FilePathExists(result)) {
+      MakeDirectory(result);
+   }
+   return result;
+}
+
+internal void
+FR_OpenLogFile(App_State* app_state) {
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 folder = PushStr8F(scratch.arena, "%S\\logs", FR_LocalFolder(scratch.arena));
+   if (!FilePathExists(folder)) {
+      MakeDirectory(folder);
+   }
+
+   // The last run's log is kept, one back: it is the one wanted after a run
+   // that went wrong.
+   String8 path = PushStr8F(scratch.arena, "%S\\slideshow_log.txt", folder);
+   if (FilePathExists(path)) {
+      CopyFilePath(PushStr8F(scratch.arena, "%S\\slideshow_log_previous.txt", folder), path);
+   }
+
+   // ShareRead: it can be read while the program runs.
+   app_state->log_file = FileOpen(AccessFlag_Write | AccessFlag_ShareRead, path);
+   app_state->log_file_off = 0;
+
+   ScratchEnd(scratch);
+}
+
+internal void
+FR_WriteLogs(App_State* app_state, LogScopeResult logs) {
+   Temp scratch = ScratchBegin(0, 0);
+
+   char* prefixes[LogMsgKind_COUNT] = {0};
+   prefixes[LogMsgKind_Info] = ">>> ";
+   prefixes[LogMsgKind_UserError] = "!!! ";
+   prefixes[LogMsgKind_UserWarning] = "??? ";
+
+   for (U64 kind = 0; kind < LogMsgKind_COUNT; kind += 1) {
+      // A line at a time, each with what kind it is in front.
+      String8 text = logs.strings[kind];
+      U64     pos = 0;
+      while (pos < text.size) {
+         U64 line_start = pos;
+         while (pos < text.size && text.str[pos] != '\n') pos += 1;
+         String8 line = Str8SkipChopWhitespace(Str8Substr(text, R1U64(line_start, pos)));
+         pos += 1;
+         if (line.size == 0) {
+            continue;
+         }
+
+         String8 out = PushStr8F(scratch.arena, "%s%S\n", prefixes[kind], line);
+         if (!FileMatch(app_state->log_file, FileZero())) {
+            app_state->log_file_off +=
+                FileWrite(app_state->log_file, R1U64(app_state->log_file_off, app_state->log_file_off + out.size), out.str);
+         }
+         // And to the console, for a run started from one.
+         printf("%.*s", Str8VArg(out));
+      }
+   }
+
+   ScratchEnd(scratch);
+}
+
+////////////////////////////////
 //~ bgz: the decks opened lately
 
 // How many are kept.
 #define _FR_RECENTS_MAX 8
 
-// Beside the program, so that it goes where the program goes and is found
-// wherever the program is started from.
+// In the program's local folder, beside it, so that it goes where the
+// program goes and is found wherever the program is started from.
 internal String8
 _FR_RecentsFilePath(Arena* arena) {
-   return PushStr8F(arena, "%S\\slideshow_recent.txt", GetProcessInfo()->binary_path);
+   Temp    scratch = ScratchBegin(&arena, 1);
+   String8 result = PushStr8F(arena, "%S\\recent.txt", FR_LocalFolder(scratch.arena));
+   ScratchEnd(scratch);
+   return result;
 }
 
 internal void
@@ -171,14 +246,13 @@ FR_OpenPath(App_State* app_state, String8 path) {
    // A text file with no slides yet is a deck to be written. Anything else
    // with no slides is nothing to show, and the deck that is open stays.
    if (!is_text && deck->slide_count == 0 && app_state->deck != 0) {
-      printf("No images in %.*s\n", Str8VArg(path));
+      LogUserErrorF("Nothing to show in %S: no images, and not a text deck (.md, .txt)\n", path);
       FR_Notice(app_state, Str8Lit("Nothing to show there: no images, and not a text deck (.md, .txt)."));
       DECK_Close(deck);
       return 0;
    }
 
-   printf("%llu slides in %.*s\n", (unsigned long long)deck->slide_count,
-          Str8VArg(is_text ? deck->file : deck->folder));
+   LogInfoF("Opened %S: %llu slides\n", is_text ? deck->file : deck->folder, (unsigned long long)deck->slide_count);
 
    if (app_state->deck != 0) {
       DECK_Close(app_state->deck);
@@ -186,6 +260,10 @@ FR_OpenPath(App_State* app_state, String8 path) {
    if (app_state->editor != 0) {
       ED_Close(app_state->editor);
       app_state->editor = 0;
+   }
+   if (app_state->deck_watch != 0) {
+      FileWatchClose(app_state->deck_watch);
+      app_state->deck_watch = 0;
    }
 
    U64 now_us = NowTimeUS();
@@ -201,6 +279,20 @@ FR_OpenPath(App_State* app_state, String8 path) {
    if (is_text) {
       app_state->editor = ED_Open(deck->file);
       app_state->parsed_edit_count = 0;
+
+      // Its folder is watched, to know at once when something else writes
+      // the file.
+      if (app_state->watch_arena == 0) {
+         app_state->watch_arena = ArenaAlloc();
+      }
+      ArenaClear(app_state->watch_arena);
+      Temp scratch = ScratchBegin(0, 0);
+      app_state->deck_watch = FileWatchOpen(app_state->watch_arena, FR_WholePath(scratch.arena, deck->folder), 0);
+      if (app_state->deck_watch == 0) {
+         LogInfoF("Could not watch %S for changes: the deck's file is looked at every %.0f seconds instead\n", deck->folder,
+                  _FR_RELOAD_CHECK_SECONDS);
+      }
+      ScratchEnd(scratch);
    }
    app_state->is_editing = is_text;
    app_state->show_format = 1;
@@ -232,12 +324,23 @@ FR_SyncDeck(App_State* app_state) {
    //
    // Read again only if nothing here would be lost by it. With unsaved
    // changes the text here wins, and saving it writes over the file.
+   //
+   // The watch only says that something in the folder changed - when to
+   // look. What is looked at is the file's own time (ED_FileHasChanged).
+   B32 look_now = 0;
+   if (app_state->deck_watch != 0) {
+      Temp        scratch = ScratchBegin(0, 0);
+      FileChanges changes = FileWatchPoll(scratch.arena, app_state->deck_watch);
+      look_now = (changes.paths.node_count != 0 || changes.overflowed);
+      ScratchEnd(scratch);
+   }
    U64 now_us = NowTimeUS();
    U64 check_us = (U64)(_FR_RELOAD_CHECK_SECONDS * 1000000.0f);
-   if (now_us - app_state->reload_checked_us >= check_us) {
+   if (look_now || now_us - app_state->reload_checked_us >= check_us) {
       app_state->reload_checked_us = now_us;
       if (ED_FileHasChanged(editor) && !ED_HasUnsavedChanges(editor)) {
          ED_Reload(editor);
+         LogInfoF("%S was written by something else: read again\n", editor->file);
       }
    }
 
@@ -631,6 +734,10 @@ _FR_BeginText(App_State* app_state, Vec2F32 window_dim) {
 
 internal void
 FrameWork(App_State* app_state) {
+   // What is logged this frame is gathered, and written at the frame's end.
+   LogSelect(app_state->log);
+   LogScopeBegin();
+
    Vec2F32 window_dim = Dim2F32(Core_WM_ClientRectFromWindow(app_state->window));
 
    // Before input: the edit screen measures text to know what a click is on.
@@ -670,4 +777,6 @@ FrameWork(App_State* app_state) {
       }
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);
+
+   FR_WriteLogs(app_state, LogScopeEnd(app_state->frame_arena));
 }

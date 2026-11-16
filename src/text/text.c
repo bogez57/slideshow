@@ -83,7 +83,7 @@ TXT_OpenFonts(void) {
       result.mono = result.regular;
    }
    if (!_TXT_FontIsValid(result.regular)) {
-      printf("No font could be opened: text will not be drawn\n");
+      LogUserErrorF("No font could be opened: text will not be drawn\n");
    }
 
    ScratchEnd(scratch);

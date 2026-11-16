@@ -67,11 +67,11 @@ IMG_LoadFromPath(String8 path) {
    _img_decode_arena = scratch.arena;
 
    if (data.size == 0) {
-      printf("Could not read %.*s\n", Str8VArg(path));
+      LogUserErrorF("Could not read %S\n", path);
    }
    else if (data.size > 0x7fffffff) {
       // stb_image takes the size as an int.
-      printf("%.*s is too big to decode (2 GB or more)\n", Str8VArg(path));
+      LogUserErrorF("%S is too big to decode (2 GB or more)\n", path);
    }
    else {
       int width = 0;
@@ -81,17 +81,17 @@ IMG_LoadFromPath(String8 path) {
       // Asked first, so an image too large for a texture is turned away
       // before it is decoded.
       if (!stbi_info_from_memory(data.str, (int)data.size, &width, &height, &channels)) {
-         printf("Could not decode %.*s: %s\n", Str8VArg(path), stbi_failure_reason());
+         LogUserErrorF("Could not decode %S: %s\n", path, stbi_failure_reason());
       }
       else if (width > IMG_MAX_DIM || height > IMG_MAX_DIM) {
-         printf("%.*s is %d x %d - the most a texture can be is %d a side\n", Str8VArg(path), width, height, IMG_MAX_DIM);
+         LogUserErrorF("%S is %d x %d - the most a texture can be is %d a side\n", path, width, height, IMG_MAX_DIM);
       }
       else {
          // 4: always RGBA, whatever the file has.
          stbi_uc* pixels = stbi_load_from_memory(data.str, (int)data.size, &width, &height, &channels, 4);
 
          if (pixels == 0) {
-            printf("Could not decode %.*s: %s\n", Str8VArg(path), stbi_failure_reason());
+            LogUserErrorF("Could not decode %S: %s\n", path, stbi_failure_reason());
          }
          else {
             // Static: the renderer copies the pixels, so they can go with
