@@ -25,9 +25,38 @@
 #define _VIEW_COLOR_ACCENT(a)  V4F32(0.36f, 0.66f, 1.00f, (a))
 
 internal F32
-VIEW_ScaleFromWindowDim(Vec2F32 window_dim) {
-   F32 result = Min(window_dim.x / VIEW_PAGE_W, window_dim.y / VIEW_PAGE_H);
+VIEW_ScaleFromDim(Vec2F32 dim) {
+   F32 result = Min(dim.x / VIEW_PAGE_W, dim.y / VIEW_PAGE_H);
    return result;
+}
+
+internal Rng2F32
+VIEW_PageRectFromRect(Rng2F32 rect) {
+   Vec2F32 dim = Dim2F32(rect);
+   F32     scale = VIEW_ScaleFromDim(dim);
+   F32     x = rect.min.x + (dim.x - VIEW_PAGE_W * scale) * 0.5f;
+   F32     y = rect.min.y + (dim.y - VIEW_PAGE_H * scale) * 0.5f;
+   return R2F32P(x, y, x + VIEW_PAGE_W * scale, y + VIEW_PAGE_H * scale);
+}
+
+// Where a picture that could not be loaded would have been: a box, with the
+// file's name, so a wrong path can be seen and read.
+internal void
+_VIEW_DrawMissingPicture(TXT_Fonts* fonts, DECK_Slide* slide, Rng2F32 rect, F32 scale, F32 alpha) {
+   Vec2F32 dim = Dim2F32(rect);
+   if (dim.x > 0 && dim.y > 0) {
+      Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.05f * alpha));
+
+      String8 lines[] = {Str8Lit("Picture not found"), Str8SkipLastSlash(slide->image_path)};
+      F32     px = 22.0f * scale;
+      F32     line_height = TXT_LineHeight(fonts->regular, px);
+      F32     y = rect.min.y + (dim.y - line_height * (F32)ArrayCount(lines)) * 0.5f;
+      for (U64 i = 0; i < ArrayCount(lines); i += 1) {
+         F32 w = TXT_Width(fonts->regular, px, lines[i]);
+         TXT_Draw(fonts->regular, px, V2F32(rect.min.x + (dim.x - w) * 0.5f, y), V4F32(1, 1, 1, 0.5f * alpha), lines[i]);
+         y += line_height;
+      }
+   }
 }
 
 internal void
@@ -126,27 +155,34 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, Rng2F32 rect, F32 
 }
 
 internal void
-VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* image, Vec2F32 window_dim, F32 alpha) {
-   if (window_dim.x <= 0 || window_dim.y <= 0) {
+VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* image, Rng2F32 rect, F32 alpha) {
+   Vec2F32 rect_dim = Dim2F32(rect);
+   if (rect_dim.x <= 0 || rect_dim.y <= 0) {
       return;
    }
 
-   //- bgz: only a picture: all of the window
+   Core_D_PushClip(rect);
+
+   F32     scale = VIEW_ScaleFromDim(rect_dim);
+   Rng2F32 page = VIEW_PageRectFromRect(rect);
+   B32     picture_is_missing = (image == 0 && slide->load_failed);
+
+   //- bgz: only a picture: all of the rect
    if (!DECK_SlideHasText(slide)) {
       if (image != 0) {
-         VIEW_DrawImageFit(image, R2F32P(0, 0, window_dim.x, window_dim.y), alpha);
+         VIEW_DrawImageFit(image, rect, alpha);
+      } else if (picture_is_missing) {
+         _VIEW_DrawMissingPicture(fonts, slide, page, scale, alpha);
       }
+      Core_D_PopClip();
       return;
    }
 
    //- bgz: the page
-   F32     scale = VIEW_ScaleFromWindowDim(window_dim);
-   F32     page_x = (window_dim.x - VIEW_PAGE_W * scale) * 0.5f;
-   F32     page_y = (window_dim.y - VIEW_PAGE_H * scale) * 0.5f;
-   Rng2F32 content = R2F32P(page_x + _VIEW_MARGIN_X * scale,
-                            page_y + _VIEW_MARGIN_TOP * scale,
-                            page_x + (VIEW_PAGE_W - _VIEW_MARGIN_X) * scale,
-                            page_y + (VIEW_PAGE_H - _VIEW_MARGIN_BOTTOM) * scale);
+   Rng2F32 content = R2F32P(page.min.x + _VIEW_MARGIN_X * scale,
+                            page.min.y + _VIEW_MARGIN_TOP * scale,
+                            page.max.x - _VIEW_MARGIN_X * scale,
+                            page.max.y - _VIEW_MARGIN_BOTTOM * scale);
    F32     content_w = Dim2F32(content).x;
 
    //- bgz: only a title: large, in the middle
@@ -169,6 +205,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* ima
       F32 bar_x = content.min.x + (content_w - bar_w) * 0.5f;
       y += 14.0f * scale;
       Core_D_Rect(R2F32P(bar_x, y, bar_x + bar_w, y + bar_h), R2F32P(0, 0, 1, 1), _VIEW_COLOR_ACCENT(alpha));
+      Core_D_PopClip();
       return;
    }
 
@@ -204,6 +241,8 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* ima
 
    if (image != 0) {
       VIEW_DrawImageFit(image, picture_rect, alpha);
+   } else if (picture_is_missing) {
+      _VIEW_DrawMissingPicture(fonts, slide, picture_rect, scale, alpha);
    }
 
    if (slide->item_count != 0) {
@@ -219,4 +258,6 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* ima
       }
       _VIEW_Body(arena, fonts, slide, body_rect, scale, shrink, alpha, 1);
    }
+
+   Core_D_PopClip();
 }

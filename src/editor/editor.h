@@ -1,0 +1,132 @@
+////////////////////////////////
+//~ bgz: editor
+//
+// A plain text editor for one file: the text, the cursor and selection, undo,
+// and the box it is typed into and drawn in. What the text means is not its
+// business - frame_edit.c hands the text to the deck layer.
+//
+// The text is UTF-8 with \n line endings and no tabs, whatever the file had:
+// ED_Open converts, and ED_Save writes the file's own line endings back.
+//
+// Lines too long for the box are wrapped, at spaces where there are any. The
+// font must be one whose characters are all the same width.
+//
+// Memory is the C runtime's (malloc), not an arena: the text and the undo
+// history grow, shrink and are let go of in no order an arena could follow.
+
+#ifndef EDITOR_H
+#define EDITOR_H
+
+// How many changes can be undone. Each is a whole copy of the text, which for
+// a deck is small.
+#define ED_MAX_UNDO 256
+
+typedef struct ED_Snapshot ED_Snapshot;
+struct ED_Snapshot {
+   U8* text;
+   U64 size;
+   U64 cursor;
+   U64 mark;
+};
+
+// What kind of change the last one was. Changes of the same kind that follow
+// each other closely are undone together.
+typedef enum ED_EditKind {
+   ED_EditKind_None,
+   ED_EditKind_Type,
+   ED_EditKind_Delete,
+   ED_EditKind_Other, // never joined to the one before
+} ED_EditKind;
+
+typedef struct ED_Editor ED_Editor;
+struct ED_Editor {
+   String8   file;          // malloc'd
+   B32       file_crlf;     // the file's line endings were \r\n
+   DenseTime file_modified; // the file's time when read or written. 0: no file yet
+
+   U8* text;
+   U64 size;
+   U64 cap;
+
+   // The selection is between mark and cursor, either one first. Equal: none.
+   U64 cursor;
+   U64 mark;
+   S64 want_column; // the column up and down try to keep. -1: the cursor's own
+
+   U64 edit_count;  // goes up with every change to the text
+   U64 saved_count; // edit_count when the text was last read or written
+
+   ED_Snapshot undo[ED_MAX_UNDO];
+   U64         undo_count;
+   ED_Snapshot redo[ED_MAX_UNDO];
+   U64         redo_count;
+   ED_EditKind last_edit_kind;
+   U64         last_edit_us;
+
+   F32 scroll_y;         // pixels the text is scrolled up by
+   B32 scroll_to_cursor; // the cursor moved: bring it into view when next drawn
+   B32 is_dragging;      // the mouse went down in the text and is still down
+   U64 last_input_us;    // the cursor does not blink just after input
+};
+
+// One row of text as drawn: a line, or a part of one that is too long.
+typedef struct ED_Row ED_Row;
+struct ED_Row {
+   U64 start;
+   U64 end;        // one past the last character drawn. Not the \n
+   B32 line_start; // the row begins a line
+   B32 line_end;   // the row ends a line: a \n or the end of the text follows
+};
+
+typedef struct ED_RowArray ED_RowArray;
+struct ED_RowArray {
+   ED_Row* v;
+   U64     count;
+};
+
+// Where the text is drawn and how big. The same one is given to ED_Input and
+// ED_Draw in a frame.
+typedef struct ED_Box ED_Box;
+struct ED_Box {
+   Rng2F32 rect;
+   FNT_Tag font;
+   F32     px;
+};
+
+// Never 0. A file that does not exist gives an empty editor, and ED_Save
+// makes the file.
+internal ED_Editor* ED_Open(String8 file);
+internal void       ED_Close(ED_Editor* editor);
+
+// The text as it is now. Good until the next change.
+internal String8 ED_Text(ED_Editor* editor);
+
+internal B32 ED_HasUnsavedChanges(ED_Editor* editor);
+internal B32 ED_Save(ED_Editor* editor);
+
+// Whether the file has been written by something else since it was read or
+// saved here.
+internal B32 ED_FileHasChanged(ED_Editor* editor);
+
+// Reads the file again, dropping the text here and its undo history.
+internal void ED_Reload(ED_Editor* editor);
+
+// Puts string where the selection is, or at the cursor if there is none.
+internal void ED_Insert(ED_Editor* editor, String8 string, ED_EditKind kind);
+
+// Puts string on a line of its own: straight in if the cursor's line is
+// empty, else on a new line under it. The part of string from select_start to
+// select_end is left selected, to be typed over - both the same for a plain
+// cursor there.
+internal void ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start, U64 select_end);
+
+internal void ED_SetCursor(ED_Editor* editor, U64 pos);
+
+// Keys, typing and the mouse. Events it uses are eaten, so what the caller
+// wants for itself (its own shortcuts) it takes first. arena is for the
+// frame: the row layout and the clipboard's text go on it.
+internal void ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, WM_Window window, ED_Box box);
+
+internal void ED_Draw(ED_Editor* editor, Arena* arena, ED_Box box);
+
+#endif // EDITOR_H

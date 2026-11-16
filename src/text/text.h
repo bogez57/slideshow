@@ -22,10 +22,11 @@ typedef struct TXT_Fonts TXT_Fonts;
 struct TXT_Fonts {
    FNT_Tag regular;
    FNT_Tag bold;
+   FNT_Tag mono; // every character the same width: the editor's
 };
 
-// data\fonts\regular.ttf and bold.ttf if the program has them, else Segoe UI
-// from Windows' own fonts, else Arial.
+// data\fonts\regular.ttf, bold.ttf and mono.ttf if the program has them, else
+// Segoe UI and Consolas from Windows' own fonts, else Arial and Courier New.
 internal TXT_Fonts TXT_OpenFonts(void);
 
 internal F32 TXT_LineHeight(FNT_Tag font, F32 px);

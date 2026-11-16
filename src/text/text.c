@@ -61,8 +61,16 @@ TXT_OpenFonts(void) {
        PushStr8F(scratch.arena, "%s\\Fonts\\arialbd.ttf", windows_dir),
    };
 
+   String8 mono_paths[] = {
+       Str8Lit("data\\fonts\\mono.ttf"),
+       PushStr8F(scratch.arena, "%s\\Fonts\\consola.ttf", windows_dir),
+       PushStr8F(scratch.arena, "%s\\Fonts\\cour.ttf", windows_dir),
+   };
+
    result.regular = _TXT_FontFromFirstPath(regular_paths, ArrayCount(regular_paths));
    result.bold = _TXT_FontFromFirstPath(bold_paths, ArrayCount(bold_paths));
+
+   result.mono = _TXT_FontFromFirstPath(mono_paths, ArrayCount(mono_paths));
 
    // One font is better than none, for either.
    if (!_TXT_FontIsValid(result.bold)) {
@@ -70,6 +78,9 @@ TXT_OpenFonts(void) {
    }
    if (!_TXT_FontIsValid(result.regular)) {
       result.regular = result.bold;
+   }
+   if (!_TXT_FontIsValid(result.mono)) {
+      result.mono = result.regular;
    }
    if (!_TXT_FontIsValid(result.regular)) {
       printf("No font could be opened: text will not be drawn\n");

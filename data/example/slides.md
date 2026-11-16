@@ -8,14 +8,15 @@ This deck is the file data\example\slides.md. Open it with:
 
 bin\slideshow.exe data\example
 
-- A line starting with #  begins a new slide and is its title
+- The text is on the left, and this preview follows the cursor
+- A line starting with # and a space begins a new slide and is its title
 - A line of --- begins a slide with no title
-- A line starting with -  is a bullet
+- A line starting with - and a space is a bullet
   - Two more spaces in front make it an inner bullet
     - And two more, one further in
 - Anything else is a paragraph
 
-Save the file while the program is running and the slides change as you write.
+The Format panel under the text lists all of this. Click a line there to write it.
 
 # Long lines wrap
 
@@ -66,8 +67,8 @@ Two # make a heading, which belongs to the slide it is on.
 
 # Keys
 
-- H or F1 shows every key
-- I shows the slide number
-- P plays, F is fullscreen
+- F5 presents, and F5 or Esc comes back to the text
+- Ctrl+S saves
+- While presenting, H shows every key
 
 # The end

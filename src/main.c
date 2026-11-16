@@ -10,10 +10,12 @@
 //                                 slides.md, if it has one
 //    bin\slideshow.exe <image>    shows the images in that image's folder,
 //                                 starting at it
-//    bin\slideshow.exe <file>     shows the slides a text file describes
-//                                 (.md or .txt - the format is in deck\deck.h)
+//    bin\slideshow.exe <file>     opens a text file that describes slides (.md
+//                                 or .txt - the format is in deck\deck.h) for
+//                                 editing, beside a preview. The file need
+//                                 not exist yet
 //
-// Keys are in frame.c.
+// Keys are in frame.c (presenting), frame_edit.c and editor\editor.c (editing).
 
 #define _CRT_SECURE_NO_WARNINGS
 
@@ -34,7 +36,9 @@
 #include "text/text.h"
 #include "deck/deck.h"
 #include "view/view.h"
+#include "editor/editor.h"
 #include "app_state.h"
+#include "frame.h"
 
 ////////////////////////////////
 //~ bgz: implementations
@@ -43,6 +47,8 @@
 #include "text/text.c"
 #include "deck/deck.c"
 #include "view/view.c"
+#include "editor/editor.c"
+#include "frame_edit.c"
 #include "frame.c"
 
 ////////////////////////////////
@@ -130,9 +136,7 @@ _EntryPoint(CmdLine* cmdline) {
    if (cmdline->inputs.first != 0) {
       path = cmdline->inputs.first->string;
    }
-   app_state.deck = DECK_OpenPath(path, &app_state.slide_idx);
-   printf("%llu slides in %.*s\n", (unsigned long long)app_state.deck->slide_count,
-          Str8VArg(app_state.deck->file.size != 0 ? app_state.deck->file : app_state.deck->folder));
+   FR_OpenPath(&app_state, path);
 
    // UseDefaultPosition: where Windows puts a new window - only the rect's
    // size is used.

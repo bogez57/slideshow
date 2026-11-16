@@ -139,11 +139,28 @@ _DECK_Trim(String8 string) {
 
 internal DECK_Deck*
 DECK_OpenFile(String8 file) {
+   Temp scratch = ScratchBegin(0, 0);
+
+   String8 text = DataFromFilePath(scratch.arena, file);
+
+   // A byte order mark, which Notepad puts at the start of a UTF-8 file.
+   if (text.size >= 3 && text.str[0] == 0xEF && text.str[1] == 0xBB && text.str[2] == 0xBF) {
+      text = Str8Skip(text, 3);
+   }
+
+   // The \r of a Windows line ending is taken off each line as it is read.
+   DECK_Deck* deck = DECK_OpenText(text, file);
+
+   ScratchEnd(scratch);
+   return deck;
+}
+
+internal DECK_Deck*
+DECK_OpenText(String8 text_to_copy, String8 file) {
    Arena*     arena = ArenaAlloc();
    DECK_Deck* deck = PushArray(arena, DECK_Deck, 1);
    deck->arena = arena;
    deck->file = PushStr8Copy(arena, file);
-   deck->file_modified = PropertiesFromFilePath(deck->file).modified;
 
    // Pictures are found from the folder the file is in. A file with nothing
    // before its name is in the folder the program was started from.
@@ -154,14 +171,8 @@ DECK_OpenFile(String8 file) {
 
    Temp scratch = ScratchBegin(&arena, 1);
 
-   // The file's text stays on the deck's arena: titles and items are pieces
-   // of it, not copies.
-   String8 text = DataFromFilePath(arena, deck->file);
-
-   // A byte order mark, which Notepad puts at the start of a UTF-8 file.
-   if (text.size >= 3 && text.str[0] == 0xEF && text.str[1] == 0xBB && text.str[2] == 0xBF) {
-      text = Str8Skip(text, 3);
-   }
+   // The deck's own copy: titles and items are pieces of it.
+   String8 text = PushStr8Copy(arena, text_to_copy);
 
    _DECK_SlideNode* first_node = 0;
    _DECK_SlideNode* last_node = 0;
@@ -171,6 +182,11 @@ DECK_OpenFile(String8 file) {
    // next line with anything on it starts a new slide.
    DECK_Slide* slide = 0;
    B32         gap_before = 0;
+
+   // Where the last --- line began, for the slide it starts: that begins at
+   // the rule, not at the first line after it with something on it.
+   B32 has_rule_pos = 0;
+   U64 rule_pos = 0;
 
    U64 pos = 0;
    while (pos < text.size) {
@@ -203,6 +219,8 @@ DECK_OpenFile(String8 file) {
       if (is_rule) {
          slide = 0;
          gap_before = 0;
+         has_rule_pos = 1;
+         rule_pos = line_start;
          continue;
       }
 
@@ -228,8 +246,10 @@ DECK_OpenFile(String8 file) {
          SLLQueuePush(first_node, last_node, node);
          node_count += 1;
          slide = &node->slide;
+         slide->text_pos = (has_rule_pos && !is_title) ? rule_pos : line_start;
          gap_before = 0;
       }
+      has_rule_pos = 0;
 
       //- bgz: add it
       if (is_title) {
@@ -278,18 +298,45 @@ DECK_OpenFile(String8 file) {
    return deck;
 }
 
-internal B32
-DECK_FileHasChanged(DECK_Deck* deck) {
-   B32 result = 0;
+internal U64
+DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos) {
+   U64 result = 0;
 
-   if (deck->file.size != 0) {
-      // A file that is gone for a moment - some editors save by writing a new
-      // file and renaming it - reads as modified at 0, and has not changed.
-      DenseTime modified = PropertiesFromFilePath(deck->file).modified;
-      result = (modified != 0 && modified != deck->file_modified);
+   for (U64 i = 0; i < deck->slide_count; i += 1) {
+      if (deck->slides[i].text_pos <= text_pos) {
+         result = i;
+      } else {
+         break;
+      }
    }
 
    return result;
+}
+
+internal void
+DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
+   for (U64 i = 0; i < dst->slide_count; i += 1) {
+      DECK_Slide* dst_slide = &dst->slides[i];
+      if (dst_slide->image_path.size == 0 || IMG_IsLoaded(&dst_slide->image)) {
+         continue;
+      }
+
+      for (U64 j = 0; j < src->slide_count; j += 1) {
+         DECK_Slide* src_slide = &src->slides[j];
+         if (!Str8Match(src_slide->image_path, dst_slide->image_path, 0)) {
+            continue;
+         }
+         if (IMG_IsLoaded(&src_slide->image)) {
+            dst_slide->image = src_slide->image;
+            MemoryZeroStruct(&src_slide->image);
+            break;
+         }
+         // A file that could not be loaded is not tried again either.
+         if (src_slide->load_failed) {
+            dst_slide->load_failed = 1;
+         }
+      }
+   }
 }
 
 internal B32

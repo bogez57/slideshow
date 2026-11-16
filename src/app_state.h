@@ -33,8 +33,27 @@ struct App_State {
    U64        slide_changed_us; // when it became the one showing. 0: never changed
    F32        scroll_left_over; // mouse wheel movement not yet enough for a slide
 
-   // A deck from a text file is read again when the file is saved.
-   U64 reload_checked_us; // when the file was last looked at
+   // A deck from a text file has an editor, which holds the text: the deck
+   // is made from the editor's text, not the file's, and made again whenever
+   // that changes (FR_SyncDeck). 0 for a folder of images.
+   ED_Editor* editor;
+   U64        parsed_edit_count; // the editor's edit_count the deck was made at
+   U64        reload_checked_us; // when the file was last looked at for changes from outside
+
+   // Which of the two screens is up: the edit screen (frame_edit.c), with the
+   // text beside a preview, or the presentation (frame.c). Only a deck with
+   // an editor has the edit screen.
+   B32 is_editing;
+   B32 show_format; // edit screen: the list of what can be written is open
+
+   // A line of text shown for a few seconds: something saved, something
+   // refused. Always a string that lasts (a literal).
+   String8 notice;
+   U64     notice_us; // when it was set
+
+   // Closing with unsaved changes asks once, with a notice. This is set when
+   // it has: the next close quits.
+   B32 quit_warned;
 
    // A change of slide fades the old one out as the new one comes in.
    B32 fade_active;
