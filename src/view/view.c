@@ -200,7 +200,9 @@ struct _VIEW_Piece {
    String8      text;          // a part of the item's own text
    U32          style;
    U32          spaces_before; // 0: it goes on from the piece before, and is never parted from it
-   F32          width;
+   U32          code_span;     // code: which `...` it is in, counted from 1. 0: not code
+   F32          pad_before;    // code: room inside its box before the letters, at the start of a span
+   F32          width;         // the letters', with the room before and after them
 };
 
 typedef struct _VIEW_PieceList _VIEW_PieceList;
@@ -232,6 +234,10 @@ _VIEW_FontFromStyle(TXT_Fonts* fonts, U32 style) {
    return result;
 }
 
+// The room inside a code box, before and after its letters, as a part of the
+// text's size.
+#define _VIEW_CodePad 0.18f
+
 // Code is a little smaller: the letters of that font are wide.
 internal F32
 _VIEW_PxFromStyle(U32 style, F32 px) {
@@ -247,6 +253,7 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
    U64 piece_start = 0;
    B32 in_piece = 0;
    B32 is_first = 1;
+   U32 code_span = 0;
 
    // One past the end is gone through too, as a space: it ends the last
    // piece.
@@ -263,6 +270,7 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
             } else if (_VIEW_HasLater(text, i + 1, Str8Lit("`"))) {
                new_style |= _VIEW_Style_Code;
                skip = 1;
+               code_span += 1;
             }
          } else if (c == '*' && !(style & _VIEW_Style_Code) && i + 1 < text.size && text.str[i + 1] == '*') {
             if (style & _VIEW_Style_Bold) {
@@ -281,6 +289,7 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
          piece->text = Str8Substr(text, R1U64(piece_start, i));
          piece->style = style;
          piece->spaces_before = is_first ? 0 : spaces;
+         piece->code_span = (style & _VIEW_Style_Code) ? code_span : 0;
          piece->width = TXT_Width(_VIEW_FontFromStyle(fonts, style), _VIEW_PxFromStyle(style, px), piece->text);
          SLLQueuePush(result.first, result.last, piece);
          in_piece = 0;
@@ -299,6 +308,21 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
             piece_start = i;
          }
          i += 1;
+      }
+   }
+
+   // A code span's box reaches a little past its letters at each end, and that
+   // room is part of the width, so the words beside it are not touched.
+   F32 pad = px * _VIEW_CodePad;
+   for (_VIEW_Piece *piece = result.first, *prev = 0; piece != 0; prev = piece, piece = piece->next) {
+      if (piece->code_span != 0) {
+         if (prev == 0 || prev->code_span != piece->code_span) {
+            piece->pad_before = pad;
+            piece->width += pad;
+         }
+         if (piece->next == 0 || piece->next->code_span != piece->code_span) {
+            piece->width += pad;
+         }
       }
    }
 
@@ -336,36 +360,35 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
       }
 
       if (do_draw) {
+         // Every piece stands on the regular font's baseline, whatever its
+         // font and size. A code box reaches from a little above a capital
+         // to a little under the baseline, around the letters of the line.
+         F32     baseline = TXT_Baseline(fonts->regular, px);
+         F32     cap_h = TXT_CapHeight(fonts->regular, px);
+         F32     box_top = y + baseline - cap_h * 1.32f;
+         F32     box_bottom = y + baseline + cap_h * 0.42f;
+         Vec4F32 box_color = _VIEW_Faded(colors->body, alpha * 0.13f);
+
          F32 piece_x = centered ? x + (max_width - line_w) * 0.5f : x;
-         for (_VIEW_Piece* piece = line_first; piece != line_end; piece = piece->next) {
-            if (piece != line_first) {
+         for (_VIEW_Piece *piece = line_first, *prev = 0; piece != line_end; prev = piece, piece = piece->next) {
+            // The space between two words of one piece of code is code too:
+            // the box goes on under it, one box under them all.
+            F32 box_x = piece_x;
+            if (prev != 0) {
                F32 gap_w = space_width * (F32)piece->spaces_before;
-               // The space between two words of code is code too: one box
-               // under them all.
-               if (gap_w != 0 && (piece->style & _VIEW_Style_Code)) {
-                  B32 prev_is_code = 0;
-                  for (_VIEW_Piece* prev = line_first; prev != piece; prev = prev->next) {
-                     prev_is_code = !!(prev->style & _VIEW_Style_Code);
-                  }
-                  if (prev_is_code) {
-                     Core_D_Rect(R2F32P(piece_x, y + line_height * 0.08f, piece_x + gap_w, y + line_height * 0.94f),
-                                 R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, alpha * 0.13f));
-                  }
-               }
                piece_x += gap_w;
+               if (piece->code_span == 0 || prev->code_span != piece->code_span) {
+                  box_x = piece_x;
+               }
             }
 
             FNT_Tag font = _VIEW_FontFromStyle(fonts, piece->style);
             F32     piece_px = _VIEW_PxFromStyle(piece->style, px);
-            F32     piece_y = y;
-            if (piece->style & _VIEW_Style_Code) {
-               Core_D_Rect(R2F32P(piece_x, y + line_height * 0.08f, piece_x + piece->width, y + line_height * 0.94f),
-                           R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, alpha * 0.13f));
-               // Smaller, and a different font: put where its letters stand
-               // on the line the others do, near enough.
-               piece_y = y + (line_height - TXT_LineHeight(font, piece_px)) * 0.5f;
+            F32     piece_y = y + baseline - TXT_Baseline(font, piece_px);
+            if (piece->code_span != 0) {
+               Core_D_Rect(R2F32P(box_x, box_top, piece_x + piece->width, box_bottom), R2F32P(0, 0, 1, 1), box_color);
             }
-            TXT_Draw(font, piece_px, V2F32(piece_x, piece_y), color, piece->text);
+            TXT_Draw(font, piece_px, V2F32(piece_x + piece->pad_before, piece_y), color, piece->text);
             piece_x += piece->width;
          }
          widest = Max(widest, line_w);

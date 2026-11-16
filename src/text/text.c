@@ -119,6 +119,36 @@ TXT_Width(FNT_Tag font, F32 px, String8 string) {
    return result;
 }
 
+// The font cache draws a run into a bitmap round(ascent + descent + line gap)
+// + 1 pixels tall, with the baseline round(descent) + round(line gap) above
+// its bottom (rad\font_provider\dwrite\font_provider_dwrite.c, fp_raster).
+// TXT_Draw puts the top of that bitmap at the position it is given.
+internal F32
+TXT_Baseline(FNT_Tag font, F32 px) {
+   F32 result = 0;
+
+   if (_TXT_FontIsValid(font)) {
+      FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, _TXT_PointsFromPx(px));
+      F32         k = 96.0f / 72.0f;
+      F32         bitmap_h = (F32)(S32)(k * (metrics.ascent + metrics.descent + metrics.line_gap) + 0.5f) + 1.0f;
+      result = bitmap_h - (F32)(S32)(k * metrics.descent + 0.5f) - (F32)(S32)(k * metrics.line_gap + 0.5f);
+   }
+
+   return result;
+}
+
+internal F32
+TXT_CapHeight(FNT_Tag font, F32 px) {
+   F32 result = 0;
+
+   if (_TXT_FontIsValid(font)) {
+      FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, _TXT_PointsFromPx(px));
+      result = metrics.capital_height * (96.0f / 72.0f);
+   }
+
+   return result;
+}
+
 internal void
 TXT_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string) {
    if (_TXT_FontIsValid(font) && string.size != 0) {

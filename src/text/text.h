@@ -31,6 +31,13 @@ internal TXT_Fonts TXT_OpenFonts(void);
 
 internal F32 TXT_LineHeight(FNT_Tag font, F32 px);
 internal F32 TXT_Width(FNT_Tag font, F32 px, String8 string);
+// How far below the position TXT_Draw is given the letters stand: their
+// baseline, in whole pixels, as the font cache rasterizes them. Two fonts or
+// sizes on one line line up when their positions differ by the difference of
+// this.
+internal F32 TXT_Baseline(FNT_Tag font, F32 px);
+// The height of a capital letter above the baseline.
+internal F32 TXT_CapHeight(FNT_Tag font, F32 px);
 internal void TXT_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string);
 
 // The string cut into lines no wider than max_width, broken at spaces. Each
