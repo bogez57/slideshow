@@ -5,7 +5,8 @@
 // layer's .c, in dependency order. bgz itself is not compiled here - it is
 // bgz.dll (src\bgz\build.bat), linked through bin\bgz.lib.
 //
-//    bin\slideshow.exe            shows data\slides
+//    bin\slideshow.exe            opens the deck that was open last. The
+//                                 first time, the open screen, to pick one
 //    bin\slideshow.exe <folder>   shows the images in that folder - or its
 //                                 slides.md, if it has one
 //    bin\slideshow.exe <image>    shows the images in that image's folder,
@@ -15,16 +16,15 @@
 //                                 editing, beside a preview. The file need
 //                                 not exist yet
 //
+// Nothing has to be given: Ctrl+O is the open screen (frame_open.c), where a
+// deck is picked or a new one started.
+//
 // Keys are in frame.c (presenting), frame_edit.c and editor\editor.c (editing).
 
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <stdio.h>
 #include <stdlib.h>
-
-// The folder shown when none is given, relative to where the program is
-// started from.
-#define DEFAULT_SLIDES_FOLDER "data\\slides"
 
 // bgz lib
 #include "bgz_inc.h"
@@ -49,6 +49,7 @@
 #include "view/view.c"
 #include "editor/editor.c"
 #include "frame_edit.c"
+#include "frame_open.c"
 #include "frame.c"
 
 ////////////////////////////////
@@ -131,12 +132,21 @@ _EntryPoint(CmdLine* cmdline) {
    app_state.fonts = TXT_OpenFonts();
 
    // What to show: the first thing on the command line that is not an
-   // option - a folder, an image or a text deck - or the default.
-   String8 path = Str8Lit(DEFAULT_SLIDES_FOLDER);
+   // option - a folder, an image or a text deck. With nothing there, the
+   // deck that was open last. And with no such deck - the first run - an
+   // empty one, under the open screen.
+   FR_LoadRecents(&app_state);
    if (cmdline->inputs.first != 0) {
-      path = cmdline->inputs.first->string;
+      FR_OpenPath(&app_state, cmdline->inputs.first->string);
+   } else if (app_state.recents.count != 0) {
+      Temp    scratch = ScratchBegin(0, 0);
+      String8 last = PushStr8Copy(scratch.arena, app_state.recents.v[0]); // opening it makes the list again
+      FR_OpenPath(&app_state, last);
+      ScratchEnd(scratch);
+   } else {
+      app_state.deck = DECK_OpenFolder(Str8Zero());
+      OPEN_Show(&app_state);
    }
-   FR_OpenPath(&app_state, path);
 
    // UseDefaultPosition: where Windows puts a new window - only the rect's
    // size is used.

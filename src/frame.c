@@ -43,11 +43,125 @@ FR_RequestQuit(App_State* app_state) {
    }
 }
 
+internal String8
+FR_WholePath(Arena* arena, String8 path) {
+   B32 is_whole = ((path.size >= 2 && path.str[1] == ':') ||
+                   (path.size >= 1 && (path.str[0] == '\\' || path.str[0] == '/')));
+
+   String8 result = {0};
+   if (is_whole) {
+      result = PushStr8Copy(arena, path);
+   } else {
+      Temp    scratch = ScratchBegin(&arena, 1);
+      String8 start = GetCurrentPath(scratch.arena);
+      while (start.size > 0 && (start.str[start.size - 1] == '\\' || start.str[start.size - 1] == '/')) {
+         start.size -= 1;
+      }
+      // "." and ".\\name" are the folder itself and name in it.
+      while (path.size >= 1 && path.str[0] == '.' &&
+             (path.size == 1 || path.str[1] == '\\' || path.str[1] == '/')) {
+         path = Str8Skip(path, Min(path.size, 2));
+      }
+      result = (path.size != 0) ? PushStr8F(arena, "%S\\%S", start, path) : PushStr8Copy(arena, start);
+      ScratchEnd(scratch);
+   }
+
+   for (U64 i = 0; i < result.size; i += 1) {
+      if (result.str[i] == '/') {
+         result.str[i] = '\\';
+      }
+   }
+   // No \ at the end - but a drive's own folder keeps its one: C:\ .
+   while (result.size > 3 && result.str[result.size - 1] == '\\') {
+      result.size -= 1;
+   }
+
+   return result;
+}
+
+////////////////////////////////
+//~ bgz: the decks opened lately
+
+// How many are kept.
+#define _FR_RECENTS_MAX 8
+
+// Beside the program, so that it goes where the program goes and is found
+// wherever the program is started from.
+internal String8
+_FR_RecentsFilePath(Arena* arena) {
+   return PushStr8F(arena, "%S\\slideshow_recent.txt", GetProcessInfo()->binary_path);
+}
+
 internal void
+FR_LoadRecents(App_State* app_state) {
+   if (app_state->recents_arena == 0) {
+      app_state->recents_arena = ArenaAlloc();
+   }
+   Arena* arena = app_state->recents_arena;
+   ArenaClear(arena);
+
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 data = DataFromFilePath(scratch.arena, _FR_RecentsFilePath(scratch.arena));
+
+   // A path a line. Ones that are no longer there are left out.
+   String8List paths = {0};
+   U64         pos = 0;
+   while (pos < data.size && paths.node_count < _FR_RECENTS_MAX) {
+      U64 line_start = pos;
+      while (pos < data.size && data.str[pos] != '\n') pos += 1;
+      String8 line = Str8SkipChopWhitespace(Str8Substr(data, R1U64(line_start, pos)));
+      pos += 1;
+      if (line.size != 0 && FilePathExists(line)) {
+         Str8ListPush(arena, &paths, PushStr8Copy(arena, line));
+      }
+   }
+   app_state->recents = Str8ArrayFromList(arena, &paths);
+
+   ScratchEnd(scratch);
+}
+
+// Puts path first among the decks opened lately, and writes them out.
+internal void
+_FR_RememberRecent(App_State* app_state, String8 path) {
+   if (app_state->recents_arena == 0) {
+      app_state->recents_arena = ArenaAlloc();
+   }
+   Temp scratch = ScratchBegin(0, 0);
+
+   // The new list is put together apart from the old, which is in the arena
+   // the new one is about to have.
+   String8List paths = {0};
+   Str8ListPush(scratch.arena, &paths, FR_WholePath(scratch.arena, path));
+   for (U64 i = 0; i < app_state->recents.count && paths.node_count < _FR_RECENTS_MAX; i += 1) {
+      if (!Str8Match(app_state->recents.v[i], paths.first->string, StringMatchFlag_CaseInsensitive)) {
+         Str8ListPush(scratch.arena, &paths, PushStr8Copy(scratch.arena, app_state->recents.v[i]));
+      }
+   }
+
+   String8List lines = {0};
+   for (String8Node* node = paths.first; node != 0; node = node->next) {
+      Str8ListPush(scratch.arena, &lines, node->string);
+      Str8ListPush(scratch.arena, &lines, Str8Lit("\n"));
+   }
+   // Not being able to write it loses only the list.
+   WriteDataToFilePath(_FR_RecentsFilePath(scratch.arena), Str8ListJoin(scratch.arena, &lines, 0));
+
+   Arena* arena = app_state->recents_arena;
+   ArenaClear(arena);
+   String8List kept = {0};
+   for (String8Node* node = paths.first; node != 0; node = node->next) {
+      Str8ListPush(arena, &kept, PushStr8Copy(arena, node->string));
+   }
+   app_state->recents = Str8ArrayFromList(arena, &kept);
+
+   ScratchEnd(scratch);
+}
+
+internal B32
 FR_OpenPath(App_State* app_state, String8 path) {
    if (app_state->editor != 0 && ED_HasUnsavedChanges(app_state->editor)) {
       FR_Notice(app_state, Str8Lit("Unsaved changes. Save (Ctrl+S) before opening something else."));
-      return;
+      return 0;
    }
 
    U64        first_slide = 0;
@@ -60,7 +174,7 @@ FR_OpenPath(App_State* app_state, String8 path) {
       printf("No images in %.*s\n", Str8VArg(path));
       FR_Notice(app_state, Str8Lit("Nothing to show there: no images, and not a text deck (.md, .txt)."));
       DECK_Close(deck);
-      return;
+      return 0;
    }
 
    printf("%llu slides in %.*s\n", (unsigned long long)deck->slide_count,
@@ -96,6 +210,15 @@ FR_OpenPath(App_State* app_state, String8 path) {
    app_state->fade_active = 1;
    app_state->fade_from_idx = deck->slide_count;
    app_state->fade_start_us = 0;
+
+   // Remembered, to be opened again at the next start - if it is there: a
+   // text deck that has not been saved yet is not.
+   String8 opened = is_text ? deck->file : deck->folder;
+   if (opened.size != 0 && FilePathExists(opened)) {
+      _FR_RememberRecent(app_state, opened);
+   }
+
+   return 1;
 }
 
 internal void
@@ -372,7 +495,7 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
    if (deck->slide_count == 0) {
       String8 lines[] = {
           Str8Lit("No slides"),
-          Str8Lit("Drop a folder of images, or a text deck (.md), on this window"),
+          Str8Lit("Ctrl+O opens a deck or starts a new one"),
       };
       F32     sizes[] = {40.0f * scale, 22.0f * scale};
       Vec4F32 colors[] = {V4F32(1, 1, 1, 0.9f), V4F32(1, 1, 1, 0.55f)};
@@ -432,6 +555,7 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
           {Str8Lit("H, F1"), Str8Lit("This list")},
           {Str8Lit("F5, Esc"), Str8Lit("Back to editing (a text deck)")},
           {Str8Lit("Esc"), Str8Lit("Leave fullscreen, or quit")},
+          {Str8Lit("Ctrl+O"), Str8Lit("Open another deck, or start a new one")},
           {Str8Lit("Drop a folder or file"), Str8Lit("Open it")},
       };
 
@@ -512,8 +636,16 @@ FrameWork(App_State* app_state) {
    // Before input: the edit screen measures text to know what a click is on.
    _FR_BeginText(app_state, window_dim);
 
+   // The open screen is over either screen, and while it is up the input is
+   // all its own.
+   if (!app_state->show_open && Core_WM_KeyPress(&app_state->events, app_state->window, WM_Modifier_Ctrl, WM_Key_O)) {
+      OPEN_Show(app_state);
+   }
+
    // Input can change which screen is up, so that is asked again for drawing.
-   if (app_state->is_editing) {
+   if (app_state->show_open) {
+      OPEN_Input(app_state, window_dim);
+   } else if (app_state->is_editing) {
       EDIT_Input(app_state, window_dim);
    } else {
       _FR_PresentInput(app_state);
@@ -531,6 +663,10 @@ FrameWork(App_State* app_state) {
       } else {
          _FR_DrawSlide(app_state, window_dim);
          _FR_DrawOverlays(app_state, window_dim);
+      }
+
+      if (app_state->show_open) {
+         OPEN_Draw(app_state, window_dim);
       }
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);

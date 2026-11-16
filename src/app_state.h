@@ -7,6 +7,24 @@
 #ifndef APP_STATE_H
 #define APP_STATE_H
 
+// A line of the open screen.
+typedef enum OPEN_RowKind {
+   OPEN_RowKind_Label,   // says what the rows under it are. Not to be clicked
+   OPEN_RowKind_Recent,  // a deck opened lately
+   OPEN_RowKind_Up,      // the folder this one is in
+   OPEN_RowKind_New,     // a new text deck, in this folder
+   OPEN_RowKind_Present, // this folder's pictures, as a deck
+   OPEN_RowKind_Folder,
+   OPEN_RowKind_Deck,    // a text deck in this folder
+} OPEN_RowKind;
+
+typedef struct OPEN_Row OPEN_Row;
+struct OPEN_Row {
+   OPEN_RowKind kind;
+   String8      label; // as shown
+   String8      path;  // what a click opens, or goes to
+};
+
 typedef struct App_State App_State;
 struct App_State {
    WM_Window    window;
@@ -63,6 +81,21 @@ struct App_State {
    // Closing with unsaved changes asks once, with a notice. This is set when
    // it has: the next close quits.
    B32 quit_warned;
+
+   // The open screen (frame_open.c): over whichever screen is up, the decks
+   // opened lately and what is in a folder, to pick a deck from.
+   B32          show_open;
+   Arena*       open_arena;      // open_folder and the rows
+   String8      open_folder;     // whole, from the drive. Empty: the list of drives
+   OPEN_Row*    open_rows;
+   U64          open_row_count;
+   U64          open_first_row;  // scrolled to
+   U64          open_scanned_us; // when the folder was last read. 0: read it now
+
+   // The decks opened lately, the latest first, as whole paths. Kept in a
+   // file beside the program from one run to the next (FR_LoadRecents).
+   Arena*       recents_arena;
+   String8Array recents;
 
    // A change of slide fades the old one out as the new one comes in.
    B32 fade_active;

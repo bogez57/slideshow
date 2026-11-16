@@ -39,7 +39,8 @@
 //    add a picture    drop an image on the window
 //    add a slide      click the + at the end of the row of small slides
 //    move a slide     Alt+Left earlier, Alt+Right later
-//    open             drop a folder or a text deck on the window
+//    open             Ctrl+O: the open screen (frame_open.c). Or drop a folder
+//                     or a text deck on the window
 //
 // The editor's own keys are in editor.c.
 
@@ -699,7 +700,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
       } else {
          String8 name = Str8SkipLastSlash(Str8(editor->file.str, editor->file.size));
          String8 left = PushStr8F(scratch.arena, "%S%s", name, ED_HasUnsavedChanges(editor) ? "  (not saved)" : "");
-         String8 right = Str8Lit("Ctrl+S save    F5 present");
+         String8 right = Str8Lit("Ctrl+O open    Ctrl+S save    F5 present");
          F32     right_w = TXT_Width(fonts->regular, layout.ui_px, right);
          TXT_Draw(fonts->regular, layout.ui_px, V2F32(layout.status.min.x + pad, status_y), color_text, left);
          TXT_Draw(fonts->regular, layout.ui_px, V2F32(layout.status.max.x - pad - right_w, status_y), color_dim, right);
