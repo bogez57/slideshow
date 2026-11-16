@@ -27,7 +27,9 @@
 // the deck's folder first if it is not there.
 //
 // The row of small slides under the preview is the whole deck: clicking one
-// moves the cursor to that slide's first line.
+// moves the cursor to that slide's first line, and the + at its end starts a
+// new slide after the one showing. Alt+Left and Alt+Right move the slide
+// showing a place earlier or later in the deck.
 //
 //    present          F5 (and F5 or Esc comes back)
 //    save             Ctrl+S
@@ -35,6 +37,8 @@
 //    fullscreen       F11 or Alt+Return. Esc leaves it
 //    pictures         click the picture line under Format. Esc closes the list
 //    add a picture    drop an image on the window
+//    add a slide      click the + at the end of the row of small slides
+//    move a slide     Alt+Left earlier, Alt+Right later
 //    open             drop a folder or a text deck on the window
 //
 // The editor's own keys are in editor.c.
@@ -80,6 +84,7 @@ struct _EDIT_Layout {
    Rng2F32 page;          // the slide, in the preview
    Rng2F32 caption;       // under the slide
    Rng2F32 thumbs;        // the row of small slides, along the bottom
+   Rng2F32 add_slide;     // the + at the row's right end
    Vec2F32 thumb_dim;     // the size of one
    F32     thumb_gap;     // between two
 
@@ -131,7 +136,12 @@ _EDIT_LayoutFromWindowDim(App_State* app_state, Vec2F32 window_dim) {
    result.thumb_gap = (F32)(S32)(10.0f * ui);
    F32 thumbs_y = window_dim.y - pad * 0.6f - result.thumb_dim.y;
    if (window_dim.x - pad > left_w + pad && thumbs_y > 0) {
-      result.thumbs = R2F32P(left_w + pad, thumbs_y, window_dim.x - pad, thumbs_y + result.thumb_dim.y);
+      // The + has the right end, and the small slides what is left of it.
+      F32 add_w = (F32)(S32)(result.thumb_dim.y * 0.6f);
+      F32 add_x = Max(window_dim.x - pad - add_w, left_w + pad);
+      result.add_slide = R2F32P(add_x, thumbs_y, window_dim.x - pad, thumbs_y + result.thumb_dim.y);
+      result.thumbs = R2F32P(left_w + pad, thumbs_y, Max(add_x - result.thumb_gap, left_w + pad),
+                             thumbs_y + result.thumb_dim.y);
    }
 
    Rng2F32 page_room = R2F32P(left_w + pad, pad, window_dim.x - pad, thumbs_y - caption_h);
@@ -171,6 +181,112 @@ _EDIT_ThumbRect(_EDIT_Layout* layout, U64 slide_count, U64 slide_showing, U64 sl
          F32 x = (F32)(S32)(layout->thumbs.min.x + step * (F32)(slide_idx - first));
          result = R2F32P(x, layout->thumbs.min.y, x + layout->thumb_dim.x, layout->thumbs.max.y);
       }
+   }
+
+   return result;
+}
+
+////////////////////////////////
+//~ bgz: slides, as pieces of the text
+//
+// A slide's piece of the text is from its text_pos to the next slide's: its
+// # Title or --- line and everything under it. The first slide's begins at
+// the text's beginning, whatever is there. The deck has to be of the text as
+// it is: FR_SyncDeck first.
+
+internal Rng1U64
+_EDIT_TextRangeFromSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
+   Rng1U64 result = R1U64(0, editor->size);
+   if (slide_idx < deck->slide_count) {
+      if (slide_idx != 0) {
+         result.min = Min(deck->slides[slide_idx].text_pos, editor->size);
+      }
+      if (slide_idx + 1 < deck->slide_count) {
+         result.max = Clamp(result.min, deck->slides[slide_idx + 1].text_pos, editor->size);
+      }
+   }
+   return result;
+}
+
+// Starts a slide after slide_idx - or the deck's first, if it has none -
+// with its title selected, to be typed over.
+internal void
+_EDIT_AddSlideAfter(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
+   U64     at = _EDIT_TextRangeFromSlide(editor, deck, slide_idx).max;
+   String8 text = ED_Text(editor);
+   Temp    scratch = ScratchBegin(0, 0);
+
+   // On a line of its own: the slide before may end without a line ending,
+   // and the slide after has to start on its own line too.
+   B32     needs_line_before = (at > 0 && text.str[at - 1] != '\n');
+   String8 added = PushStr8F(scratch.arena, "%s# Title\n", needs_line_before ? "\n" : "");
+   ED_ReplaceRange(editor, at, at, added);
+
+   U64 title_start = at + (needs_line_before ? 1 : 0) + 2;
+   ED_SetCursor(editor, title_start + 5);
+   editor->mark = title_start;
+
+   ScratchEnd(scratch);
+}
+
+// Moves slide_idx a place later in the deck, or earlier: its piece of the
+// text and its neighbour's change places, as one step to undo. The cursor
+// stays where it was in the slide. 0 if there is no place to move it to.
+internal B32
+_EDIT_MoveSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx, B32 to_later) {
+   B32 result = 0;
+
+   // Either way two slides next to each other change places: first, second.
+   U64 first_idx = to_later ? slide_idx : slide_idx - 1;
+   if (slide_idx < deck->slide_count && (to_later ? slide_idx + 1 < deck->slide_count : slide_idx > 0)) {
+      Temp    scratch = ScratchBegin(0, 0);
+      String8 text = ED_Text(editor);
+      Rng1U64 first_range = _EDIT_TextRangeFromSlide(editor, deck, first_idx);
+      Rng1U64 second_range = _EDIT_TextRangeFromSlide(editor, deck, first_idx + 1);
+      String8 first = Str8Substr(text, first_range);
+      String8 second = Str8Substr(text, second_range);
+
+      // The deck's first slide can start without a # Title or a --- : there
+      // is nothing before it to be told from. Anywhere else it would be read
+      // as more of the slide before, so it is given a --- to start with.
+      B32 first_starts_itself = 0;
+      for (U64 i = 0; i < first.size; i += 1) {
+         if (first.str[i] != ' ' && first.str[i] != '\t' && first.str[i] != '\n') {
+            first_starts_itself = (first.str[i] == '#' || first.str[i] == '-');
+            if (first.str[i] == '-') {
+               // A --- line, and not a bullet.
+               U64 dash_count = 0;
+               while (i + dash_count < first.size && first.str[i + dash_count] == '-') dash_count += 1;
+               U64 after = i + dash_count;
+               while (after < first.size && (first.str[after] == ' ' || first.str[after] == '\t')) after += 1;
+               first_starts_itself = (dash_count >= 3 && (after == first.size || first.str[after] == '\n'));
+            } else if (first.str[i] == '#') {
+               // A # Title, and not a ## Heading.
+               first_starts_itself = !(i + 1 < first.size && first.str[i + 1] == '#');
+            }
+            break;
+         }
+      }
+      if (first.size == 0) {
+         first_starts_itself = 1;
+      }
+
+      // The second can be the text's last line, with no line ending.
+      B32     second_needs_line_end = (second.size != 0 && second.str[second.size - 1] != '\n');
+      String8 middle = PushStr8F(scratch.arena, "%s%s", second_needs_line_end ? "\n" : "",
+                                 first_starts_itself ? "" : "---\n");
+      String8 swapped = PushStr8F(scratch.arena, "%S%S%S", second, middle, first);
+
+      // Where the cursor was in the slide that was asked to be moved.
+      Rng1U64 moved_range = to_later ? first_range : second_range;
+      U64     in_slide = Clamp(moved_range.min, editor->cursor, moved_range.max) - moved_range.min;
+      U64     moved_start = to_later ? first_range.min + second.size + middle.size : first_range.min;
+
+      ED_ReplaceRange(editor, first_range.min, second_range.max, swapped);
+      ED_SetCursor(editor, moved_start + in_slide);
+
+      ScratchEnd(scratch);
+      result = 1;
    }
 
    return result;
@@ -413,6 +529,27 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       }
    }
 
+   //- bgz: slides added and moved
+   {
+      B32 move_earlier = Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Left);
+      B32 move_later = Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Right);
+      B32 add = _EDIT_ClickIn(app_state, layout.add_slide);
+      if (move_earlier || move_later || add) {
+         // The deck as the text is now: something above may have changed it.
+         FR_SyncDeck(app_state);
+         U64 slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
+         if (add) {
+            _EDIT_AddSlideAfter(editor, app_state->deck, slide_idx);
+         } else if (!_EDIT_MoveSlide(editor, app_state->deck, slide_idx, move_later)) {
+            FR_Notice(app_state, move_later ? Str8Lit("This is the last slide already")
+                                            : Str8Lit("This is the first slide already"));
+         }
+         editor->last_input_us = NowTimeUS();
+         FR_SyncDeck(app_state);
+         app_state->slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
+      }
+   }
+
    //- bgz: the row of small slides: a click goes to the slide
    {
       DECK_Deck* deck = app_state->deck;
@@ -586,8 +723,8 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          // pictures of slides far from this one.
          IMG_Image* image = DECK_ImageFromSlide(deck, app_state->slide_idx);
          VIEW_DrawSlide(app_state->frame_arena, fonts, &deck->slides[app_state->slide_idx], image, layout.page, 1.0f);
-         caption = PushStr8F(scratch.arena, "Slide %llu of %llu", (unsigned long long)(app_state->slide_idx + 1),
-                             (unsigned long long)deck->slide_count);
+         caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Alt+Left / Alt+Right moves it",
+                             (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count);
       } else {
          // No slides yet: how to make the first.
          String8 lines[] = {
@@ -635,6 +772,23 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          VIEW_DrawSlide(app_state->frame_arena, fonts, &deck->slides[i], DECK_LoadedImageFromSlide(deck, i), rect,
                         is_showing ? 1.0f : 0.8f);
       }
+   }
+
+   //- bgz: the + that adds a slide
+   if (layout.add_slide.max.x > layout.add_slide.min.x) {
+      B32 is_hot = Contains2F32(layout.add_slide, mouse);
+      Core_D_Rect(layout.add_slide, R2F32P(0, 0, 1, 1), is_hot ? V4F32(1, 1, 1, 0.16f) : V4F32(1, 1, 1, 0.07f));
+
+      // Drawn, not written: a + of two bars, in the middle.
+      Vec2F32 dim = Dim2F32(layout.add_slide);
+      F32     middle_x = (F32)(S32)(layout.add_slide.min.x + dim.x * 0.5f);
+      F32     middle_y = (F32)(S32)(layout.add_slide.min.y + dim.y * 0.5f);
+      F32     arm = (F32)(S32)(Min(dim.x, dim.y) * 0.22f);
+      F32     half = Max(1.0f, (F32)(S32)(1.5f * ui));
+      Core_D_Rect(R2F32P(middle_x - arm, middle_y - half, middle_x + arm, middle_y + half), R2F32P(0, 0, 1, 1),
+                  is_hot ? color_text : color_dim);
+      Core_D_Rect(R2F32P(middle_x - half, middle_y - arm, middle_x + half, middle_y + arm), R2F32P(0, 0, 1, 1),
+                  is_hot ? color_text : color_dim);
    }
 
    ScratchEnd(scratch);
