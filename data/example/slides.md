@@ -31,7 +31,7 @@ Two # make a heading, which belongs to the slide it is on.
 
 # A picture beside the text
 
-![](../slides/slide1.png)
+![](hills.png)
 
 - ![](path) puts a picture on the slide
 - The path is found from the text file's folder
@@ -40,11 +40,11 @@ Two # make a heading, which belongs to the slide it is on.
 
 # A picture under a title
 
-![](../slides/slide2.jpg)
+![](bars.jpg)
 
 ---
 
-![](../slides/slide3.png)
+![](circles.png)
 
 # A lot on one slide
 
