@@ -18,6 +18,10 @@ exported WM_SystemInfo*  Core_WM_GetSystemInfo(void);
 exported WM_Window       Core_WM_WindowOpen(Rng2F32 rect, WM_WindowFlags flags, String8 title);
 exported void            Core_WM_WindowFirstPaint(WM_Window window);
 
+// Closes a window the app opened. Its render equipment is the app's to let go
+// of first (Core_R_WindowUnequip).
+exported void            Core_WM_WindowClose(WM_Window window);
+
 // Brings the window to the front with the keyboard. Windows only allows it when
 // this program was given the right - by being started from the program in
 // front, or by that program calling AllowOtherProcessToTakeFocus.

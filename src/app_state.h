@@ -51,6 +51,16 @@ struct App_State {
    B32 show_notes; // the slide's notes and what comes next, along the bottom
    B32 show_help; // the list of keys
 
+   // The presenter's window (frame_presenter.c): a second window, for the
+   // screen only whoever presents sees, with the slide, the one after it,
+   // the notes and how long it has been. Opened and closed by the main loop
+   // between frames, when a frame sets toggle_presenter.
+   B32       toggle_presenter;
+   B32       presenter_open;
+   WM_Window presenter_window;
+   R_Handle  presenter_window_eqp;
+   U64       presenter_started_us; // what its clock counts from
+
    // What is logged (LogInfoF, LogUserErrorF) is gathered a frame at a time
    // and written to local\logs\slideshow_log.txt beside the program, and to
    // the console (FR_WriteLogs).

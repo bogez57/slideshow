@@ -86,4 +86,18 @@ internal void OPEN_Show(App_State* app_state);
 internal void OPEN_Input(App_State* app_state, Vec2F32 window_dim);
 internal void OPEN_Build(App_State* app_state, Vec2F32 window_dim);
 
+//- bgz: the presenter's window (frame_presenter.c)
+
+// Opens the window if it is closed and closes it if it is open. Between
+// frames only (main.c).
+internal void PRES_Toggle(App_State* app_state);
+
+// Takes the window's events off this frame's: its close, and its keys, which
+// become the main window's so that either window drives the slides.
+internal void PRES_Input(App_State* app_state);
+
+// Draws the window. Inside its own Core_R_WindowBeginFrame and
+// Core_R_WindowEndFrame, after FrameWork.
+internal void PRES_Draw(App_State* app_state);
+
 #endif // FRAME_H

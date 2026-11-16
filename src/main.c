@@ -68,6 +68,7 @@
 #include "editor/editor.c"
 #include "frame_edit.c"
 #include "frame_open.c"
+#include "frame_presenter.c"
 #include "frame.c"
 
 ////////////////////////////////
@@ -99,6 +100,14 @@ _Main_RunFrame(App_State* app_state) {
    FrameWork(app_state);
 
    Core_R_WindowEndFrame(app_state->window, app_state->window_eqp);
+
+   // The presenter's window, if it is open: a frame of its own, with what
+   // FrameWork left showing.
+   if (app_state->presenter_open) {
+      Core_R_WindowBeginFrame(app_state->presenter_window, app_state->presenter_window_eqp);
+      PRES_Draw(app_state);
+      Core_R_WindowEndFrame(app_state->presenter_window, app_state->presenter_window_eqp);
+   }
    Core_R_EndFrame();
 
    g_frame_running = 0;
@@ -221,11 +230,21 @@ _EntryPoint(CmdLine* cmdline) {
          Core_WM_WindowSetFullscreen(app_state.window, !Core_WM_WindowIsFullscreen(app_state.window));
       }
 
+      // Also between frames: a window is not opened or closed while one of
+      // its frames is being drawn.
+      if (app_state.toggle_presenter) {
+         app_state.toggle_presenter = 0;
+         PRES_Toggle(&app_state);
+      }
+
       ArenaClear(app_state.frame_arena);
    }
 
    g_repaint_app_state = 0;
 
+   if (app_state.presenter_open) {
+      PRES_Toggle(&app_state);
+   }
    if (app_state.deck_watch != 0) {
       FileWatchClose(app_state.deck_watch);
    }

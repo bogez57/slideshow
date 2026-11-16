@@ -375,6 +375,8 @@ FR_SyncDeck(App_State* app_state) {
 //    fullscreen       F, F11 or Alt+Return. Esc leaves it
 //    slide number     I
 //    notes            N: the slide's @note lines and what comes next
+//    presenter view   V: a second window with the slide, the next one, the
+//                     notes and a clock (frame_presenter.c)
 //    this list        H or F1
 //    edit             F5 or Esc, for a text deck: back to the edit screen
 //    open             drop a folder, an image or a text deck (.md, .txt) on the
@@ -412,6 +414,9 @@ _FR_PresentInput(App_State* app_state) {
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_N)) {
       app_state->show_notes = !app_state->show_notes;
+   }
+   if (Core_WM_KeyPress(events, window, 0, WM_Key_V)) {
+      app_state->toggle_presenter = 1;
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_H) || Core_WM_KeyPress(events, window, 0, WM_Key_F1)) {
       app_state->show_help = !app_state->show_help;
@@ -711,6 +716,7 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
           {Str8Lit("F, F11, Alt+Enter"), Str8Lit("Fullscreen")},
           {Str8Lit("I"), Str8Lit("Slide number")},
           {Str8Lit("N"), Str8Lit("Notes, and what comes next")},
+          {Str8Lit("V"), Str8Lit("Presenter view, in a second window")},
           {Str8Lit("H, F1"), Str8Lit("This list")},
           {Str8Lit("F5, Esc"), Str8Lit("Back to editing (a text deck)")},
           {Str8Lit("Esc"), Str8Lit("Leave fullscreen, or quit")},
@@ -1070,6 +1076,13 @@ FrameWork(App_State* app_state) {
 
    // Before input: the edit screen measures text to know what a click is on.
    _FR_BeginText(app_state, window_dim);
+
+   // The presenter's window is for presenting: it goes when the text comes
+   // back. Its keys are made the main window's before anything reads them.
+   PRES_Input(app_state);
+   if (app_state->presenter_open && app_state->is_editing) {
+      app_state->toggle_presenter = 1;
+   }
 
    // The open screen is over either screen, and while it is up the input is
    // all its own.

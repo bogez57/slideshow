@@ -71,6 +71,11 @@ Core_WM_WindowSetMinimized(WM_Window window, B32 minimized) {
    wm_window_set_minimized(window, minimized);
 }
 
+exported void
+Core_WM_WindowClose(WM_Window window) {
+   wm_window_close(window);
+}
+
 exported B32
 Core_WM_WindowIsFullscreen(WM_Window window) {
    B32 result = wm_window_is_fullscreen(window);
