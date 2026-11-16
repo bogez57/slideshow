@@ -48,19 +48,8 @@ struct R_Sokol_D3D11State {
    IDXGIAdapter*         dxgi_adapter;
    IDXGIFactory2*        dxgi_factory;
 
-   // frame buffer (main buffer that will get displayed. Attached to swapchain)
-   ID3D11Texture2D*        framebuffer;
-   ID3D11RenderTargetView* framebuffer_rtv;
-
-   // swapchain
-   IDXGISwapChain1* d3d11_swapchain;
-
-   // Signalled when the swap chain can take another frame without queueing
-   // it behind one not yet shown. Core_R_WaitForFrame waits on it before the
-   // app reads input, so the wait for vsync comes before the keys are read
-   // rather than after the frame is built. 0 if the system has no
-   // IDXGISwapChain2; Present then throttles as it always did.
-   HANDLE frame_latency_waitable;
+   // The swap chain, its backbuffer and its waitable are each window's own:
+   // see R_Sokol_Window.
 };
 
 // Forward declare
@@ -110,8 +99,24 @@ struct R_Sokol_State {
    R_Sokol_Tex2D* first_tex2d;
 };
 
+// One per equipped window (Core_R_WindowEquip), so a program can draw to more
+// than one. The R_Handle an equip returns points at one of these.
 typedef struct R_Sokol_Window R_Sokol_Window;
 struct R_Sokol_Window {
+   B32 in_use;
+
+   // swapchain, and its frame buffer (what gets displayed)
+   IDXGISwapChain1*        d3d11_swapchain;
+   ID3D11Texture2D*        framebuffer;
+   ID3D11RenderTargetView* framebuffer_rtv;
+
+   // Signalled when the swap chain can take another frame without queueing
+   // it behind one not yet shown. Core_R_WaitForFrame waits on it before the
+   // app reads input, so the wait for vsync comes before the keys are read
+   // rather than after the frame is built. 0 if the system has no
+   // IDXGISwapChain2; Present then throttles as it always did.
+   HANDLE frame_latency_waitable;
+
    sg_swapchain sokol_swapchain;
 
    // rjf: staging buffer
@@ -153,7 +158,8 @@ typedef struct R_Sokol_Uniforms {
 // Globals
 local_persist R_Sokol_State*      _sokol_state;
 local_persist R_Sokol_D3D11State* _d3d11_state;
-local_persist R_Sokol_Window      _window; // global window for now
+#define R_SOKOL_WINDOW_CAP 8
+local_persist R_Sokol_Window      _windows[R_SOKOL_WINDOW_CAP];
 local_persist Arena*              _frame_arena;
 local_persist S64                 _frame;
 
@@ -306,6 +312,16 @@ R_Handle Core_R_Sokol_HandleFromBuffer(R_Sokol_Buffer* buffer) {
    R_Handle handle = {0};
    handle.u64[0] = (U64)buffer;
    return handle;
+}
+
+// A zero handle is the first window, for callers from before there could be
+// more than one.
+static R_Sokol_Window* _R_SokolWindowFromHandle(R_Handle handle) {
+   R_Sokol_Window* r_window = (R_Sokol_Window*)handle.u64[0];
+   if (r_window == 0) {
+      r_window = &_windows[0];
+   }
+   return r_window;
 }
 
 void Core_R_Init(CmdLine* cmdline) {
@@ -755,7 +771,21 @@ void Core_R_Init(CmdLine* cmdline) {
 }
 
 R_Handle Core_R_WindowEquip(WM_Window window) {
-   R_Handle res = {0};
+   R_Handle        res = {0};
+   R_Sokol_Window* r_window = 0;
+   for (U64 i = 0; i < R_SOKOL_WINDOW_CAP; i += 1) {
+      if (!_windows[i].in_use) {
+         r_window = &_windows[i];
+         break;
+      }
+   }
+   if (r_window == 0) {
+      sh_message(1, str8_lit("Fatal Error"), str8_lit("Too many windows equipped for rendering. The process is terminating."));
+      abort_self(1);
+   }
+   MemoryZeroStruct(r_window);
+   r_window->in_use = 1;
+   res.u64[0] = (U64)r_window;
 
    //- rjf: map os window handle -> hwnd
    HWND hwnd = {0};
@@ -782,7 +812,7 @@ R_Handle Core_R_WindowEquip(WM_Window window) {
       swapchain_desc.Flags |= DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
    }
 
-   HRESULT error = _d3d11_state->dxgi_factory->lpVtbl->CreateSwapChainForHwnd(_d3d11_state->dxgi_factory, (IUnknown*)_d3d11_state->device, hwnd, &swapchain_desc, 0, 0, &_d3d11_state->d3d11_swapchain);
+   HRESULT error = _d3d11_state->dxgi_factory->lpVtbl->CreateSwapChainForHwnd(_d3d11_state->dxgi_factory, (IUnknown*)_d3d11_state->device, hwnd, &swapchain_desc, 0, 0, &r_window->d3d11_swapchain);
    if (FAILED(error)) {
       char buffer[256] = {0};
       raddbg_snprintf(buffer, sizeof(buffer), "DXGI swap chain creation failure (%lx). The process is terminating.", error);
@@ -795,11 +825,11 @@ R_Handle Core_R_WindowEquip(WM_Window window) {
    // device's SetMaximumFrameLatency above.
    {
       IDXGISwapChain2* swapchain2 = 0;
-      HRESULT          qi = _d3d11_state->d3d11_swapchain->lpVtbl->QueryInterface(_d3d11_state->d3d11_swapchain, &IID_IDXGISwapChain2, (void**)&swapchain2);
+      HRESULT          qi = r_window->d3d11_swapchain->lpVtbl->QueryInterface(r_window->d3d11_swapchain, &IID_IDXGISwapChain2, (void**)&swapchain2);
 
       if (SUCCEEDED(qi) && swapchain2 != 0) {
          swapchain2->lpVtbl->SetMaximumFrameLatency(swapchain2, 1);
-         _d3d11_state->frame_latency_waitable = swapchain2->lpVtbl->GetFrameLatencyWaitableObject(swapchain2);
+         r_window->frame_latency_waitable = swapchain2->lpVtbl->GetFrameLatencyWaitableObject(swapchain2);
          swapchain2->lpVtbl->Release(swapchain2);
       }
    }
@@ -827,32 +857,77 @@ R_Handle Core_R_WindowEquip(WM_Window window) {
    _d3d11_state->dxgi_factory->lpVtbl->MakeWindowAssociation(_d3d11_state->dxgi_factory, hwnd, DXGI_MWA_NO_ALT_ENTER);
 
    //- rjf: create framebuffer & view
-   error = _d3d11_state->d3d11_swapchain->lpVtbl->GetBuffer(_d3d11_state->d3d11_swapchain, 0, &IID_ID3D11Texture2D, (void**)&_d3d11_state->framebuffer);
-   Assert(SUCCEEDED(error) && _d3d11_state->framebuffer);
-   error = _d3d11_state->device->lpVtbl->CreateRenderTargetView(_d3d11_state->device, (ID3D11Resource*)_d3d11_state->framebuffer, NULL, &_d3d11_state->framebuffer_rtv);
-   Assert(SUCCEEDED(error) && _d3d11_state->framebuffer_rtv);
+   error = r_window->d3d11_swapchain->lpVtbl->GetBuffer(r_window->d3d11_swapchain, 0, &IID_ID3D11Texture2D, (void**)&r_window->framebuffer);
+   Assert(SUCCEEDED(error) && r_window->framebuffer);
+   error = _d3d11_state->device->lpVtbl->CreateRenderTargetView(_d3d11_state->device, (ID3D11Resource*)r_window->framebuffer, NULL, &r_window->framebuffer_rtv);
+   Assert(SUCCEEDED(error) && r_window->framebuffer_rtv);
 
-   Core_R_SetDebugName(_d3d11_state->framebuffer, "bgz swapchain backbuffer");
-   Core_R_SetDebugName(_d3d11_state->framebuffer_rtv, "bgz swapchain backbuffer rtv");
+   Core_R_SetDebugName(r_window->framebuffer, "bgz swapchain backbuffer");
+   Core_R_SetDebugName(r_window->framebuffer_rtv, "bgz swapchain backbuffer rtv");
 
    // Get width/height of framebuffer
    D3D11_TEXTURE2D_DESC bb_desc = {0};
-   _d3d11_state->framebuffer->lpVtbl->GetDesc(_d3d11_state->framebuffer, &bb_desc);
+   r_window->framebuffer->lpVtbl->GetDesc(r_window->framebuffer, &bb_desc);
    UINT frame_buffer_width = bb_desc.Width;
    UINT frame_buffer_height = bb_desc.Height;
 
    // Create sokol swapchain
-   _window.sokol_swapchain = (sg_swapchain){
+   r_window->sokol_swapchain = (sg_swapchain){
        .width = frame_buffer_width,
        .height = frame_buffer_height,
        .sample_count = swapchain_desc.SampleDesc.Count,
        .color_format = SG_PIXELFORMAT_BGRA8,
        .d3d11 = {
            .resolve_view = 0,
-           .render_view = _d3d11_state->framebuffer_rtv,
+           .render_view = r_window->framebuffer_rtv,
        }};
 
    return res;
+}
+
+// Lets go of what Core_R_WindowEquip made for the window: its stage image, its
+// backbuffer and its swap chain. Before the OS window itself is closed, and
+// between frames.
+static void _R_SokolWindowRelease(R_Sokol_Window* r_window) {
+   if (!r_window->in_use) {
+      return;
+   }
+
+   if (r_window->stage_image_write_view.id) {
+      sg_destroy_view(r_window->stage_image_write_view);
+   }
+   if (r_window->stage_image_read_view.id) {
+      sg_destroy_view(r_window->stage_image_read_view);
+   }
+   if (r_window->stage_image.id) {
+      sg_destroy_image(r_window->stage_image);
+   }
+
+   // Nothing may still have the backbuffer bound when it goes.
+   ID3D11DeviceContext1* ctx = _d3d11_state->device_ctx;
+   ctx->lpVtbl->OMSetRenderTargets(ctx, 0, 0, 0);
+   ctx->lpVtbl->ClearState(ctx);
+   ctx->lpVtbl->Flush(ctx);
+   sg_reset_state_cache();
+
+   // The view goes before the texture it views.
+   D3D11_SAFE_RELEASE(r_window->framebuffer_rtv);
+   D3D11_SAFE_RELEASE(r_window->framebuffer);
+   if (r_window->frame_latency_waitable != 0) {
+      CloseHandle(r_window->frame_latency_waitable);
+      r_window->frame_latency_waitable = 0;
+   }
+   D3D11_SAFE_RELEASE(r_window->d3d11_swapchain);
+
+   MemoryZeroStruct(r_window);
+}
+
+void Core_R_WindowUnequip(WM_Window window, R_Handle window_equip) {
+   UnusedVariable(window);
+   if (window_equip.u64[0] == 0) {
+      return;
+   }
+   _R_SokolWindowRelease(_R_SokolWindowFromHandle(window_equip));
 }
 
 sg_pixel_format _R_Tex2DFormatToSokolPixelFormat(R_Tex2DFormat fmt) {
@@ -1134,9 +1209,23 @@ void Core_R_BeginFrame(void) {
 // Without it Present does the waiting, after the frame is built, and every
 // key waits one more frame. The timeout keeps a minimized or occluded window,
 // whose frames are never shown, from stopping the loop.
+//
+// With more than one window, every one of their swap chains: each is presented
+// once a frame, and one not waited on would make its Present do the waiting.
 void Core_R_WaitForFrame(void) {
-   if (_d3d11_state != 0 && _d3d11_state->frame_latency_waitable != 0) {
-      WaitForSingleObjectEx(_d3d11_state->frame_latency_waitable, 100, TRUE);
+   if (_d3d11_state == 0) {
+      return;
+   }
+   HANDLE waitables[R_SOKOL_WINDOW_CAP];
+   DWORD  waitable_count = 0;
+   for (U64 i = 0; i < R_SOKOL_WINDOW_CAP; i += 1) {
+      if (_windows[i].in_use && _windows[i].frame_latency_waitable != 0) {
+         waitables[waitable_count] = _windows[i].frame_latency_waitable;
+         waitable_count += 1;
+      }
+   }
+   if (waitable_count != 0) {
+      WaitForMultipleObjectsEx(waitable_count, waitables, TRUE, 100, TRUE);
    }
 }
 
@@ -1175,8 +1264,7 @@ void Core_R_EndFrame(void) {
 // upon window resizing or intial loop. Creating stage buffers also helps with effects
 // and compositing.
 void Core_R_WindowBeginFrame(WM_Window window, R_Handle window_equip) {
-   UnusedVariable(window_equip);
-   R_Sokol_Window* r_window = &_window;
+   R_Sokol_Window* r_window = _R_SokolWindowFromHandle(window_equip);
 
    // No LogScopeBegin here, and no matching End in Core_R_WindowEndFrame.
    //
@@ -1218,27 +1306,27 @@ void Core_R_WindowBeginFrame(WM_Window window, R_Handle window_equip) {
       ctx->lpVtbl->Flush(ctx);
 
       // rjf: resize d3d11 swapchain & main framebuffer
-      _d3d11_state->framebuffer_rtv->lpVtbl->Release(_d3d11_state->framebuffer_rtv);
-      _d3d11_state->framebuffer->lpVtbl->Release(_d3d11_state->framebuffer);
+      r_window->framebuffer_rtv->lpVtbl->Release(r_window->framebuffer_rtv);
+      r_window->framebuffer->lpVtbl->Release(r_window->framebuffer);
       // The same flags the swap chain was made with: ResizeBuffers fails if the
       // waitable flag is added or dropped.
       UINT resize_flags = (_d3d11_state->allow_tearing) ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
       resize_flags |= DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
-      HRESULT hr = _d3d11_state->d3d11_swapchain->lpVtbl->ResizeBuffers(_d3d11_state->d3d11_swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, resize_flags);
+      HRESULT hr = r_window->d3d11_swapchain->lpVtbl->ResizeBuffers(r_window->d3d11_swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, resize_flags);
       AssertHR(hr);
-      hr = _d3d11_state->d3d11_swapchain->lpVtbl->GetBuffer(_d3d11_state->d3d11_swapchain, 0, &IID_ID3D11Texture2D, (void**)(&_d3d11_state->framebuffer));
+      hr = r_window->d3d11_swapchain->lpVtbl->GetBuffer(r_window->d3d11_swapchain, 0, &IID_ID3D11Texture2D, (void**)(&r_window->framebuffer));
       AssertHR(hr);
       D3D11_RENDER_TARGET_VIEW_DESC framebuffer_rtv_desc = {0};
       framebuffer_rtv_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
       framebuffer_rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-      hr = _d3d11_state->device->lpVtbl->CreateRenderTargetView(_d3d11_state->device, (ID3D11Resource*)_d3d11_state->framebuffer, &framebuffer_rtv_desc, &_d3d11_state->framebuffer_rtv);
+      hr = _d3d11_state->device->lpVtbl->CreateRenderTargetView(_d3d11_state->device, (ID3D11Resource*)r_window->framebuffer, &framebuffer_rtv_desc, &r_window->framebuffer_rtv);
       AssertHR(hr);
 
       // These are new objects, so the names from creation do not carry over.
       // This branch also runs on the very first frame, when the stored
       // resolution is still zero - which is why the originals never survive.
-      Core_R_SetDebugName(_d3d11_state->framebuffer, "bgz swapchain backbuffer");
-      Core_R_SetDebugName(_d3d11_state->framebuffer_rtv, "bgz swapchain backbuffer rtv");
+      Core_R_SetDebugName(r_window->framebuffer, "bgz swapchain backbuffer");
+      Core_R_SetDebugName(r_window->framebuffer_rtv, "bgz swapchain backbuffer rtv");
 
       // Reallocate and resize staging image
       UINT frame_buffer_width = 0;
@@ -1246,7 +1334,7 @@ void Core_R_WindowBeginFrame(WM_Window window, R_Handle window_equip) {
       {
          // Get width/height of framebuffer
          D3D11_TEXTURE2D_DESC bb_desc = {0};
-         _d3d11_state->framebuffer->lpVtbl->GetDesc(_d3d11_state->framebuffer, &bb_desc);
+         r_window->framebuffer->lpVtbl->GetDesc(r_window->framebuffer, &bb_desc);
          frame_buffer_width = bb_desc.Width;
          frame_buffer_height = bb_desc.Height;
          Assert(frame_buffer_width > 0 && frame_buffer_height > 0);
@@ -1289,7 +1377,7 @@ void Core_R_WindowBeginFrame(WM_Window window, R_Handle window_equip) {
       // Update sokol swapchain object
       r_window->sokol_swapchain.width = frame_buffer_width;
       r_window->sokol_swapchain.height = frame_buffer_height;
-      r_window->sokol_swapchain.d3d11.render_view = _d3d11_state->framebuffer_rtv;
+      r_window->sokol_swapchain.d3d11.render_view = r_window->framebuffer_rtv;
    }
 
    _frame_stats.resized = resize_done;
@@ -1301,7 +1389,7 @@ void Core_R_WindowBeginFrame(WM_Window window, R_Handle window_equip) {
 
 void Core_R_WindowEndFrame(WM_Window window, R_Handle window_equip) {
    UnusedVariable(window);
-   UnusedVariable(window_equip);
+   R_Sokol_Window* r_window = _R_SokolWindowFromHandle(window_equip);
    sg_end_pass();
 
    { // Begin final pass to framebuffer for display
@@ -1310,7 +1398,7 @@ void Core_R_WindowEndFrame(WM_Window window, R_Handle window_equip) {
               .colors[0] = {
                   .load_action = SG_LOADACTION_LOAD}},
 
-          .swapchain = _window.sokol_swapchain,
+          .swapchain = r_window->sokol_swapchain,
 
           //.label = "Final frame buffer pass"
       });
@@ -1322,7 +1410,7 @@ void Core_R_WindowEndFrame(WM_Window window, R_Handle window_equip) {
 
       // set bindings
       sg_bindings bind = {0};
-      bind.views[0] = _window.stage_image_read_view;
+      bind.views[0] = r_window->stage_image_read_view;
       bind.samplers[0] = _sokol_state->linear_sampler;
       sg_apply_bindings(&bind);
 
@@ -1339,7 +1427,7 @@ void Core_R_WindowEndFrame(WM_Window window, R_Handle window_equip) {
       present_flags |= DXGI_PRESENT_ALLOW_TEARING;
    }
    U64 present_begin_us = now_time_us();
-   HRESULT result = IDXGISwapChain_Present(_d3d11_state->d3d11_swapchain, _d3d11_state->vsync, present_flags);
+   HRESULT result = IDXGISwapChain_Present(r_window->d3d11_swapchain, _d3d11_state->vsync, present_flags);
    AssertHR(result);
 
    U64 end_us = now_time_us();
@@ -1636,13 +1724,20 @@ void Core_R_Shutdown(void) {
 
    // Release the objects we created ourselves. The view goes before the texture
    // it views, so the count it holds is gone before we drop ours.
-   D3D11_SAFE_RELEASE(_d3d11_state->framebuffer_rtv);
-   D3D11_SAFE_RELEASE(_d3d11_state->framebuffer);
-   if (_d3d11_state->frame_latency_waitable != 0) {
-      CloseHandle(_d3d11_state->frame_latency_waitable);
-      _d3d11_state->frame_latency_waitable = 0;
+   for (U64 i = 0; i < R_SOKOL_WINDOW_CAP; i += 1) {
+      R_Sokol_Window* r_window = &_windows[i];
+      if (!r_window->in_use) {
+         continue;
+      }
+      D3D11_SAFE_RELEASE(r_window->framebuffer_rtv);
+      D3D11_SAFE_RELEASE(r_window->framebuffer);
+      if (r_window->frame_latency_waitable != 0) {
+         CloseHandle(r_window->frame_latency_waitable);
+         r_window->frame_latency_waitable = 0;
+      }
+      D3D11_SAFE_RELEASE(r_window->d3d11_swapchain);
+      MemoryZeroStruct(r_window);
    }
-   D3D11_SAFE_RELEASE(_d3d11_state->d3d11_swapchain);
    D3D11_SAFE_RELEASE(_d3d11_state->dxgi_factory);
    D3D11_SAFE_RELEASE(_d3d11_state->dxgi_adapter);
    D3D11_SAFE_RELEASE(_d3d11_state->dxgi_device);
@@ -1693,8 +1788,10 @@ void _SokolTraceHookCallBack_BeginPass(const sg_pass* pass, void* user_data) {
          sg_image img = sg_query_view_image(v);
 
          // 3) Identify which offscreen target (compare sg_image ids you own)
-         if (img.id == _window.stage_image.id) {
-            active_buffer = str8_lit("stage image");
+         for (U64 i = 0; i < R_SOKOL_WINDOW_CAP; i += 1) {
+            if (_windows[i].in_use && img.id == _windows[i].stage_image.id) {
+               active_buffer = str8_lit("stage image");
+            }
          }
 
          // 4) Query size (note: this is base size, not mip-adjusted)
