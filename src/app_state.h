@@ -46,6 +46,15 @@ struct App_State {
    B32 is_editing;
    B32 show_format; // edit screen: the list of what can be written is open
 
+   // Edit screen: the list of pictures to pick from, open in place of the
+   // format panel's lines. The names are of the files in the deck's folder,
+   // looked up again every so often while the list is open.
+   B32          show_pictures;
+   Arena*       pictures_arena;
+   String8Array pictures;
+   U64          pictures_scanned_us;
+   U64          pictures_first_row; // scrolled to
+
    // A line of text shown for a few seconds: something saved, something
    // refused. Always a string that lasts (a literal).
    String8 notice;

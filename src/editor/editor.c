@@ -433,6 +433,17 @@ ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start, U64 select_en
 }
 
 internal void
+ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string) {
+   start = Min(start, editor->size);
+   end = Clamp(start, end, editor->size);
+
+   _ED_BeforeEdit(editor, ED_EditKind_Other);
+   _ED_Splice(editor, start, end, string);
+   editor->cursor = start + string.size;
+   editor->mark = editor->cursor;
+}
+
+internal void
 ED_SetCursor(ED_Editor* editor, U64 pos) {
    editor->cursor = Min(pos, editor->size);
    editor->mark = editor->cursor;

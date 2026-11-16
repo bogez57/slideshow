@@ -13,19 +13,29 @@
 //    +---------------------------+     +------------------+     |
 //    |  Format: what can be      |        Slide 3 of 9          |
 //    |  written, a line each     |                              |
-//    +---------------------------+                              |
-//    |  status                   |                              |
+//    +---------------------------+   [1] [2] [3] [4] [5] ...    |
+//    |  status                   |   every slide, small         |
 //    +---------------------------+------------------------------+
 //
 // The Format panel is how the format is learned without leaving the program:
 // every kind of line there is, as it is written, with what it does. Clicking
 // one writes it into the text at the cursor, ready to be typed over.
 //
+// Clicking the picture line there opens, in the panel's place, the list of
+// the pictures in the deck's folder: clicking one puts it on the slide.
+// Dropping an image file on the window does the same, copying the file into
+// the deck's folder first if it is not there.
+//
+// The row of small slides under the preview is the whole deck: clicking one
+// moves the cursor to that slide's first line.
+//
 //    present          F5 (and F5 or Esc comes back)
 //    save             Ctrl+S
 //    format panel     F1 opens and closes it
 //    fullscreen       F11 or Alt+Return. Esc leaves it
-//    open             drop a folder, an image or a text deck on the window
+//    pictures         click the picture line under Format. Esc closes the list
+//    add a picture    drop an image on the window
+//    open             drop a folder or a text deck on the window
 //
 // The editor's own keys are in editor.c.
 
@@ -39,6 +49,7 @@ struct _EDIT_FormatRow {
    String8 insert;       // what a click writes
    U64     select_start; // the part of insert left selected, to type over
    U64     select_end;
+   B32     opens_pictures; // a click opens the list of pictures instead
 };
 
 global _EDIT_FormatRow _edit_format_rows[] = {
@@ -47,7 +58,7 @@ global _EDIT_FormatRow _edit_format_rows[] = {
     {Str8LitComp("## Heading"), Str8LitComp("a heading inside the slide"), Str8LitComp("## Heading"), 3, 10},
     {Str8LitComp("- point"), Str8LitComp("a bullet. Tab moves it in, Shift+Tab out"), Str8LitComp("- point"), 2, 7},
     {Str8LitComp("  - point"), Str8LitComp("an inner bullet: two more spaces in front"), Str8LitComp("  - point"), 4, 9},
-    {Str8LitComp("![](picture.png)"), Str8LitComp("the slide's picture, from this file's folder"), Str8LitComp("![](picture.png)"), 4, 15},
+    {Str8LitComp("![](picture.png)"), Str8LitComp("the slide's picture. Click to pick one"), Str8LitComp("![](picture.png)"), 4, 15, 1},
     {Str8LitComp("Any other line"), Str8LitComp("a paragraph. An empty line adds room"), Str8LitComp("Text"), 0, 4},
 };
 
@@ -68,6 +79,9 @@ struct _EDIT_Layout {
    Rng2F32 preview;       // the right side, all of it
    Rng2F32 page;          // the slide, in the preview
    Rng2F32 caption;       // under the slide
+   Rng2F32 thumbs;        // the row of small slides, along the bottom
+   Vec2F32 thumb_dim;     // the size of one
+   F32     thumb_gap;     // between two
 
    F32 ui_px;   // the size of text that is not the editor's
    F32 mono_px; // the editor's
@@ -109,9 +123,18 @@ _EDIT_LayoutFromWindowDim(App_State* app_state, Vec2F32 window_dim) {
    result.status = R2F32P(0, status_y, left_w, window_dim.y);
 
    result.preview = R2F32P(left_w, 0, window_dim.x, window_dim.y);
-   F32     pad = 28.0f * ui;
-   F32     caption_h = 40.0f * ui;
-   Rng2F32 page_room = R2F32P(left_w + pad, pad, window_dim.x - pad, window_dim.y - pad - caption_h);
+   F32 pad = 28.0f * ui;
+   F32 caption_h = 40.0f * ui;
+
+   result.thumb_dim.y = (F32)(S32)(76.0f * ui);
+   result.thumb_dim.x = (F32)(S32)(result.thumb_dim.y * VIEW_PAGE_W / VIEW_PAGE_H);
+   result.thumb_gap = (F32)(S32)(10.0f * ui);
+   F32 thumbs_y = window_dim.y - pad * 0.6f - result.thumb_dim.y;
+   if (window_dim.x - pad > left_w + pad && thumbs_y > 0) {
+      result.thumbs = R2F32P(left_w + pad, thumbs_y, window_dim.x - pad, thumbs_y + result.thumb_dim.y);
+   }
+
+   Rng2F32 page_room = R2F32P(left_w + pad, pad, window_dim.x - pad, thumbs_y - caption_h);
    if (page_room.max.x > page_room.min.x && page_room.max.y > page_room.min.y) {
       result.page = VIEW_PageRectFromRect(page_room);
       result.caption = R2F32P(result.page.min.x, result.page.max.y, result.page.max.x, result.page.max.y + caption_h);
@@ -124,6 +147,129 @@ internal Rng2F32
 _EDIT_FormatRowRect(_EDIT_Layout* layout, U64 row_idx) {
    F32 y = layout->format_rows.min.y + 4.0f * layout->ui + layout->format_row_h * (F32)row_idx;
    return R2F32P(layout->format_rows.min.x, y, layout->format_rows.max.x, y + layout->format_row_h);
+}
+
+// Where a slide's small picture is in the row. With more slides than fit, the
+// row shows the ones around the slide showing - as far as the ends of the
+// deck allow - and always whole ones. A slide that is not in the row gets a
+// zero rect.
+internal Rng2F32
+_EDIT_ThumbRect(_EDIT_Layout* layout, U64 slide_count, U64 slide_showing, U64 slide_idx) {
+   Rng2F32 result = {0};
+
+   F32 step = layout->thumb_dim.x + layout->thumb_gap;
+   F32 row_w = Dim2F32(layout->thumbs).x;
+   if (row_w >= layout->thumb_dim.x && step > 0) {
+      U64 fit_count = (U64)((row_w + layout->thumb_gap) / step);
+      U64 first = 0;
+      if (slide_count > fit_count) {
+         first = (slide_showing > fit_count / 2) ? slide_showing - fit_count / 2 : 0;
+         first = Min(first, slide_count - fit_count);
+      }
+
+      if (slide_idx >= first && slide_idx < first + fit_count) {
+         F32 x = (F32)(S32)(layout->thumbs.min.x + step * (F32)(slide_idx - first));
+         result = R2F32P(x, layout->thumbs.min.y, x + layout->thumb_dim.x, layout->thumbs.max.y);
+      }
+   }
+
+   return result;
+}
+
+////////////////////////////////
+//~ bgz: pictures
+
+// How often the folder is looked in again while the list is open.
+#define _EDIT_PICTURES_SCAN_SECONDS 1.0f
+
+internal void
+_EDIT_ScanPictures(App_State* app_state) {
+   if (app_state->pictures_arena == 0) {
+      app_state->pictures_arena = ArenaAlloc();
+   }
+   ArenaClear(app_state->pictures_arena);
+   app_state->pictures = DECK_PictureNamesFromFolder(app_state->pictures_arena, app_state->deck->folder);
+   app_state->pictures_scanned_us = NowTimeUS();
+
+   U64 row_count = ArrayCount(_edit_format_rows);
+   U64 max_first = (app_state->pictures.count > row_count) ? app_state->pictures.count - row_count : 0;
+   app_state->pictures_first_row = Min(app_state->pictures_first_row, max_first);
+}
+
+// Makes name the picture of the slide the cursor is on: in place of the
+// picture line the slide has, if it has one, else on a new line at the
+// cursor. A slide shows only its first picture, so a second line would do
+// nothing.
+internal void
+_EDIT_PutPicture(App_State* app_state, String8 name) {
+   ED_Editor* editor = app_state->editor;
+   DECK_Deck* deck = app_state->deck;
+   String8    text = ED_Text(editor);
+   Temp       scratch = ScratchBegin(0, 0);
+   String8    line = PushStr8F(scratch.arena, "![](%S)", name);
+
+   // The slide's part of the text. The deck is from the text as it was at
+   // the last FR_SyncDeck, which is this frame's or the last's: positions
+   // are kept inside the text as it is now.
+   U64 slide_start = 0;
+   U64 slide_end = text.size;
+   if (deck->slide_count != 0) {
+      U64 slide_idx = DECK_SlideFromTextPos(deck, editor->cursor);
+      slide_start = Min(deck->slides[slide_idx].text_pos, text.size);
+      if (slide_idx + 1 < deck->slide_count) {
+         slide_end = Min(deck->slides[slide_idx + 1].text_pos, text.size);
+      }
+   }
+
+   // Its first line that starts with ![ - spaces before it aside.
+   B32 found = 0;
+   U64 pos = slide_start;
+   while (pos < slide_end && !found) {
+      U64 line_start = pos;
+      while (pos < slide_end && text.str[pos] != '\n') pos += 1;
+      U64 line_end = pos;
+      pos += 1;
+
+      U64 first = line_start;
+      while (first < line_end && text.str[first] == ' ') first += 1;
+      if (first + 1 < line_end && text.str[first] == '!' && text.str[first + 1] == '[') {
+         ED_ReplaceRange(editor, line_start, line_end, line);
+         found = 1;
+      }
+   }
+   if (!found) {
+      ED_InsertLine(editor, line, line.size, line.size);
+   }
+   editor->last_input_us = NowTimeUS();
+
+   ScratchEnd(scratch);
+}
+
+// An image file dropped on the window: it becomes the slide's picture. A
+// file from somewhere else is copied into the deck's folder first, so the
+// deck and its pictures stay together - unless a file of that name is there
+// already, and then that one is used.
+internal void
+_EDIT_DropPicture(App_State* app_state, String8 path) {
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 name = Str8SkipLastSlash(path);
+   String8 in_folder = PushStr8F(scratch.arena, "%S\\%S", app_state->deck->folder, name);
+
+   B32 is_there = FilePathExists(in_folder);
+   if (!is_there) {
+      is_there = CopyFilePath(in_folder, path);
+      if (is_there) {
+         FR_Notice(app_state, Str8Lit("Picture copied into the deck's folder"));
+      } else {
+         FR_Notice(app_state, Str8Lit("Could not copy the picture into the deck's folder"));
+      }
+   }
+   if (is_there) {
+      _EDIT_PutPicture(app_state, name);
+      app_state->pictures_scanned_us = 0; // the list, if open, is out of date
+   }
+
+   ScratchEnd(scratch);
 }
 
 ////////////////////////////////
@@ -153,11 +299,18 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       if (event->kind == WM_EventKind_WindowClose) {
          FR_RequestQuit(app_state);
       }
-      // Of several things dropped at once, the first is opened.
+      // Of several things dropped at once, the first is used. An image is a
+      // picture for the slide. Anything else is a deck to open.
       if (event->kind == WM_EventKind_FileDrop && event->strings.first != 0) {
-         FR_OpenPath(app_state, event->strings.first->string);
-         if (!app_state->is_editing) {
-            return;
+         String8 path = event->strings.first->string;
+         B32     is_folder = !!(PropertiesFromFilePath(path).flags & FilePropertyFlag_IsFolder);
+         if (!is_folder && IMG_NameIsImage(path)) {
+            _EDIT_DropPicture(app_state, path);
+         } else {
+            FR_OpenPath(app_state, path);
+            if (!app_state->is_editing) {
+               return;
+            }
          }
       }
    }
@@ -171,12 +324,23 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
        Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Return)) {
       app_state->toggle_fullscreen = 1;
    }
-   if (Core_WM_KeyPress(events, window, 0, WM_Key_Esc) && is_fullscreen) {
-      app_state->toggle_fullscreen = 1;
+   // Esc closes what is open: the list of pictures, then fullscreen.
+   if (Core_WM_KeyPress(events, window, 0, WM_Key_Esc)) {
+      if (app_state->show_pictures) {
+         app_state->show_pictures = 0;
+      } else if (is_fullscreen) {
+         app_state->toggle_fullscreen = 1;
+      }
    }
 
+   // The header closes the list of pictures if that is what is open, else
+   // opens and closes the panel.
    if (Core_WM_KeyPress(events, window, 0, WM_Key_F1) || _EDIT_ClickIn(app_state, layout.format_header)) {
-      app_state->show_format = !app_state->show_format;
+      if (app_state->show_pictures) {
+         app_state->show_pictures = 0;
+      } else {
+         app_state->show_format = !app_state->show_format;
+      }
       layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
    }
 
@@ -197,13 +361,67 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
 
    B32 present_pressed = Core_WM_KeyPress(events, window, 0, WM_Key_F5);
 
-   //- bgz: the format panel: a click writes the line
-   if (app_state->show_format) {
-      for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
+   //- bgz: the panel: the list of pictures, or the format's lines
+   U64 panel_row_count = ArrayCount(_edit_format_rows);
+   if (app_state->show_format && app_state->show_pictures) {
+      U64 scan_us = (U64)(_EDIT_PICTURES_SCAN_SECONDS * 1000000.0f);
+      if (NowTimeUS() - app_state->pictures_scanned_us >= scan_us) {
+         _EDIT_ScanPictures(app_state);
+      }
+
+      // The wheel, over the list, moves through it a row a notch.
+      if (Contains2F32(layout.format_rows, Core_WM_MouseFromWindow(window))) {
+         WM_Event* next_event = 0;
+         for (WM_Event* event = events->first; event != 0; event = next_event) {
+            next_event = event->next;
+            if (event->kind == WM_EventKind_Scroll) {
+               U64 max_first = (app_state->pictures.count > panel_row_count) ? app_state->pictures.count - panel_row_count : 0;
+               if (event->delta.y > 0 && app_state->pictures_first_row < max_first) {
+                  app_state->pictures_first_row += 1;
+               } else if (event->delta.y < 0 && app_state->pictures_first_row > 0) {
+                  app_state->pictures_first_row -= 1;
+               }
+               Core_WM_EatEvent(events, event);
+            }
+         }
+      }
+
+      // A click on a name puts that picture on the slide, and closes the list.
+      for (U64 i = 0; i < panel_row_count; i += 1) {
+         U64 picture_idx = app_state->pictures_first_row + i;
+         if (_EDIT_ClickIn(app_state, _EDIT_FormatRowRect(&layout, i)) && picture_idx < app_state->pictures.count) {
+            _EDIT_PutPicture(app_state, app_state->pictures.v[picture_idx]);
+            app_state->show_pictures = 0;
+            break;
+         }
+      }
+   } else if (app_state->show_format) {
+      // A click writes the line - or, on the picture line, opens the list.
+      for (U64 i = 0; i < panel_row_count; i += 1) {
          if (_EDIT_ClickIn(app_state, _EDIT_FormatRowRect(&layout, i))) {
             _EDIT_FormatRow* row = &_edit_format_rows[i];
-            ED_InsertLine(editor, row->insert, row->select_start, row->select_end);
+            if (row->opens_pictures) {
+               app_state->show_pictures = 1;
+               app_state->pictures_first_row = 0;
+               _EDIT_ScanPictures(app_state);
+            } else {
+               ED_InsertLine(editor, row->insert, row->select_start, row->select_end);
+               editor->last_input_us = NowTimeUS();
+            }
+            break;
+         }
+      }
+   }
+
+   //- bgz: the row of small slides: a click goes to the slide
+   {
+      DECK_Deck* deck = app_state->deck;
+      for (U64 i = 0; i < deck->slide_count; i += 1) {
+         Rng2F32 rect = _EDIT_ThumbRect(&layout, deck->slide_count, app_state->slide_idx, i);
+         if (rect.max.x > rect.min.x && _EDIT_ClickIn(app_state, rect)) {
+            ED_SetCursor(editor, Min(deck->slides[i].text_pos, editor->size));
             editor->last_input_us = NowTimeUS();
+            break;
          }
       }
    }
@@ -259,9 +477,16 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                   header_is_hot ? V4F32(0.17f, 0.18f, 0.21f, 1.0f) : V4F32(0.14f, 0.15f, 0.17f, 1.0f));
 
       F32     header_y = layout.format_header.min.y + (Dim2F32(layout.format_header).y - text_h) * 0.5f;
-      String8 header_left = app_state->show_format ? Str8Lit("Format: click a line to write it into the text")
-                                                   : Str8Lit("Format: what can be written (click or F1 to open)");
-      String8 header_right = app_state->show_format ? Str8Lit("F1 closes") : Str8Lit("F1");
+      B32     shows_pictures = (app_state->show_format && app_state->show_pictures);
+      String8 header_left = Str8Lit("Format: what can be written (click or F1 to open)");
+      String8 header_right = Str8Lit("F1");
+      if (shows_pictures) {
+         header_left = Str8Lit("Pictures: click one to put it on this slide");
+         header_right = Str8Lit("Esc closes");
+      } else if (app_state->show_format) {
+         header_left = Str8Lit("Format: click a line to write it into the text");
+         header_right = Str8Lit("F1 closes");
+      }
       TXT_Draw(fonts->bold, layout.ui_px, V2F32(layout.format_header.min.x + pad, header_y), color_text, header_left);
       F32 header_right_w = TXT_Width(fonts->regular, layout.ui_px, header_right);
       TXT_Draw(fonts->regular, layout.ui_px, V2F32(layout.format_header.max.x - pad - header_right_w, header_y),
@@ -270,25 +495,60 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
       if (app_state->show_format) {
          Core_D_Rect(layout.format_rows, R2F32P(0, 0, 1, 1), V4F32(0.11f, 0.115f, 0.135f, 1.0f));
 
-         // What each does starts where the longest way of writing one ends.
          F32 mono_h = TXT_LineHeight(fonts->mono, layout.ui_px);
-         F32 syntax_w = 0;
-         for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
-            syntax_w = Max(syntax_w, TXT_Width(fonts->mono, layout.ui_px, _edit_format_rows[i].syntax));
-         }
+         U64 row_count = ArrayCount(_edit_format_rows);
 
-         for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
-            _EDIT_FormatRow* row = &_edit_format_rows[i];
-            Rng2F32          rect = _EDIT_FormatRowRect(&layout, i);
-            if (Contains2F32(rect, mouse)) {
-               Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.07f));
+         if (shows_pictures && app_state->pictures.count == 0) {
+            Rng2F32 rect = _EDIT_FormatRowRect(&layout, 0);
+            TXT_Draw(fonts->regular, layout.ui_px, V2F32(rect.min.x + pad, rect.min.y + (Dim2F32(rect).y - text_h) * 0.5f),
+                     color_dim, Str8Lit("No pictures in the deck's folder yet. Drop one on the window to add it."));
+         } else if (shows_pictures) {
+            //- bgz: the names of the folder's pictures, as many as there are rows
+            for (U64 i = 0; i < row_count; i += 1) {
+               U64 picture_idx = app_state->pictures_first_row + i;
+               if (picture_idx >= app_state->pictures.count) {
+                  break;
+               }
+               Rng2F32 rect = _EDIT_FormatRowRect(&layout, i);
+               if (Contains2F32(rect, mouse)) {
+                  Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.07f));
+               }
+               TXT_Draw(fonts->mono, layout.ui_px, V2F32(rect.min.x + pad, rect.min.y + (Dim2F32(rect).y - mono_h) * 0.5f),
+                        V4F32(0.60f, 0.85f, 0.60f, 1.0f), app_state->pictures.v[picture_idx]);
             }
-            F32 row_h = Dim2F32(rect).y;
-            TXT_Draw(fonts->mono, layout.ui_px, V2F32(rect.min.x + pad, rect.min.y + (row_h - mono_h) * 0.5f),
-                     color_syntax, row->syntax);
-            TXT_Draw(fonts->regular, layout.ui_px,
-                     V2F32(rect.min.x + pad + syntax_w + 18.0f * ui, rect.min.y + (row_h - text_h) * 0.5f), color_dim,
-                     row->what);
+
+            // More than fit: which of them these are, at the right of the
+            // first row, where a name would have to be very long to reach.
+            if (app_state->pictures.count > row_count) {
+               Rng2F32 rect = _EDIT_FormatRowRect(&layout, 0);
+               U64     last = Min(app_state->pictures_first_row + row_count, app_state->pictures.count);
+               String8 more = PushStr8F(scratch.arena, "%llu-%llu of %llu, wheel for more",
+                                        (unsigned long long)(app_state->pictures_first_row + 1), (unsigned long long)last,
+                                        (unsigned long long)app_state->pictures.count);
+               F32     more_w = TXT_Width(fonts->regular, layout.ui_px, more);
+               TXT_Draw(fonts->regular, layout.ui_px,
+                        V2F32(rect.max.x - pad - more_w, rect.min.y + (Dim2F32(rect).y - text_h) * 0.5f), color_dim, more);
+            }
+         } else {
+            // What each does starts where the longest way of writing one ends.
+            F32 syntax_w = 0;
+            for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
+               syntax_w = Max(syntax_w, TXT_Width(fonts->mono, layout.ui_px, _edit_format_rows[i].syntax));
+            }
+
+            for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
+               _EDIT_FormatRow* row = &_edit_format_rows[i];
+               Rng2F32          rect = _EDIT_FormatRowRect(&layout, i);
+               if (Contains2F32(rect, mouse)) {
+                  Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.07f));
+               }
+               F32 row_h = Dim2F32(rect).y;
+               TXT_Draw(fonts->mono, layout.ui_px, V2F32(rect.min.x + pad, rect.min.y + (row_h - mono_h) * 0.5f),
+                        color_syntax, row->syntax);
+               TXT_Draw(fonts->regular, layout.ui_px,
+                        V2F32(rect.min.x + pad + syntax_w + 18.0f * ui, rect.min.y + (row_h - text_h) * 0.5f), color_dim,
+                        row->what);
+            }
          }
       }
 
@@ -354,6 +614,26 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                   V2F32(layout.caption.min.x + (Dim2F32(layout.caption).x - caption_w) * 0.5f,
                         layout.caption.min.y + (Dim2F32(layout.caption).y - caption_text_h) * 0.5f),
                   color_dim, caption);
+      }
+   }
+
+   //- bgz: the row of small slides, the one showing with a frame around it
+   for (U64 i = 0; i < deck->slide_count; i += 1) {
+      Rng2F32 rect = _EDIT_ThumbRect(&layout, deck->slide_count, app_state->slide_idx, i);
+      if (rect.max.x > rect.min.x) {
+         B32 is_showing = (i == app_state->slide_idx);
+         if (is_showing || Contains2F32(rect, mouse)) {
+            F32 frame = (F32)(S32)(2.0f * ui);
+            Core_D_Rect(R2F32P(rect.min.x - frame, rect.min.y - frame, rect.max.x + frame, rect.max.y + frame),
+                        R2F32P(0, 0, 1, 1), is_showing ? color_syntax : V4F32(1, 1, 1, 0.35f));
+         }
+         Core_D_Rect(rect, R2F32P(0, 0, 1, 1), FR_COLOR_BACKGROUND);
+
+         // Only a picture that is loaded already is drawn: the slide showing
+         // and the ones next to it. Loading every picture of a long deck for
+         // its small slides would take the memory DECK_ImageFromSlide saves.
+         VIEW_DrawSlide(app_state->frame_arena, fonts, &deck->slides[i], DECK_LoadedImageFromSlide(deck, i), rect,
+                        is_showing ? 1.0f : 0.8f);
       }
    }
 

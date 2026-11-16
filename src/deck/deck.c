@@ -53,6 +53,63 @@ _DECK_CompareNames(String8 a, String8 b) {
    return a_left == b_left ? 0 : (a_left < b_left ? -1 : 1);
 }
 
+// Insertion sort: a folder of slides is small, and the file system mostly
+// hands them over in order already.
+internal void
+_DECK_SortNames(String8Array names) {
+   for (U64 i = 1; i < names.count; i += 1) {
+      String8 name = names.v[i];
+      U64     slot = i;
+      while (slot > 0 && _DECK_CompareNames(name, names.v[slot - 1]) < 0) {
+         names.v[slot] = names.v[slot - 1];
+         slot -= 1;
+      }
+      names.v[slot] = name;
+   }
+}
+
+internal String8Array
+DECK_PictureNamesFromFolder(Arena* arena, String8 folder) {
+   String8List names = {0};
+   Temp        scratch = ScratchBegin(&arena, 1);
+
+   if (folder.size != 0) {
+      // The folder's own images.
+      FileIter* it = FileIterBegin(scratch.arena, folder, FileIterFlag_SkipFolders | FileIterFlag_SkipHiddenFiles);
+      for (FileInfo info = {0}; FileIterNext(scratch.arena, it, &info);) {
+         if (IMG_NameIsImage(info.name)) {
+            Str8ListPush(arena, &names, PushStr8Copy(arena, info.name));
+         }
+      }
+      FileIterEnd(it);
+
+      // And those one folder down: a deck often keeps its pictures in one.
+      String8List sub_folders = {0};
+      it = FileIterBegin(scratch.arena, folder, FileIterFlag_SkipFiles | FileIterFlag_SkipHiddenFiles);
+      for (FileInfo info = {0}; FileIterNext(scratch.arena, it, &info);) {
+         Str8ListPush(scratch.arena, &sub_folders, PushStr8Copy(scratch.arena, info.name));
+      }
+      FileIterEnd(it);
+
+      for (String8Node* node = sub_folders.first; node != 0; node = node->next) {
+         String8 sub_folder = PushStr8F(scratch.arena, "%S\\%S", folder, node->string);
+         it = FileIterBegin(scratch.arena, sub_folder, FileIterFlag_SkipFolders | FileIterFlag_SkipHiddenFiles);
+         for (FileInfo info = {0}; FileIterNext(scratch.arena, it, &info);) {
+            if (IMG_NameIsImage(info.name)) {
+               Str8ListPush(arena, &names, PushStr8F(arena, "%S/%S", node->string, info.name));
+            }
+         }
+         FileIterEnd(it);
+      }
+   }
+
+   String8Array result = Str8ArrayFromList(arena, &names);
+   _DECK_SortNames(result);
+
+   ScratchEnd(scratch);
+   return result;
+}
+
 internal DECK_Deck*
 DECK_OpenFolder(String8 folder) {
    Arena*     arena = ArenaAlloc();
@@ -81,17 +138,7 @@ DECK_OpenFolder(String8 folder) {
 
       String8Array sorted = Str8ArrayFromList(scratch.arena, &names);
 
-      // Insertion sort: a folder of slides is small, and the file system
-      // mostly hands them over in order already.
-      for (U64 i = 1; i < sorted.count; i += 1) {
-         String8 name = sorted.v[i];
-         U64     slot = i;
-         while (slot > 0 && _DECK_CompareNames(name, sorted.v[slot - 1]) < 0) {
-            sorted.v[slot] = sorted.v[slot - 1];
-            slot -= 1;
-         }
-         sorted.v[slot] = name;
-      }
+      _DECK_SortNames(sorted);
 
       deck->slide_count = sorted.count;
       deck->slides = PushArray(arena, DECK_Slide, Max(sorted.count, 1));

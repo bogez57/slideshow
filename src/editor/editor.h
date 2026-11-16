@@ -120,6 +120,9 @@ internal void ED_Insert(ED_Editor* editor, String8 string, ED_EditKind kind);
 // cursor there.
 internal void ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start, U64 select_end);
 
+// Puts string in place of the text from start to end, and the cursor after it.
+internal void ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string);
+
 internal void ED_SetCursor(ED_Editor* editor, U64 pos);
 
 // Keys, typing and the mouse. Events it uses are eaten, so what the caller

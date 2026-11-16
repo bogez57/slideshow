@@ -114,6 +114,11 @@ internal DECK_Deck* DECK_OpenPath(String8 path, U64* first_slide_out);
 // Whether there is anything on the slide but its picture.
 internal B32 DECK_SlideHasText(DECK_Slide* slide);
 
+// The names of the image files in a folder and in the folders directly inside
+// it, as a slide's ![](...) line would name them from a text file there:
+// "hills.png", "pictures/bars.jpg". In order of name, on arena.
+internal String8Array DECK_PictureNamesFromFolder(Arena* arena, String8 folder);
+
 // Releases every image the deck has loaded, and the deck itself.
 internal void DECK_Close(DECK_Deck* deck);
 
