@@ -37,6 +37,8 @@
 //    @note Say this     a note for whoever presents, on the slide it is in: not
 //                       drawn on the slide, shown beside it on request
 //    anything else      a paragraph. Each line is its own
+//    **words**          in a paragraph or a bullet: drawn bold
+//    `words`            in a paragraph or a bullet: drawn as code (view.c)
 //    (an empty line)    a little more room before what follows
 //
 // A slide with only a title shows it large, in the middle. A slide with only

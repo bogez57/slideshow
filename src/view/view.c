@@ -175,6 +175,212 @@ _VIEW_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 
    return y;
 }
 
+////////////////////////////////
+//~ bgz: words in bold and in code
+//
+// In a paragraph or a bullet:
+//
+//    **these words**   are drawn bold
+//    `these`           in the font with every letter the same width, on a
+//                      faint box, as code is written. Inside, ** is only **
+//
+// The marks themselves are not drawn. One with no partner later in the line
+// is not a mark: it is drawn as written.
+
+enum {
+   _VIEW_Style_Bold = (1 << 0),
+   _VIEW_Style_Code = (1 << 1),
+};
+
+// A run of letters drawn alike, with no space in it. A word is one, or
+// several end to end where the look changes inside it.
+typedef struct _VIEW_Piece _VIEW_Piece;
+struct _VIEW_Piece {
+   _VIEW_Piece* next;
+   String8      text;          // a part of the item's own text
+   U32          style;
+   U32          spaces_before; // 0: it goes on from the piece before, and is never parted from it
+   F32          width;
+};
+
+typedef struct _VIEW_PieceList _VIEW_PieceList;
+struct _VIEW_PieceList {
+   _VIEW_Piece* first;
+   _VIEW_Piece* last;
+};
+
+internal B32
+_VIEW_HasLater(String8 text, U64 from, String8 mark) {
+   B32 result = 0;
+   for (U64 i = from; i + mark.size <= text.size; i += 1) {
+      if (MemoryMatch(text.str + i, mark.str, mark.size)) {
+         result = 1;
+         break;
+      }
+   }
+   return result;
+}
+
+internal FNT_Tag
+_VIEW_FontFromStyle(TXT_Fonts* fonts, U32 style) {
+   FNT_Tag result = fonts->regular;
+   if (style & _VIEW_Style_Code) {
+      result = fonts->mono;
+   } else if (style & _VIEW_Style_Bold) {
+      result = fonts->bold;
+   }
+   return result;
+}
+
+// Code is a little smaller: the letters of that font are wide.
+internal F32
+_VIEW_PxFromStyle(U32 style, F32 px) {
+   return (style & _VIEW_Style_Code) ? px * 0.9f : px;
+}
+
+internal _VIEW_PieceList
+_VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
+   _VIEW_PieceList result = {0};
+
+   U32 style = 0;
+   U32 spaces = 0;
+   U64 piece_start = 0;
+   B32 in_piece = 0;
+   B32 is_first = 1;
+
+   // One past the end is gone through too, as a space: it ends the last
+   // piece.
+   for (U64 i = 0; i <= text.size;) {
+      U8  c = (i < text.size) ? text.str[i] : ' ';
+      U32 new_style = style;
+      U64 skip = 0; // the length of a mark here. 0: a letter or a space
+
+      if (i < text.size) {
+         if (c == '`') {
+            if (style & _VIEW_Style_Code) {
+               new_style &= ~_VIEW_Style_Code;
+               skip = 1;
+            } else if (_VIEW_HasLater(text, i + 1, Str8Lit("`"))) {
+               new_style |= _VIEW_Style_Code;
+               skip = 1;
+            }
+         } else if (c == '*' && !(style & _VIEW_Style_Code) && i + 1 < text.size && text.str[i + 1] == '*') {
+            if (style & _VIEW_Style_Bold) {
+               new_style &= ~_VIEW_Style_Bold;
+               skip = 2;
+            } else if (_VIEW_HasLater(text, i + 2, Str8Lit("**"))) {
+               new_style |= _VIEW_Style_Bold;
+               skip = 2;
+            }
+         }
+      }
+
+      B32 is_space = (skip == 0 && c == ' ');
+      if (in_piece && (is_space || skip != 0)) {
+         _VIEW_Piece* piece = PushArray(arena, _VIEW_Piece, 1);
+         piece->text = Str8Substr(text, R1U64(piece_start, i));
+         piece->style = style;
+         piece->spaces_before = is_first ? 0 : spaces;
+         piece->width = TXT_Width(_VIEW_FontFromStyle(fonts, style), _VIEW_PxFromStyle(style, px), piece->text);
+         SLLQueuePush(result.first, result.last, piece);
+         in_piece = 0;
+         is_first = 0;
+         spaces = 0;
+      }
+
+      if (skip != 0) {
+         style = new_style;
+         i += skip;
+      } else {
+         if (is_space) {
+            spaces += 1;
+         } else if (!in_piece) {
+            in_piece = 1;
+            piece_start = i;
+         }
+         i += 1;
+      }
+   }
+
+   return result;
+}
+
+// As _VIEW_Lines, for text that may have words in bold and in code.
+internal F32
+_VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, String8 text, F32 x, F32 y, F32 max_width,
+                Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out) {
+   F32             line_height = TXT_LineHeight(fonts->regular, px);
+   F32             space_width = TXT_Width(fonts->regular, px, Str8Lit(" "));
+   _VIEW_PieceList pieces = _VIEW_PiecesFromText(arena, fonts, px, text);
+   F32             widest = 0;
+
+   // A line at a time: first how many pieces go on it, then they are drawn.
+   for (_VIEW_Piece* line_first = pieces.first; line_first != 0;) {
+      _VIEW_Piece* line_end = line_first; // the first piece not on the line
+      F32          line_w = 0;
+      while (line_end != 0) {
+         // A word: this piece and the ones that go on from it.
+         F32          word_w = line_end->width;
+         _VIEW_Piece* word_end = line_end->next;
+         while (word_end != 0 && word_end->spaces_before == 0) {
+            word_w += word_end->width;
+            word_end = word_end->next;
+         }
+         F32 gap_w = (line_end == line_first) ? 0 : space_width * (F32)line_end->spaces_before;
+         // The first word of a line always goes on it.
+         if (line_end != line_first && line_w + gap_w + word_w > max_width) {
+            break;
+         }
+         line_w += gap_w + word_w;
+         line_end = word_end;
+      }
+
+      if (do_draw) {
+         F32 piece_x = centered ? x + (max_width - line_w) * 0.5f : x;
+         for (_VIEW_Piece* piece = line_first; piece != line_end; piece = piece->next) {
+            if (piece != line_first) {
+               F32 gap_w = space_width * (F32)piece->spaces_before;
+               // The space between two words of code is code too: one box
+               // under them all.
+               if (gap_w != 0 && (piece->style & _VIEW_Style_Code)) {
+                  B32 prev_is_code = 0;
+                  for (_VIEW_Piece* prev = line_first; prev != piece; prev = prev->next) {
+                     prev_is_code = !!(prev->style & _VIEW_Style_Code);
+                  }
+                  if (prev_is_code) {
+                     Core_D_Rect(R2F32P(piece_x, y + line_height * 0.08f, piece_x + gap_w, y + line_height * 0.94f),
+                                 R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, alpha * 0.13f));
+                  }
+               }
+               piece_x += gap_w;
+            }
+
+            FNT_Tag font = _VIEW_FontFromStyle(fonts, piece->style);
+            F32     piece_px = _VIEW_PxFromStyle(piece->style, px);
+            F32     piece_y = y;
+            if (piece->style & _VIEW_Style_Code) {
+               Core_D_Rect(R2F32P(piece_x, y + line_height * 0.08f, piece_x + piece->width, y + line_height * 0.94f),
+                           R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, alpha * 0.13f));
+               // Smaller, and a different font: put where its letters stand
+               // on the line the others do, near enough.
+               piece_y = y + (line_height - TXT_LineHeight(font, piece_px)) * 0.5f;
+            }
+            TXT_Draw(font, piece_px, V2F32(piece_x, piece_y), color, piece->text);
+            piece_x += piece->width;
+         }
+         widest = Max(widest, line_w);
+      }
+
+      y += line_height;
+      line_first = line_end;
+   }
+
+   if (widest_out != 0) {
+      *widest_out = widest;
+   }
+   return y;
+}
+
 // The slide's items, from rect's top left down, no wider than rect. shrink is
 // the part of full size to draw them at. Returns the y under the last.
 internal F32
@@ -245,13 +451,13 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
          if (item->text.size == 0) {
             y += TXT_LineHeight(fonts->regular, px);
          }
-         y = _VIEW_Lines(arena, fonts->regular, px, item->text, text_x, y, rect.max.x - text_x,
-                         _VIEW_Faded(colors->body, alpha), do_draw, centered, widest_out);
+         y = _VIEW_RichLines(arena, fonts, colors, px, item->text, text_x, y, rect.max.x - text_x,
+                             _VIEW_Faded(colors->body, alpha), alpha, do_draw, centered, widest_out);
       } break;
 
       default: {
-         y = _VIEW_Lines(arena, fonts->regular, body_px, item->text, rect.min.x, y, Dim2F32(rect).x,
-                         _VIEW_Faded(colors->body, alpha), do_draw, centered, widest_out);
+         y = _VIEW_RichLines(arena, fonts, colors, body_px, item->text, rect.min.x, y, Dim2F32(rect).x,
+                             _VIEW_Faded(colors->body, alpha), alpha, do_draw, centered, widest_out);
       } break;
       }
 

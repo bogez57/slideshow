@@ -130,6 +130,11 @@ internal void ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start,
 // Puts string in place of the text from start to end, and the cursor after it.
 internal void ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string);
 
+// Puts mark before and after the selection, which stays selected - or takes
+// them away, if they are there already. With no selection, writes
+// placeholder between two marks and selects it, to be typed over.
+internal void ED_WrapSelection(ED_Editor* editor, String8 mark, String8 placeholder);
+
 internal void ED_SetCursor(ED_Editor* editor, U64 pos);
 
 // Keys, typing and the mouse. Events it uses are eaten, so what the caller

@@ -29,6 +29,13 @@ A paragraph that is too long for the page is broken at spaces into as many lines
 
 Two # make a heading, which belongs to the slide it is on.
 
+# Bold and code
+
+- Two stars on each side make **bold words**
+- Backticks make `code`, as in `@theme light`
+- Select words and press Ctrl+B or Ctrl+E, or click the line in Format
+- A lone ** or ` with no partner is drawn as it is
+
 # A picture beside the text
 
 ![](hills.png)

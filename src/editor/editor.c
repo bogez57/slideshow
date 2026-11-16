@@ -472,6 +472,39 @@ ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string) {
 }
 
 internal void
+ED_WrapSelection(ED_Editor* editor, String8 mark, String8 placeholder) {
+   U64 start = Min(editor->cursor, editor->mark);
+   U64 end = Max(editor->cursor, editor->mark);
+
+   _ED_BeforeEdit(editor, ED_EditKind_Other);
+   if (start == end) {
+      _ED_Splice(editor, start, start, mark);
+      _ED_Splice(editor, start + mark.size, start + mark.size, placeholder);
+      _ED_Splice(editor, start + mark.size + placeholder.size, start + mark.size + placeholder.size, mark);
+      editor->mark = start + mark.size;
+      editor->cursor = editor->mark + placeholder.size;
+   } else {
+      B32 has_marks = (start >= mark.size && end + mark.size <= editor->size &&
+                       MemoryMatch(editor->text + start - mark.size, mark.str, mark.size) &&
+                       MemoryMatch(editor->text + end, mark.str, mark.size));
+      if (has_marks) {
+         // The later one first: taking the earlier away moves it.
+         _ED_Splice(editor, end, end + mark.size, Str8Lit(""));
+         _ED_Splice(editor, start - mark.size, start, Str8Lit(""));
+         editor->mark = start - mark.size;
+         editor->cursor = end - mark.size;
+      } else {
+         _ED_Splice(editor, end, end, mark);
+         _ED_Splice(editor, start, start, mark);
+         editor->mark = start + mark.size;
+         editor->cursor = end + mark.size;
+      }
+   }
+   editor->want_column = -1;
+   editor->scroll_to_cursor = 1;
+}
+
+internal void
 ED_SetCursor(ED_Editor* editor, U64 pos) {
    editor->cursor = Min(pos, editor->size);
    editor->mark = editor->cursor;

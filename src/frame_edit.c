@@ -54,6 +54,7 @@
 //    add a picture    drop an image on the window
 //    add a slide      click the + at the end of the row of small slides
 //    move a slide     Alt+Left earlier, Alt+Right later
+//    bold, code       Ctrl+B and Ctrl+E: ** or ` around what is selected
 //    open             Ctrl+O: the open screen (frame_open.c). Or drop a folder
 //                     or a text deck on the window
 //
@@ -77,6 +78,7 @@ enum {
    _EDIT_FormatAction_Pictures, // opens the list of pictures
    _EDIT_FormatAction_Theme,    // gives the deck the next theme
    _EDIT_FormatAction_Layout,   // gives the slide the next layout
+   _EDIT_FormatAction_Wrap,     // puts insert before and after the selection (ED_WrapSelection)
 };
 
 global _EDIT_FormatRow _edit_format_rows[] = {
@@ -87,6 +89,8 @@ global _EDIT_FormatRow _edit_format_rows[] = {
     {Str8LitComp("  - point"), Str8LitComp("an inner bullet. Shift+Tab moves it out"), Str8LitComp("  - point"), 4, 9},
     {Str8LitComp("![](picture.png)"), Str8LitComp("the slide's picture. Click to pick one"), Str8LitComp("![](picture.png)"), 4, 15, _EDIT_FormatAction_Pictures},
     {Str8LitComp("Any other line"), Str8LitComp("a paragraph. An empty line adds room"), Str8LitComp("Text"), 0, 4},
+    {Str8LitComp("**bold**"), Str8LitComp("bold words. Select some first, or Ctrl+B"), Str8LitComp("**"), 0, 0, _EDIT_FormatAction_Wrap},
+    {Str8LitComp("`code`"), Str8LitComp("words as code. Select some first, or Ctrl+E"), Str8LitComp("`"), 0, 0, _EDIT_FormatAction_Wrap},
     {Str8LitComp("@note Say this"), Str8LitComp("a note to yourself. N shows notes while presenting"), Str8LitComp("@note Say this"), 6, 14},
     // What these two do is said in EDIT_Build, with what the deck and the slide have now.
     {Str8LitComp("@theme"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Theme},
@@ -562,6 +566,17 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
    }
 
+   // Bold and code, around what is selected (the Format panel's two lines
+   // for them do the same).
+   if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_B)) {
+      ED_WrapSelection(editor, Str8Lit("**"), Str8Lit("bold"));
+      editor->last_input_us = NowTimeUS();
+   }
+   if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_E)) {
+      ED_WrapSelection(editor, Str8Lit("`"), Str8Lit("code"));
+      editor->last_input_us = NowTimeUS();
+   }
+
    if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_S)) {
       if (ED_Save(editor)) {
          FR_Notice(app_state, Str8Lit("Saved"));
@@ -896,6 +911,10 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
          } else {
             _EDIT_NextLayout(editor, app_state->deck, DECK_SlideFromTextPos(app_state->deck, editor->cursor));
          }
+         editor->last_input_us = NowTimeUS();
+      } else if (row->action == _EDIT_FormatAction_Wrap) {
+         B32 is_bold = Str8Match(row->insert, Str8Lit("**"), 0);
+         ED_WrapSelection(editor, row->insert, is_bold ? Str8Lit("bold") : Str8Lit("code"));
          editor->last_input_us = NowTimeUS();
       } else {
          ED_InsertLine(editor, row->insert, row->select_start, row->select_end);
