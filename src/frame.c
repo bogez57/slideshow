@@ -196,6 +196,10 @@ _FR_PresentInput(App_State* app_state) {
    }
 
    B32 edit_pressed = Core_WM_KeyPress(events, window, 0, WM_Key_F5);
+   if (edit_pressed && app_state->editor == 0) {
+      // Said, rather than nothing happening: F5 is in the list of keys.
+      FR_Notice(app_state, Str8Lit("A folder of images has no text to edit. F5 is for text decks (.md)."));
+   }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_Esc)) {
       if (is_fullscreen) {
          app_state->toggle_fullscreen = 1;
