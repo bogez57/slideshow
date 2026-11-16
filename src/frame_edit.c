@@ -258,6 +258,21 @@ _EDIT_MoveSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx, B32 to_later)
       // as more of the slide before, so it is given a --- to start with.
       B32 first_starts_itself = 0;
       for (U64 i = 0; i < first.size; i += 1) {
+         // An @theme or @layout line is not what starts it: the line after
+         // is. (Any other line with an @ is a paragraph.)
+         if (first.str[i] == '@') {
+            U64 word_end = i;
+            while (word_end < first.size && first.str[word_end] != ' ' && first.str[word_end] != '\t' &&
+                   first.str[word_end] != '\n') {
+               word_end += 1;
+            }
+            String8 word = Str8Substr(first, R1U64(i, word_end));
+            if (Str8Match(word, Str8Lit("@theme"), StringMatchFlag_CaseInsensitive) ||
+                Str8Match(word, Str8Lit("@layout"), StringMatchFlag_CaseInsensitive)) {
+               while (i < first.size && first.str[i] != '\n') i += 1;
+               continue;
+            }
+         }
          if (first.str[i] != ' ' && first.str[i] != '\t' && first.str[i] != '\n') {
             first_starts_itself = (first.str[i] == '#' || first.str[i] == '-');
             if (first.str[i] == '-') {
@@ -740,7 +755,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                V4F32(0, 0, 0, 0.5f));
 
    if (Dim2F32(layout.page).x > 0) {
-      Core_D_Rect(layout.page, R2F32P(0, 0, 1, 1), FR_COLOR_BACKGROUND);
+      Core_D_Rect(layout.page, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
 
       String8 caption = {0};
       if (app_state->slide_idx < deck->slide_count) {
@@ -748,7 +763,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          // pictures of slides far from this one.
          IMG_Image* image = DECK_ImageFromSlide(deck, app_state->slide_idx);
          VIEW_HitList hits = {0};
-         VIEW_DrawSlide(app_state->frame_arena, fonts, &deck->slides[app_state->slide_idx], image, layout.page, 1.0f,
+         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], image, layout.page, 1.0f,
                         &hits);
 
          //- bgz: the slide's pieces, kept for the next frame's clicks
@@ -829,12 +844,12 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
             Core_D_Rect(R2F32P(rect.min.x - frame, rect.min.y - frame, rect.max.x + frame, rect.max.y + frame),
                         R2F32P(0, 0, 1, 1), is_showing ? color_syntax : V4F32(1, 1, 1, 0.35f));
          }
-         Core_D_Rect(rect, R2F32P(0, 0, 1, 1), FR_COLOR_BACKGROUND);
+         Core_D_Rect(rect, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
 
          // Only a picture that is loaded already is drawn: the slide showing
          // and the ones next to it. Loading every picture of a long deck for
          // its small slides would take the memory DECK_ImageFromSlide saves.
-         VIEW_DrawSlide(app_state->frame_arena, fonts, &deck->slides[i], DECK_LoadedImageFromSlide(deck, i), rect,
+         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[i], DECK_LoadedImageFromSlide(deck, i), rect,
                         is_showing ? 1.0f : 0.8f, 0);
       }
    }

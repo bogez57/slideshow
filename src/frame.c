@@ -576,11 +576,11 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
    // the last slide is no slide: the new one fades in over the background.
    if (app_state->fade_active && app_state->fade_from_idx < deck->slide_count) {
       IMG_Image* from_image = DECK_LoadedImageFromSlide(deck, app_state->fade_from_idx);
-      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, &deck->slides[app_state->fade_from_idx], from_image,
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->fade_from_idx], from_image,
                      window_rect, 1.0f - fade_t, 0);
    }
    if (app_state->slide_idx < deck->slide_count) {
-      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, &deck->slides[app_state->slide_idx], image,
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], image,
                      window_rect, fade_t, 0);
    }
 }
@@ -1026,7 +1026,8 @@ FrameWork(App_State* app_state) {
    Core_D_BucketScope(bucket) {
       // The background, which is all there is behind a slide that does not
       // fill the window.
-      Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1), FR_COLOR_BACKGROUND);
+      Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1),
+                  VIEW_ColorsFromTheme(app_state->deck->theme).background);
 
       if (app_state->is_editing) {
          EDIT_Draw(app_state, window_dim);

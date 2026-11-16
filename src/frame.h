@@ -13,9 +13,6 @@
 // How long a notice stays up.
 #define FR_NOTICE_SECONDS 4.0f
 
-// The window's background, and a slide's.
-#define FR_COLOR_BACKGROUND V4F32(0.05f, 0.05f, 0.06f, 1.0f)
-
 // Everything between the renderer's begin and end of a frame (main.c): this
 // frame's input, then the screen that is up.
 internal void FrameWork(App_State* app_state);

@@ -38,6 +38,38 @@ Two # make a heading, which belongs to the slide it is on.
 - With text, the picture has the right half
 - A slide has one picture: the first
 
+# Layouts
+
+@layout picture-left
+![](circles.png)
+
+- A line of @layout says how the slide it is on is laid out
+- picture-left puts the picture on this side
+- picture-right is what a slide gets with no such line
+
+# A picture behind the words
+
+@layout picture-behind
+![](hills.png)
+
+- picture-behind fills the slide with the picture
+- The words go over it, on a wash of the background
+
+# Everything in the middle
+
+@layout center
+
+center puts every line in the middle of the slide
+
+- Bullets lose their dots
+- Good for a quote, or a few words
+
+# Themes
+
+- One line of @theme anywhere in the file colours the whole deck
+- dark is what a deck gets with no such line
+- Try writing @theme light, @theme blue or @theme paper on a line of its own
+
 # A picture under a title
 
 ![](bars.jpg)

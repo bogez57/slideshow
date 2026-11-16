@@ -28,6 +28,12 @@
 //    * point            (up to DECK_MAX_BULLET_LEVEL)
 //    ![](picture.png)   the slide's picture, found from the text file's folder.
 //                       A slide has one: the first
+//    @theme light       the whole deck's colours: dark (as with no such line),
+//                       light, blue or paper. Anywhere in the file
+//    @layout center     how the slide it is in is laid out: picture-right (as
+//                       with no such line), picture-left, picture-behind (the
+//                       picture fills the slide, behind the words) or center
+//                       (every line in the middle, bullets without their dots)
 //    anything else      a paragraph. Each line is its own
 //    (an empty line)    a little more room before what follows
 //
@@ -38,6 +44,26 @@
 #define DECK_H
 
 #define DECK_MAX_BULLET_LEVEL 3
+
+// The colours of a whole deck. The names, as written after @theme, are in
+// deck.c (DECK_ThemeName), in this order.
+typedef enum DECK_Theme {
+   DECK_Theme_Dark,
+   DECK_Theme_Light,
+   DECK_Theme_Blue,
+   DECK_Theme_Paper,
+   DECK_Theme_COUNT,
+} DECK_Theme;
+
+// How one slide is laid out. The names, as written after @layout, are in
+// deck.c (DECK_LayoutName), in this order.
+typedef enum DECK_Layout {
+   DECK_Layout_PictureRight, // the body on the left, the picture on the right
+   DECK_Layout_PictureLeft,
+   DECK_Layout_PictureBehind, // the picture fills the slide, behind the words
+   DECK_Layout_Center,        // every line in the middle
+   DECK_Layout_COUNT,
+} DECK_Layout;
 
 typedef enum DECK_ItemKind {
    DECK_ItemKind_Text,
@@ -72,6 +98,12 @@ struct DECK_Slide {
    Rng1U64 title_range;
    Rng1U64 image_range;
 
+   // From the slide's @layout line, which is at layout_line in the deck's
+   // text (the line without its ending) when has_layout_line.
+   DECK_Layout layout;
+   B32         has_layout_line;
+   Rng1U64     layout_line;
+
    // Empty and zero for a slide that is only a picture.
    String8    title;
    DECK_Item* first_item;
@@ -88,7 +120,17 @@ struct DECK_Deck {
 
    // For a deck from a text file: the file. Empty for a folder of images.
    String8 file;
+
+   // From the file's first @theme line, which is at theme_line in the text
+   // (the line without its ending) when has_theme_line.
+   DECK_Theme theme;
+   B32        has_theme_line;
+   Rng1U64    theme_line;
 };
+
+// As written after @theme and @layout.
+internal String8 DECK_ThemeName(DECK_Theme theme);
+internal String8 DECK_LayoutName(DECK_Layout layout);
 
 // Never 0. A folder that is missing, or has no images in it, gives a deck
 // with no slides.

@@ -13,12 +13,28 @@
 //
 // A slide that is only a picture is not put on the page: the picture fills
 // the rect.
+//
+// The deck's theme gives the colours, and each slide's layout says where its
+// picture goes - beside the words on either side, or behind them - or puts
+// every line in the middle.
 
 #ifndef VIEW_H
 #define VIEW_H
 
 #define VIEW_PAGE_W 1280.0f
 #define VIEW_PAGE_H 720.0f
+
+// A theme's colours. The background is the caller's to draw, behind the
+// slide and around it: a slide is drawn over it, at any alpha.
+typedef struct VIEW_Colors VIEW_Colors;
+struct VIEW_Colors {
+   Vec4F32 background;
+   Vec4F32 title;
+   Vec4F32 body;
+   Vec4F32 accent; // the bar under the title, headings, bullets' dots
+};
+
+internal VIEW_Colors VIEW_ColorsFromTheme(DECK_Theme theme);
 
 // How many pixels a page unit is in a rect of this size.
 internal F32 VIEW_ScaleFromDim(Vec2F32 dim);
@@ -56,7 +72,10 @@ struct VIEW_HitList {
 //
 // hits, if not 0, is given a hit for the title, for each line of the body
 // and for the picture, on arena.
-internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* image, Rng2F32 rect, F32 alpha,
-                             VIEW_HitList* hits);
+//
+// theme is the deck's, for the colours. The slide's own layout
+// (slide->layout) says where its picture and words go.
+internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, IMG_Image* image,
+                             Rng2F32 rect, F32 alpha, VIEW_HitList* hits);
 
 #endif // VIEW_H

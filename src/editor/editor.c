@@ -1025,6 +1025,8 @@ ED_Draw(ED_Editor* editor, Arena* arena, ED_Box box) {
             color = V4F32(0.45f, 0.72f, 1.00f, 1.0f); // a heading
          } else if (line.size >= 2 && line.str[0] == '!' && line.str[1] == '[') {
             color = V4F32(0.55f, 0.85f, 0.60f, 1.0f); // a picture
+         } else if (line.size >= 2 && line.str[0] == '@') {
+            color = V4F32(0.80f, 0.62f, 0.95f, 1.0f); // @theme, @layout
          }
 
          TXT_Draw(box.font, box.px, V2F32(x, y), color, Str8(editor->text + row.start, row.end - row.start));

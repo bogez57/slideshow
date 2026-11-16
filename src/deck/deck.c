@@ -202,6 +202,19 @@ DECK_OpenFile(String8 file) {
    return deck;
 }
 
+internal String8
+DECK_ThemeName(DECK_Theme theme) {
+   String8 names[DECK_Theme_COUNT] = {Str8Lit("dark"), Str8Lit("light"), Str8Lit("blue"), Str8Lit("paper")};
+   return names[(theme < DECK_Theme_COUNT) ? theme : 0];
+}
+
+internal String8
+DECK_LayoutName(DECK_Layout layout) {
+   String8 names[DECK_Layout_COUNT] = {Str8Lit("picture-right"), Str8Lit("picture-left"), Str8Lit("picture-behind"),
+                                       Str8Lit("center")};
+   return names[(layout < DECK_Layout_COUNT) ? layout : 0];
+}
+
 internal DECK_Deck*
 DECK_OpenText(String8 text_to_copy, String8 file) {
    Arena*     arena = ArenaAlloc();
@@ -234,6 +247,12 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
    // the rule, not at the first line after it with something on it.
    B32 has_rule_pos = 0;
    U64 rule_pos = 0;
+
+   // An @layout line that came before its slide had anything on it - right
+   // under a --- - waits here for the slide.
+   B32         has_waiting_layout = 0;
+   DECK_Layout waiting_layout = DECK_Layout_PictureRight;
+   Rng1U64     waiting_layout_line = {0};
 
    U64 pos = 0;
    while (pos < text.size) {
@@ -271,6 +290,49 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          continue;
       }
 
+      //- bgz: @theme and @layout: about the deck or the slide, not on it
+      //
+      // Only those two: any other line that starts with an @ is a paragraph.
+      // A name that is not one of the names gives the first, as no line would.
+      if (line.str[0] == '@') {
+         U64 word_end = 0;
+         while (word_end < line.size && line.str[word_end] != ' ' && line.str[word_end] != '\t') word_end += 1;
+         String8 word = Str8Prefix(line, word_end);
+         String8 name = _DECK_Trim(Str8Skip(line, word_end));
+         Rng1U64 line_range = R1U64((U64)(line.str - text.str), (U64)(line.str - text.str) + line.size);
+
+         if (Str8Match(word, Str8Lit("@theme"), StringMatchFlag_CaseInsensitive)) {
+            if (!deck->has_theme_line) {
+               deck->has_theme_line = 1;
+               deck->theme_line = line_range;
+               for (U64 i = 0; i < DECK_Theme_COUNT; i += 1) {
+                  if (Str8Match(name, DECK_ThemeName((DECK_Theme)i), StringMatchFlag_CaseInsensitive)) {
+                     deck->theme = (DECK_Theme)i;
+                  }
+               }
+            }
+            continue;
+         }
+         if (Str8Match(word, Str8Lit("@layout"), StringMatchFlag_CaseInsensitive)) {
+            DECK_Layout layout = DECK_Layout_PictureRight;
+            for (U64 i = 0; i < DECK_Layout_COUNT; i += 1) {
+               if (Str8Match(name, DECK_LayoutName((DECK_Layout)i), StringMatchFlag_CaseInsensitive)) {
+                  layout = (DECK_Layout)i;
+               }
+            }
+            if (slide != 0 && !slide->has_layout_line) {
+               slide->layout = layout;
+               slide->has_layout_line = 1;
+               slide->layout_line = line_range;
+            } else if (slide == 0 && !has_waiting_layout) {
+               has_waiting_layout = 1;
+               waiting_layout = layout;
+               waiting_layout_line = line_range;
+            }
+            continue;
+         }
+      }
+
       U64 hash_count = 0;
       while (hash_count < line.size && line.str[hash_count] == '#') hash_count += 1;
       // The space after the #s can be left out: "#Title" is a title too. And
@@ -301,7 +363,14 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          slide = &node->slide;
          slide->text_pos = (has_rule_pos && !is_title) ? rule_pos : line_start;
          gap_before = 0;
+
+         if (has_waiting_layout) {
+            slide->layout = waiting_layout;
+            slide->has_layout_line = 1;
+            slide->layout_line = waiting_layout_line;
+         }
       }
+      has_waiting_layout = 0;
       has_rule_pos = 0;
 
       //- bgz: add it
