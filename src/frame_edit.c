@@ -19,7 +19,10 @@
 //
 // The Format panel is how the format is learned without leaving the program:
 // every kind of line there is, as it is written, with what it does. Clicking
-// one writes it into the text at the cursor, ready to be typed over.
+// one writes it into the text at the cursor, ready to be typed over. Its
+// last two lines change something instead: the deck's theme and the layout
+// of the slide the cursor is on, each to the next there is, by writing the
+// @theme or @layout line.
 //
 // Clicking the picture line there opens, in the panel's place, the list of
 // the pictures in the deck's folder, which scrolls: clicking one puts it on
@@ -66,7 +69,14 @@ struct _EDIT_FormatRow {
    String8 insert;       // what a click writes
    U64     select_start; // the part of insert left selected, to type over
    U64     select_end;
-   B32     opens_pictures; // a click opens the list of pictures instead
+   U32     action;       // an _EDIT_FormatAction: what a click does, if not write insert
+};
+
+enum {
+   _EDIT_FormatAction_Insert,
+   _EDIT_FormatAction_Pictures, // opens the list of pictures
+   _EDIT_FormatAction_Theme,    // gives the deck the next theme
+   _EDIT_FormatAction_Layout,   // gives the slide the next layout
 };
 
 global _EDIT_FormatRow _edit_format_rows[] = {
@@ -75,8 +85,11 @@ global _EDIT_FormatRow _edit_format_rows[] = {
     {Str8LitComp("## Heading"), Str8LitComp("a heading inside the slide"), Str8LitComp("## Heading"), 3, 10},
     {Str8LitComp("- point"), Str8LitComp("a bullet. Tab moves it in, Shift+Tab out"), Str8LitComp("- point"), 2, 7},
     {Str8LitComp("  - point"), Str8LitComp("an inner bullet: two more spaces in front"), Str8LitComp("  - point"), 4, 9},
-    {Str8LitComp("![](picture.png)"), Str8LitComp("the slide's picture. Click to pick one"), Str8LitComp("![](picture.png)"), 4, 15, 1},
+    {Str8LitComp("![](picture.png)"), Str8LitComp("the slide's picture. Click to pick one"), Str8LitComp("![](picture.png)"), 4, 15, _EDIT_FormatAction_Pictures},
     {Str8LitComp("Any other line"), Str8LitComp("a paragraph. An empty line adds room"), Str8LitComp("Text"), 0, 4},
+    // What these two do is said in EDIT_Build, with what the deck and the slide have now.
+    {Str8LitComp("@theme light"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Theme},
+    {Str8LitComp("@layout center"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Layout},
 };
 
 ////////////////////////////////
@@ -310,6 +323,78 @@ _EDIT_MoveSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx, B32 to_later)
    }
 
    return result;
+}
+
+////////////////////////////////
+//~ bgz: themes and layouts
+//
+// The deck has to be of the text as it is: FR_SyncDeck first.
+
+// Puts string where [start, end) of the text was, and leaves the cursor in
+// the words it was in - not at the change, which may be on another slide.
+internal void
+_EDIT_ReplaceKeepingCursor(ED_Editor* editor, U64 start, U64 end, String8 string) {
+   U64 cursor = editor->cursor;
+   if (cursor >= end) {
+      cursor = cursor - (end - start) + string.size;
+   } else if (cursor > start) {
+      cursor = start + string.size;
+   }
+   ED_ReplaceRange(editor, start, end, string);
+   ED_SetCursor(editor, cursor);
+}
+
+// Gives the deck the theme after the one it has: its @theme line is
+// written again, or a new one is put at the top of the text.
+internal void
+_EDIT_NextTheme(ED_Editor* editor, DECK_Deck* deck) {
+   Temp       scratch = ScratchBegin(0, 0);
+   DECK_Theme theme = (DECK_Theme)((deck->theme + 1) % DECK_Theme_COUNT);
+   String8    line = PushStr8F(scratch.arena, "@theme %S", DECK_ThemeName(theme));
+
+   if (deck->has_theme_line && deck->theme_line.max <= editor->size) {
+      _EDIT_ReplaceKeepingCursor(editor, deck->theme_line.min, deck->theme_line.max, line);
+   } else {
+      _EDIT_ReplaceKeepingCursor(editor, 0, 0, PushStr8F(scratch.arena, "%S\n", line));
+   }
+
+   ScratchEnd(scratch);
+}
+
+// Gives slide_idx the layout after the one it has: its @layout line is
+// written again, or a new one is put under the line the slide starts with.
+internal void
+_EDIT_NextLayout(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
+   if (slide_idx >= deck->slide_count) {
+      return;
+   }
+   Temp        scratch = ScratchBegin(0, 0);
+   DECK_Slide* slide = &deck->slides[slide_idx];
+   DECK_Layout layout = (DECK_Layout)((slide->layout + 1) % DECK_Layout_COUNT);
+   String8     line = PushStr8F(scratch.arena, "@layout %S", DECK_LayoutName(layout));
+   String8     text = ED_Text(editor);
+
+   if (slide->has_layout_line && slide->layout_line.max <= text.size) {
+      _EDIT_ReplaceKeepingCursor(editor, slide->layout_line.min, slide->layout_line.max, line);
+   } else {
+      // Under the slide's first line when that is its # Title or its --- :
+      // the line belongs to the slide from there. A first slide that starts
+      // with neither has it above, where it waits for the slide.
+      U64 line_start = Min(slide->text_pos, text.size);
+      U64 line_end = line_start;
+      while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
+      U64 first = line_start;
+      while (first < line_end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
+
+      B32 starts_slide = (first < line_end && (text.str[first] == '#' || text.str[first] == '-'));
+      if (starts_slide) {
+         _EDIT_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
+      } else {
+         _EDIT_ReplaceKeepingCursor(editor, line_start, line_start, PushStr8F(scratch.arena, "%S\n", line));
+      }
+   }
+
+   ScratchEnd(scratch);
 }
 
 ////////////////////////////////
@@ -722,6 +807,21 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
 
                for (U64 i = 0; i < ArrayCount(_edit_format_rows); i += 1) {
                   _EDIT_FormatRow* format_row = &_edit_format_rows[i];
+
+                  // The theme's and the layout's rows say what there is now.
+                  // On the frame arena: a label's words are needed until the
+                  // frame is drawn.
+                  String8 what = format_row->what;
+                  if (format_row->action == _EDIT_FormatAction_Theme) {
+                     what = PushStr8F(app_state->frame_arena, "the deck's colours, now %S. Click for the next",
+                                      DECK_ThemeName(app_state->deck->theme));
+                  } else if (format_row->action == _EDIT_FormatAction_Layout) {
+                     DECK_Deck* deck = app_state->deck;
+                     String8    now = (app_state->slide_idx < deck->slide_count)
+                                          ? DECK_LayoutName(deck->slides[app_state->slide_idx].layout)
+                                          : DECK_LayoutName(DECK_Layout_PictureRight);
+                     what = PushStr8F(app_state->frame_arena, "this slide's layout, now %S. Click for the next", now);
+                  }
                   UI_Box* row = UI_ListRow(row_h, 0, UI_BoxFlag_DrawBackground | click_flags, "###edit format row %llu",
                                            (unsigned long long)i);
                   UI_Parent(row) UI_PrefHeight(UI_Pct(1, 1)) {
@@ -733,7 +833,7 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
                      UI_Spacer(UI_Px(18.0f * ui, 1));
                      UI_SetNextPrefWidth(UI_Pct(1, 0));
                      UI_SetNextColorTag(Str8Lit("dim"));
-                     UI_Label(format_row->what);
+                     UI_Label(what);
                   }
                   if (interactive) {
                      UI_Signal signal = UI_SignalFromBox(row);
@@ -782,10 +882,19 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
    }
    if (format_picked >= 0) {
       _EDIT_FormatRow* row = &_edit_format_rows[format_picked];
-      if (row->opens_pictures) {
+      if (row->action == _EDIT_FormatAction_Pictures) {
          app_state->show_pictures = 1;
          MemoryZeroStruct(&app_state->pictures_scroll); // the list starts at its top
          _EDIT_ScanPictures(app_state);
+      } else if (row->action == _EDIT_FormatAction_Theme || row->action == _EDIT_FormatAction_Layout) {
+         // The deck as the text is now, to know what there is to change.
+         FR_SyncDeck(app_state);
+         if (row->action == _EDIT_FormatAction_Theme) {
+            _EDIT_NextTheme(editor, app_state->deck);
+         } else {
+            _EDIT_NextLayout(editor, app_state->deck, DECK_SlideFromTextPos(app_state->deck, editor->cursor));
+         }
+         editor->last_input_us = NowTimeUS();
       } else {
          ED_InsertLine(editor, row->insert, row->select_start, row->select_end);
          editor->last_input_us = NowTimeUS();
