@@ -26,6 +26,11 @@
 // Dropping an image file on the window does the same, copying the file into
 // the deck's folder first if it is not there.
 //
+// The slide in the preview can be clicked: on its title, a line of its body
+// or its picture, and the cursor goes to that line of the text, with the
+// words selected, to be typed over. What the mouse is over is lit, and what
+// the cursor is in has a mark beside it.
+//
 // The row of small slides under the preview is the whole deck: clicking one
 // moves the cursor to that slide's first line, and the + at its end starts a
 // new slide after the one showing. Alt+Left and Alt+Right move the slide
@@ -36,6 +41,7 @@
 //    format panel     F1 opens and closes it
 //    fullscreen       F11 or Alt+Return. Esc leaves it
 //    pictures         click the picture line under Format. Esc closes the list
+//    edit a piece     click it in the preview
 //    add a picture    drop an image on the window
 //    add a slide      click the + at the end of the row of small slides
 //    move a slide     Alt+Left earlier, Alt+Right later
@@ -530,6 +536,22 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       }
    }
 
+   //- bgz: a click on a piece of the slide in the preview: to its words
+   //
+   // Before anything this frame can have changed the text: where the pieces
+   // are from was worked out for the text as it was drawn.
+   if (editor->edit_count == app_state->preview_hits_edit_count) {
+      for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
+         VIEW_Hit* hit = &app_state->preview_hits[i];
+         if (hit->text_range.max <= editor->size && _EDIT_ClickIn(app_state, hit->rect)) {
+            ED_SetCursor(editor, hit->text_range.max);
+            editor->mark = hit->text_range.min;
+            editor->last_input_us = NowTimeUS();
+            break;
+         }
+      }
+   }
+
    //- bgz: slides added and moved
    {
       B32 move_earlier = Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Left);
@@ -574,6 +596,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    if (present_pressed) {
       if (app_state->deck->slide_count != 0) {
          app_state->is_editing = 0;
+         app_state->preview_hit_count = 0; // not drawn while presenting, and the window can change
          app_state->fade_active = 0;
          app_state->slide_changed_us = 0;
          app_state->scroll_left_over = 0;
@@ -710,6 +733,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
    }
 
    //- bgz: the preview
+   app_state->preview_hit_count = 0; // made again below, if a slide is drawn
    Core_D_Rect(layout.preview, R2F32P(0, 0, 1, 1), V4F32(0.125f, 0.13f, 0.15f, 1.0f));
    // A line where the text ends and the preview begins.
    Core_D_Rect(R2F32P(layout.preview.min.x, 0, layout.preview.min.x + 1.0f, window_dim.y), R2F32P(0, 0, 1, 1),
@@ -723,7 +747,47 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          // Asking for the picture is what loads it, and what releases the
          // pictures of slides far from this one.
          IMG_Image* image = DECK_ImageFromSlide(deck, app_state->slide_idx);
-         VIEW_DrawSlide(app_state->frame_arena, fonts, &deck->slides[app_state->slide_idx], image, layout.page, 1.0f);
+         VIEW_HitList hits = {0};
+         VIEW_DrawSlide(app_state->frame_arena, fonts, &deck->slides[app_state->slide_idx], image, layout.page, 1.0f,
+                        &hits);
+
+         //- bgz: the slide's pieces, kept for the next frame's clicks
+         if (app_state->preview_hits_arena == 0) {
+            app_state->preview_hits_arena = ArenaAlloc();
+         }
+         ArenaClear(app_state->preview_hits_arena);
+         app_state->preview_hits = PushArray(app_state->preview_hits_arena, VIEW_Hit, Max(hits.count, 1));
+         app_state->preview_hit_count = 0;
+         // The deck drawn is of the text at parsed_edit_count.
+         app_state->preview_hits_edit_count = app_state->parsed_edit_count;
+
+         F32 grow = 4.0f * ui;
+         for (VIEW_Hit* hit = hits.first; hit != 0; hit = hit->next) {
+            // A little larger than what was drawn, to be easy to click, and
+            // no larger than the slide.
+            Rng2F32 rect = Intersect2F32(R2F32P(hit->rect.min.x - grow, hit->rect.min.y - grow * 0.5f, hit->rect.max.x + grow,
+                                                hit->rect.max.y + grow * 0.5f),
+                                         layout.page);
+            if (rect.max.x <= rect.min.x || rect.max.y <= rect.min.y) {
+               continue;
+            }
+            VIEW_Hit* kept = &app_state->preview_hits[app_state->preview_hit_count];
+            app_state->preview_hit_count += 1;
+            kept->next = 0;
+            kept->rect = rect;
+            kept->text_range = hit->text_range;
+
+            // Lit under the mouse. And a mark beside the piece the cursor is
+            // in: where typing goes.
+            if (Contains2F32(rect, mouse) && !app_state->show_open) {
+               Core_D_Rect(rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.10f));
+            }
+            if (editor->cursor >= hit->text_range.min && editor->cursor <= hit->text_range.max) {
+               F32 mark_w = Max(2.0f, (F32)(S32)(3.0f * ui));
+               Core_D_Rect(R2F32P(rect.min.x - mark_w, rect.min.y, rect.min.x, rect.max.y), R2F32P(0, 0, 1, 1),
+                           V4F32(0.40f, 0.75f, 1.00f, 0.9f));
+            }
+         }
          caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Alt+Left / Alt+Right moves it",
                              (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count);
       } else {
@@ -771,7 +835,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          // and the ones next to it. Loading every picture of a long deck for
          // its small slides would take the memory DECK_ImageFromSlide saves.
          VIEW_DrawSlide(app_state->frame_arena, fonts, &deck->slides[i], DECK_LoadedImageFromSlide(deck, i), rect,
-                        is_showing ? 1.0f : 0.8f);
+                        is_showing ? 1.0f : 0.8f, 0);
       }
    }
 

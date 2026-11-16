@@ -474,11 +474,11 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
    if (app_state->fade_active && app_state->fade_from_idx < deck->slide_count) {
       IMG_Image* from_image = DECK_LoadedImageFromSlide(deck, app_state->fade_from_idx);
       VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, &deck->slides[app_state->fade_from_idx], from_image,
-                     window_rect, 1.0f - fade_t);
+                     window_rect, 1.0f - fade_t, 0);
    }
    if (app_state->slide_idx < deck->slide_count) {
       VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, &deck->slides[app_state->slide_idx], image,
-                     window_rect, fade_t);
+                     window_rect, fade_t, 0);
    }
 }
 

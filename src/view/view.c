@@ -77,27 +77,48 @@ VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha) {
    }
 }
 
+internal void
+_VIEW_PushHit(Arena* arena, VIEW_HitList* hits, Rng2F32 rect, Rng1U64 text_range) {
+   if (hits != 0 && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
+      VIEW_Hit* hit = PushArray(arena, VIEW_Hit, 1);
+      hit->rect = rect;
+      hit->text_range = text_range;
+      SLLQueuePush(hits->first, hits->last, hit);
+      hits->count += 1;
+   }
+}
+
 // Lines of wrapped text from top down, each starting at x. Returns the y
 // under the last. With do_draw 0 nothing is drawn: it only measures.
+// widest_out, if not 0, gets the width of the widest line drawn.
 internal F32
-_VIEW_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 max_width, Vec4F32 color, B32 do_draw) {
+_VIEW_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 max_width, Vec4F32 color, B32 do_draw,
+            F32* widest_out) {
    F32         line_height = TXT_LineHeight(font, px);
    String8List lines = TXT_Wrap(arena, font, px, text, max_width);
+   F32         widest = 0;
 
    for (String8Node* node = lines.first; node != 0; node = node->next) {
       if (do_draw) {
          TXT_Draw(font, px, V2F32(x, y), color, node->string);
+         if (widest_out != 0) {
+            widest = Max(widest, TXT_Width(font, px, node->string));
+         }
       }
       y += line_height;
    }
 
+   if (widest_out != 0) {
+      *widest_out = widest;
+   }
    return y;
 }
 
 // The slide's items, from rect's top left down, no wider than rect. shrink is
 // the part of full size to draw them at. Returns the y under the last.
 internal F32
-_VIEW_Body(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, Rng2F32 rect, F32 scale, F32 shrink, F32 alpha, B32 do_draw) {
+_VIEW_Body(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, Rng2F32 rect, F32 scale, F32 shrink, F32 alpha, B32 do_draw,
+           VIEW_HitList* hits) {
    F32 unit = scale * shrink;
    F32 y = rect.min.y;
 
@@ -114,17 +135,26 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, Rng2F32 rect, F32 
          }
       }
 
+      // Where the item is drawn, for its hit: from its left - a bullet's dot
+      // - to the end of its widest line.
+      F32  item_x = rect.min.x;
+      F32  item_y = y;
+      F32  text_x = rect.min.x;
+      F32  widest = 0;
+      F32* widest_out = (do_draw && hits != 0) ? &widest : 0;
+
       switch (item->kind) {
       case DECK_ItemKind_Heading: {
          y = _VIEW_Lines(arena, fonts->bold, _VIEW_HEADING_PX * unit, item->text, rect.min.x, y, Dim2F32(rect).x,
-                         _VIEW_COLOR_ACCENT(alpha), do_draw);
+                         _VIEW_COLOR_ACCENT(alpha), do_draw, widest_out);
       } break;
 
       case DECK_ItemKind_Bullet: {
          // Inner levels are a little smaller.
          F32 px = body_px * (item->level == 0 ? 1.0f : 0.88f);
          F32 indent = _VIEW_BULLET_INDENT * unit;
-         F32 text_x = rect.min.x + indent * (F32)(item->level + 1);
+         text_x = rect.min.x + indent * (F32)(item->level + 1);
+         item_x = text_x - indent * 0.62f;
 
          if (do_draw) {
             // A round dot, level with the middle of the first line. Not under
@@ -148,13 +178,19 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, Rng2F32 rect, F32 
             y += TXT_LineHeight(fonts->regular, px);
          }
          y = _VIEW_Lines(arena, fonts->regular, px, item->text, text_x, y, rect.max.x - text_x, _VIEW_COLOR_BODY(alpha),
-                         do_draw);
+                         do_draw, widest_out);
       } break;
 
       default: {
          y = _VIEW_Lines(arena, fonts->regular, body_px, item->text, rect.min.x, y, Dim2F32(rect).x,
-                         _VIEW_COLOR_BODY(alpha), do_draw);
+                         _VIEW_COLOR_BODY(alpha), do_draw, widest_out);
       } break;
+      }
+
+      if (do_draw) {
+         // A bullet with no words yet is still something to click: as wide
+         // as a few letters.
+         _VIEW_PushHit(arena, hits, R2F32P(item_x, item_y, text_x + Max(widest, body_px * 3.0f), y), item->text_range);
       }
    }
 
@@ -162,7 +198,8 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, Rng2F32 rect, F32 
 }
 
 internal void
-VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* image, Rng2F32 rect, F32 alpha) {
+VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* image, Rng2F32 rect, F32 alpha,
+               VIEW_HitList* hits) {
    Vec2F32 rect_dim = Dim2F32(rect);
    if (rect_dim.x <= 0 || rect_dim.y <= 0) {
       return;
@@ -180,6 +217,9 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* ima
          VIEW_DrawImageFit(image, rect, alpha);
       } else if (picture_is_missing) {
          _VIEW_DrawMissingPicture(fonts, slide, page, scale, alpha);
+      }
+      if (slide->image_path.size != 0) {
+         _VIEW_PushHit(arena, hits, rect, slide->image_range);
       }
       Core_D_PopClip();
       return;
@@ -199,12 +239,19 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* ima
       String8List lines = TXT_Wrap(arena, fonts->bold, px, slide->title, content_w);
 
       F32 y = (content.min.y + content.max.y) * 0.5f - line_height * (F32)lines.node_count * 0.5f;
+      F32 title_y = y;
+      F32 widest = px * 2.0f; // a title with no words yet is still something to click
       for (String8Node* node = lines.first; node != 0; node = node->next) {
          F32 line_w = TXT_Width(fonts->bold, px, node->string);
+         widest = Max(widest, line_w);
          TXT_Draw(fonts->bold, px, V2F32(content.min.x + (content_w - line_w) * 0.5f, y), _VIEW_COLOR_TITLE(alpha),
                   node->string);
          y += line_height;
       }
+      _VIEW_PushHit(arena, hits,
+                    R2F32P(content.min.x + (content_w - widest) * 0.5f, title_y, content.min.x + (content_w + widest) * 0.5f,
+                           Max(y, title_y + line_height)),
+                    slide->title_range);
 
       // A short bar under it.
       F32 bar_w = 96.0f * scale;
@@ -219,8 +266,11 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* ima
    //- bgz: the title, at the top
    F32 y = content.min.y;
    if (slide->title.size != 0) {
+      F32 title_y = y;
+      F32 widest = 0;
       y = _VIEW_Lines(arena, fonts->bold, _VIEW_TITLE_PX * scale, slide->title, content.min.x, y, content_w,
-                      _VIEW_COLOR_TITLE(alpha), 1);
+                      _VIEW_COLOR_TITLE(alpha), 1, &widest);
+      _VIEW_PushHit(arena, hits, R2F32P(content.min.x, title_y, content.min.x + widest, y), slide->title_range);
 
       F32 bar_w = 72.0f * scale;
       F32 bar_h = 4.0f * scale;
@@ -251,19 +301,22 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* ima
    } else if (picture_is_missing) {
       _VIEW_DrawMissingPicture(fonts, slide, picture_rect, scale, alpha);
    }
+   if (has_picture) {
+      _VIEW_PushHit(arena, hits, picture_rect, slide->image_range);
+   }
 
    if (slide->item_count != 0) {
       // Full size if it fits above the bottom margin, else the largest of a
       // few smaller sizes that does - or the smallest, if none do.
       F32 shrink = 1.0f;
       for (;;) {
-         F32 end_y = _VIEW_Body(arena, fonts, slide, body_rect, scale, shrink, alpha, 0);
+         F32 end_y = _VIEW_Body(arena, fonts, slide, body_rect, scale, shrink, alpha, 0, 0);
          if (end_y <= body_rect.max.y || shrink <= _VIEW_MIN_BODY_SHRINK) {
             break;
          }
          shrink = Max(shrink * 0.88f, _VIEW_MIN_BODY_SHRINK);
       }
-      _VIEW_Body(arena, fonts, slide, body_rect, scale, shrink, alpha, 1);
+      _VIEW_Body(arena, fonts, slide, body_rect, scale, shrink, alpha, 1, hits);
    }
 
    Core_D_PopClip();

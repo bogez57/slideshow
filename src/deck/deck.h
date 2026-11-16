@@ -53,6 +53,7 @@ struct DECK_Item {
    String8       text;
    U32           level;      // bullets: 0 is outermost
    B32           gap_before; // an empty line came before it
+   Rng1U64       text_range; // where its words are in the deck's text. Empty, at the line's end, for no words
 };
 
 typedef struct DECK_Slide DECK_Slide;
@@ -64,6 +65,12 @@ struct DECK_Slide {
    // Where in the deck's text the slide begins: the start of its first line.
    // 0 in a folder of images.
    U64 text_pos;
+
+   // Where in the deck's text the title's words are, and the picture's
+   // path: as DECK_Item's text_range. Zero for a slide without the one or
+   // the other, and in a folder of images.
+   Rng1U64 title_range;
+   Rng1U64 image_range;
 
    // Empty and zero for a slide that is only a picture.
    String8    title;

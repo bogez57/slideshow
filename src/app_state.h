@@ -82,6 +82,15 @@ struct App_State {
    // it has: the next close quits.
    B32 quit_warned;
 
+   // Edit screen: where the pieces of the slide in the preview were drawn
+   // last frame, and where in the text each is from - what a click on the
+   // preview is a click on. Good for the text as it was then:
+   // preview_hits_edit_count is the editor's edit_count they were made at.
+   Arena*    preview_hits_arena;
+   VIEW_Hit* preview_hits;
+   U64       preview_hit_count;
+   U64       preview_hits_edit_count;
+
    // The open screen (frame_open.c): over whichever screen is up, the decks
    // opened lately and what is in a folder, to pick a deck from.
    B32          show_open;

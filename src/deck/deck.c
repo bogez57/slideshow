@@ -305,10 +305,20 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
       has_rule_pos = 0;
 
       //- bgz: add it
+      //
+      // Where a piece of the line is in the text: it is a piece of text, so
+      // by where it starts. One with nothing in it is put at the line's end.
+      U64 line_end_pos = (U64)(line.str - text.str) + line.size;
+#define _DECK_RangeOf(piece) \
+   (((piece).size != 0) ? R1U64((U64)((piece).str - text.str), (U64)((piece).str - text.str) + (piece).size) \
+                        : R1U64(line_end_pos, line_end_pos))
+
       if (is_title) {
          slide->title = _DECK_Trim(Str8Skip(line, hash_count));
+         slide->title_range = _DECK_RangeOf(slide->title);
       } else if (image_path.size != 0) {
          if (slide->image_path.size == 0) {
+            slide->image_range = _DECK_RangeOf(image_path);
             // A path that says where it starts from is used as it is.
             B32 is_absolute = (image_path.str[0] == '/' || image_path.str[0] == '\\' ||
                                (image_path.size >= 2 && image_path.str[1] == ':'));
@@ -335,7 +345,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
             item->kind = DECK_ItemKind_Text;
             item->text = line;
          }
+         item->text_range = _DECK_RangeOf(item->text);
       }
+#undef _DECK_RangeOf
       gap_before = 0;
    }
 

@@ -30,6 +30,22 @@ internal Rng2F32 VIEW_PageRectFromRect(Rng2F32 rect);
 // it. alpha is how much of it shows over what is already drawn.
 internal void VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha);
 
+// Where a piece of a slide was drawn, and where in the deck's text it is
+// from: what a click on the slide is a click on.
+typedef struct VIEW_Hit VIEW_Hit;
+struct VIEW_Hit {
+   VIEW_Hit* next;
+   Rng2F32   rect;
+   Rng1U64   text_range;
+};
+
+typedef struct VIEW_HitList VIEW_HitList;
+struct VIEW_HitList {
+   VIEW_Hit* first;
+   VIEW_Hit* last;
+   U64       count;
+};
+
 // image is the slide's picture, or 0 to draw the slide without it: loading is
 // the caller's business (DECK_ImageFromSlide). alpha is as for
 // VIEW_DrawImageFit, for the whole slide. Line lists for wrapped text go on
@@ -37,6 +53,10 @@ internal void VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha);
 //
 // A picture that could not be loaded (slide->load_failed) is drawn as a box
 // with its file's name in it.
-internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* image, Rng2F32 rect, F32 alpha);
+//
+// hits, if not 0, is given a hit for the title, for each line of the body
+// and for the picture, on arena.
+internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Slide* slide, IMG_Image* image, Rng2F32 rect, F32 alpha,
+                             VIEW_HitList* hits);
 
 #endif // VIEW_H
