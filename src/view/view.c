@@ -397,6 +397,14 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
 
    if (picture_is_beside) {
       if (image != 0) {
+         // Beside a body, the picture starts level with the body's first
+         // line, not in the middle of its half's height: its room is cut
+         // down to the picture's own height, from the top.
+         if (slide->item_count != 0 && image->size.x > 0 && image->size.y > 0) {
+            Vec2F32 room = Dim2F32(picture_rect);
+            F32     fit = Min(room.x / (F32)image->size.x, room.y / (F32)image->size.y);
+            picture_rect.max.y = picture_rect.min.y + (F32)image->size.y * fit;
+         }
          VIEW_DrawImageFit(image, picture_rect, alpha);
       } else if (picture_is_missing) {
          _VIEW_DrawMissingPicture(fonts, &colors, slide, picture_rect, scale, alpha);

@@ -83,13 +83,13 @@ global _EDIT_FormatRow _edit_format_rows[] = {
     {Str8LitComp("# Title"), Str8LitComp("starts a new slide, with a title"), Str8LitComp("# Title"), 2, 7},
     {Str8LitComp("---"), Str8LitComp("starts a new slide with no title"), Str8LitComp("---\n"), 4, 4},
     {Str8LitComp("## Heading"), Str8LitComp("a heading inside the slide"), Str8LitComp("## Heading"), 3, 10},
-    {Str8LitComp("- point"), Str8LitComp("a bullet. Tab moves it in, Shift+Tab out"), Str8LitComp("- point"), 2, 7},
-    {Str8LitComp("  - point"), Str8LitComp("an inner bullet: two more spaces in front"), Str8LitComp("  - point"), 4, 9},
+    {Str8LitComp("- point"), Str8LitComp("a bullet. Tab moves it in"), Str8LitComp("- point"), 2, 7},
+    {Str8LitComp("  - point"), Str8LitComp("an inner bullet. Shift+Tab moves it out"), Str8LitComp("  - point"), 4, 9},
     {Str8LitComp("![](picture.png)"), Str8LitComp("the slide's picture. Click to pick one"), Str8LitComp("![](picture.png)"), 4, 15, _EDIT_FormatAction_Pictures},
     {Str8LitComp("Any other line"), Str8LitComp("a paragraph. An empty line adds room"), Str8LitComp("Text"), 0, 4},
     // What these two do is said in EDIT_Build, with what the deck and the slide have now.
-    {Str8LitComp("@theme light"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Theme},
-    {Str8LitComp("@layout center"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Layout},
+    {Str8LitComp("@theme"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Theme},
+    {Str8LitComp("@layout"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Layout},
 };
 
 ////////////////////////////////
@@ -831,14 +831,14 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
                   // frame is drawn.
                   String8 what = format_row->what;
                   if (format_row->action == _EDIT_FormatAction_Theme) {
-                     what = PushStr8F(app_state->frame_arena, "the deck's colours, now %S. Click for the next",
+                     what = PushStr8F(app_state->frame_arena, "the deck's colours: %S. Click for the next",
                                       DECK_ThemeName(app_state->deck->theme));
                   } else if (format_row->action == _EDIT_FormatAction_Layout) {
                      DECK_Deck* deck = app_state->deck;
                      String8    now = (app_state->slide_idx < deck->slide_count)
                                           ? DECK_LayoutName(deck->slides[app_state->slide_idx].layout)
                                           : DECK_LayoutName(DECK_Layout_PictureRight);
-                     what = PushStr8F(app_state->frame_arena, "this slide's layout, now %S. Click for the next", now);
+                     what = PushStr8F(app_state->frame_arena, "this slide's layout: %S. Click for the next", now);
                   }
                   UI_Box* row = UI_ListRow(row_h, 0, UI_BoxFlag_DrawBackground | click_flags, "###edit format row %lld", i);
                   UI_Parent(row) UI_PrefHeight(UI_Pct(1, 1)) {
@@ -1002,7 +1002,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
             if (editor->cursor >= hit->text_range.min && editor->cursor <= hit->text_range.max) {
                F32 mark_w = Max(2.0f, (F32)(S32)(3.0f * ui));
                Core_D_Rect(R2F32P(rect.min.x - mark_w, rect.min.y, rect.min.x, rect.max.y), R2F32P(0, 0, 1, 1),
-                           V4F32(0.40f, 0.75f, 1.00f, 0.9f));
+                           VIEW_ColorsFromTheme(deck->theme).accent);
             }
          }
          caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Alt+Left / Alt+Right moves it",
