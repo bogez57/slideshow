@@ -15,13 +15,24 @@ struct App_State {
    WM_EventList events;      // this frame's, on frame_arena
    B32          quit;
 
+   // Set by a frame that wants fullscreen turned on or off. The main loop
+   // does it between frames - see _EntryPoint (main.c).
+   B32 toggle_fullscreen;
+
    DECK_Deck* deck;
-   U64        slide_idx; // the slide showing
+   U64        slide_idx;        // the slide showing
+   U64        slide_changed_us; // when it became the one showing. 0: never changed
+   F32        scroll_left_over; // mouse wheel movement not yet enough for a slide
 
    // A change of slide fades the old one out as the new one comes in.
    B32 fade_active;
-   U64 fade_from_idx; // the slide that was showing
+   U64 fade_from_idx; // the slide that was showing. Past the last: none, fade from the background
    U64 fade_start_us; // 0 until the frame that first draws the new slide
+
+   // Playing: the deck moves on by itself, a slide every _FR_PLAY_SECONDS,
+   // and from the last slide back to the first.
+   B32 playing;
+   U64 play_from_us; // when the slide showing began its turn
 };
 
 #endif // APP_STATE_H

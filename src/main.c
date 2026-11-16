@@ -7,6 +7,8 @@
 //
 //    bin\slideshow.exe            shows the images in data\slides
 //    bin\slideshow.exe <folder>   shows the images in that folder
+//    bin\slideshow.exe <image>    shows the images in that image's folder,
+//                                 starting at it
 //
 // Keys are in frame.c.
 
@@ -112,13 +114,13 @@ _EntryPoint(CmdLine* cmdline) {
    App_State app_state = {0};
    app_state.frame_arena = ArenaAlloc();
 
-   // The folder to show: the first thing on the command line that is not an
-   // option, or the default.
-   String8 folder = Str8Lit(DEFAULT_SLIDES_FOLDER);
+   // What to show: the first thing on the command line that is not an
+   // option - a folder, or one image of a folder - or the default.
+   String8 path = Str8Lit(DEFAULT_SLIDES_FOLDER);
    if (cmdline->inputs.first != 0) {
-      folder = cmdline->inputs.first->string;
+      path = cmdline->inputs.first->string;
    }
-   app_state.deck = DECK_OpenFolder(folder);
+   app_state.deck = DECK_OpenPath(path, &app_state.slide_idx);
    printf("%llu slides in %.*s\n", (unsigned long long)app_state.deck->slide_count, Str8VArg(app_state.deck->folder));
 
    // UseDefaultPosition: where Windows puts a new window - only the rect's
@@ -140,6 +142,15 @@ _EntryPoint(CmdLine* cmdline) {
 
       app_state.events = Core_WM_GetEvents(app_state.frame_arena, 0);
       _Main_RunFrame(&app_state);
+
+      // Between frames, not from inside one: the change of size makes Windows
+      // ask for a repaint before the call returns, and _Main_RepaintFrame
+      // does nothing while a frame is running - the window would show the
+      // frame drawn for its old size, stretched, until the next one.
+      if (app_state.toggle_fullscreen) {
+         app_state.toggle_fullscreen = 0;
+         Core_WM_WindowSetFullscreen(app_state.window, !Core_WM_WindowIsFullscreen(app_state.window));
+      }
 
       ArenaClear(app_state.frame_arena);
    }

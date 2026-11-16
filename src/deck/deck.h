@@ -3,7 +3,7 @@
 //
 // The slides, in the order they are shown. Today a deck is a folder: every
 // image file directly in it is a slide, in order of file name - slide2 before
-// slide10.
+// slide10. Opening one image file opens its folder, starting at that image.
 //
 // A slide's image is loaded the first time it is asked for, not when the deck
 // is opened, and only the slides around the one showing are kept: a folder of
@@ -30,6 +30,14 @@ struct DECK_Deck {
 // Never 0. A folder that is missing, or has no images in it, gives a deck
 // with no slides.
 internal DECK_Deck* DECK_OpenFolder(String8 folder);
+
+// As DECK_OpenFolder, for a path that is either a folder or one image file. A
+// file opens the folder it is in, and first_slide_out is given its slide's
+// index, which is where to start. For a folder that is 0.
+internal DECK_Deck* DECK_OpenPath(String8 path, U64* first_slide_out);
+
+// Releases every image the deck has loaded, and the deck itself.
+internal void DECK_Close(DECK_Deck* deck);
 
 // The image of a slide, loaded now if it is not yet. 0 if there is no such
 // slide or its file could not be loaded. Slides more than one away from this

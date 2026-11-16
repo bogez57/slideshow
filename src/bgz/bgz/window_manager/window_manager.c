@@ -71,6 +71,17 @@ Core_WM_WindowSetMinimized(WM_Window window, B32 minimized) {
    wm_window_set_minimized(window, minimized);
 }
 
+exported B32
+Core_WM_WindowIsFullscreen(WM_Window window) {
+   B32 result = wm_window_is_fullscreen(window);
+   return result;
+}
+
+exported void
+Core_WM_WindowSetFullscreen(WM_Window window, B32 fullscreen) {
+   wm_window_set_fullscreen(window, fullscreen);
+}
+
 exported void
 Core_WM_WindowClearCustomBorderData(WM_Window handle) {
    wm_window_clear_custom_border_data(handle);

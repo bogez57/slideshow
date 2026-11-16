@@ -105,6 +105,48 @@ DECK_OpenFolder(String8 folder) {
    return deck;
 }
 
+internal DECK_Deck*
+DECK_OpenPath(String8 path, U64* first_slide_out) {
+   DECK_Deck* deck = 0;
+   U64        first_slide = 0;
+
+   FileProperties properties = PropertiesFromFilePath(path);
+   B32            is_folder = !!(properties.flags & FilePropertyFlag_IsFolder);
+
+   if (!is_folder && IMG_NameIsImage(path)) {
+      // A file with nothing before its name is in the folder the program was
+      // started from.
+      String8 folder = Str8ChopLastSlash(path);
+      String8 name = Str8SkipLastSlash(path);
+      if (folder.size == 0) {
+         folder = Str8Lit(".");
+      }
+
+      deck = DECK_OpenFolder(folder);
+      for (U64 i = 0; i < deck->slide_count; i += 1) {
+         if (Str8Match(Str8SkipLastSlash(deck->slides[i].path), name, StringMatchFlag_CaseInsensitive)) {
+            first_slide = i;
+            break;
+         }
+      }
+   } else {
+      // A folder - or something that is neither, which as a folder gives the
+      // deck with no slides.
+      deck = DECK_OpenFolder(path);
+   }
+
+   *first_slide_out = first_slide;
+   return deck;
+}
+
+internal void
+DECK_Close(DECK_Deck* deck) {
+   for (U64 i = 0; i < deck->slide_count; i += 1) {
+      IMG_Release(&deck->slides[i].image);
+   }
+   ArenaRelease(deck->arena);
+}
+
 internal IMG_Image*
 DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
    IMG_Image* result = 0;

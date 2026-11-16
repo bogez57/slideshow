@@ -28,6 +28,11 @@ exported void            Core_WM_WindowSetMaximized(WM_Window window, B32 maximi
 exported B32             Core_WM_WindowIsMinimized(WM_Window window);
 exported void            Core_WM_WindowSetMinimized(WM_Window window, B32 minimized);
 
+// Fullscreen is the window with no frame, covering the monitor it is on. Its
+// place and size from before come back when fullscreen is turned off.
+exported B32             Core_WM_WindowIsFullscreen(WM_Window window);
+exported void            Core_WM_WindowSetFullscreen(WM_Window window, B32 fullscreen);
+
 exported void            Core_WM_WindowClearCustomBorderData(WM_Window handle);
 exported void            Core_WM_WindowPushCustomTitleBar(WM_Window handle, F32 thickness);
 exported void            Core_WM_WindowPushCustomTitleBarClientArea(WM_Window handle, Rng2F32 rect);
