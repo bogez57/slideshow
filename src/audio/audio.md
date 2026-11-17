@@ -43,6 +43,13 @@ at the right speed on a machine with nothing to hear it on.
 
 ## Not done yet
 
+- How long sound takes to be heard, past the card's own buffer, is what
+  Windows' clock for the stream says (audio_wasapi.c). On a Bluetooth
+  headset that was already playing when the stream opened, that clock was
+  seen to say about 60 ms where Windows' mix showed about 200 ms: a video's
+  picture is then that much ahead of its sound. Opened while the headset was
+  idle, the two agree.
+
 - Volume, other than off and on.
 - Following Windows when another card is made the default while the program
   runs. The card in use is kept until it stops answering.

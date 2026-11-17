@@ -440,16 +440,23 @@ VID_Update(VID_Video* video) {
 
    // By the sound while there is sound to go by: playing, and not run out.
    B32 sound_is_left = (video->has_sound && !(video->sound_at_end && video->ring_count == 0));
-   if (video->playing && sound_is_left) {
-      if (video->sound_on && video->heard_us != 0) {
-         // What is heard now: the note's moment, and on from when it was -
-         // or back, if that sound is still on its way to the speakers.
-         F64 since_s = ((F64)now_us - (F64)video->heard_us) / 1000000.0;
-         F64 heard_s = video->heard_time_s + Clamp(-0.5, since_s, 0.5);
+   B32 by_sound = (video->playing && sound_is_left);
+
+   // What is heard now: the note's moment, and on from when it was - or
+   // back, if that sound is still on its way to the speakers. No note yet:
+   // the sound has not started, and the clock waits for it.
+   B32 is_heard = (by_sound && video->sound_on && video->heard_us != 0);
+   F64 heard_s = 0;
+   if (is_heard) {
+      F64 since_s = ((F64)now_us - (F64)video->heard_us) / 1000000.0;
+      heard_s = video->heard_time_s + Clamp(-0.5, since_s, 0.5);
+   }
+
+   if (by_sound) {
+      if (is_heard && !video->need_frame) {
          // Never backwards: two notes a moment apart can disagree by a hair.
          video->position_s = Max(video->position_s, heard_s);
       }
-      // No note yet: the sound has not started, and the clock waits for it.
    } else if (video->playing && !is_waiting) {
       video->position_s += dt_s;
    }
@@ -459,14 +466,24 @@ VID_Update(VID_Video* video) {
    U8* due = 0;
    while (video->queue_count != 0) {
       _VID_Frame* frame = &video->queue[video->queue_first];
-      if (!video->need_frame && frame->time_s > video->position_s) {
+      if (video->need_frame) {
+         // The first frame after a start or a seek. Stopped, or with no
+         // sound to go by, it is shown at once. Playing by sound, its sound
+         // has started (below) and it is shown when that is heard: the
+         // sound takes a while to come out of the speakers - a fifth of a
+         // second, on a Bluetooth headset - and the picture waits for it.
+         if (by_sound && !(is_heard && frame->time_s <= heard_s)) {
+            break;
+         }
+      } else if (frame->time_s > video->position_s) {
          break;
       }
       due = frame->pixels;
       if (video->need_frame) {
          video->need_frame = 0;
-         // From the frame there is: a seek lands on a frame, not between two.
-         video->position_s = Max(video->position_s, frame->time_s);
+         // From the frame there is: a seek lands on a frame, not between
+         // two. Or from what is heard, which has reached it.
+         video->position_s = by_sound ? Max(heard_s, frame->time_s) : Max(video->position_s, frame->time_s);
       }
       video->queue_first = (video->queue_first + 1) % _VID_QUEUE_CAP;
       video->queue_count -= 1;
@@ -478,8 +495,8 @@ VID_Update(VID_Video* video) {
    }
 
    // Sound plays while the video does, once the picture it goes with is
-   // showing: not ahead of the first frame after a seek.
-   video->sound_on = (video->playing && !video->need_frame);
+   // there to be shown: not ahead of the first frame after a seek.
+   video->sound_on = (video->playing && (!video->need_frame || video->queue_count != 0));
    if (!video->sound_on) {
       video->heard_us = 0;
    }

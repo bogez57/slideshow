@@ -40,6 +40,7 @@ static const GUID _aud_clsid_device_enumerator = {0xBCDE0395, 0xE52F, 0x467C, {0
 static const GUID _aud_iid_device_enumerator = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
 static const GUID _aud_iid_audio_client = {0x1CB9AD4C, 0xDBFA, 0x4C32, {0xB1, 0x78, 0xC2, 0xF5, 0x68, 0xA7, 0x03, 0xB2}};
 static const GUID _aud_iid_render_client = {0xF294ACFC, 0x3146, 0x4483, {0xA7, 0xBF, 0xAD, 0xDC, 0xA7, 0xC2, 0x60, 0xE2}};
+static const GUID _aud_iid_audio_clock = {0xCD63314F, 0x3FBA, 0x4A1B, {0x81, 0x2C, 0xEF, 0x96, 0x35, 0x87, 0x28, 0xE7}};
 static const GUID _aud_format_float = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 
 // How much sound the card is asked to hold: less is less delay between a
@@ -98,6 +99,18 @@ _AUD_PlayThroughCard(AUD_Device* device) {
                   SUCCEEDED(IAudioClient_GetService(client, &_aud_iid_render_client, (void**)&render)) &&
                   SUCCEEDED(IAudioClient_Start(client)));
 
+   // The stream's clock, for how far behind what is written the speakers
+   // are. Without it, the card's buffer alone is taken to be the delay.
+   IAudioClock* clock = 0;
+   UINT64       clock_frequency = 0; // the clock's units in a second
+   U64          written_frames = 0;
+   F64          beyond_card_s = 0; // the delay past the card's buffer (below)
+   if (is_open && SUCCEEDED(IAudioClient_GetService(client, &_aud_iid_audio_clock, (void**)&clock))) {
+      if (FAILED(IAudioClock_GetFrequency(clock, &clock_frequency))) {
+         clock_frequency = 0;
+      }
+   }
+
    if (is_open) {
       HANDLE events[2] = {device->quit_event, wake_event};
       U32    missed = 0; // times in a row the card did not ask for sound
@@ -119,8 +132,8 @@ _AUD_PlayThroughCard(AUD_Device* device) {
          }
          missed = 0;
 
-         // What the card still holds is what will be heard before anything
-         // written now: the delay. The rest of its buffer is the room.
+         // What the card still holds is heard before anything written now.
+         // The rest of its buffer is the room.
          UINT32 held_frames = 0;
          if (FAILED(IAudioClient_GetCurrentPadding(client, &held_frames))) {
             break;
@@ -133,14 +146,41 @@ _AUD_PlayThroughCard(AUD_Device* device) {
          if (FAILED(IAudioRenderClient_GetBuffer(render, room_frames, &data))) {
             break;
          }
-         device->function(device->user, (F32*)data, room_frames, (F64)held_frames / (F64)AUD_SAMPLE_RATE);
+         // The delay: how long from now until what is written now is heard.
+         // What the card holds is the least of it. Windows keeps more of its
+         // own past the card's buffer - a Bluetooth headset, a fifth of a
+         // second - which only the stream's clock tells: everything written
+         // so far, less what it says has been played.
+         F64 held_s = (F64)held_frames / (F64)AUD_SAMPLE_RATE;
+         if (clock != 0 && clock_frequency != 0) {
+            UINT64 played = 0;
+            UINT64 played_qpc = 0; // when it said so, in 100 ns: the same clock as NowTimeUS
+            if (SUCCEEDED(IAudioClock_GetPosition(clock, &played, &played_qpc))) {
+               F64 written_s = (F64)written_frames / (F64)AUD_SAMPLE_RATE;
+               F64 played_s = (F64)played / (F64)clock_frequency;
+               F64 since_s = ((F64)NowTimeUS() - (F64)played_qpc / 10.0) / 1000000.0;
+               F64 clock_delay_s = written_s - played_s - since_s;
+               // The part past the card's buffer, kept at the most it has
+               // been. A Bluetooth headset's clock was seen to jump ahead a
+               // seventh of a second part way through, while the sound, as
+               // Windows mixes it, kept its delay: a delay grows when sound
+               // is held up, and does not shrink unless sound is thrown away.
+               // More than a second is not believed.
+               if (clock_delay_s < 1.0) {
+                  beyond_card_s = Max(beyond_card_s, clock_delay_s - held_s);
+               }
+            }
+         }
+         device->function(device->user, (F32*)data, room_frames, held_s + beyond_card_s);
          if (FAILED(IAudioRenderClient_ReleaseBuffer(render, room_frames, 0))) {
             break;
          }
+         written_frames += room_frames;
       }
       IAudioClient_Stop(client);
    }
 
+   if (clock != 0) IAudioClock_Release(clock);
    if (render != 0) IAudioRenderClient_Release(render);
    if (client != 0) IAudioClient_Release(client);
    if (card != 0) IMMDevice_Release(card);

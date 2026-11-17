@@ -207,12 +207,16 @@ _VID_AfterSeek(VID_Decoder* decoder) {
    }
 }
 
-// To the first byte of the file where the format can go there, which is
-// always before the first keyframe. Else to the first frame's time.
+// To the first byte of the file, which is always before the first
+// keyframe, for the formats that are a plain run of packets (.ts, .mpg).
+// Else to the first frame's time: a format with an index of its own - .mkv
+// - takes a seek to a byte without saying no, and then reads from wherever
+// it was.
 internal void
 _VID_SeekToStart(VID_Decoder* decoder) {
    int error = -1;
-   if (!(decoder->format->iformat->flags & AVFMT_NO_BYTE_SEEK)) {
+   int format_flags = decoder->format->iformat->flags;
+   if ((format_flags & AVFMT_TS_DISCONT) && !(format_flags & AVFMT_NO_BYTE_SEEK)) {
       error = av_seek_frame(decoder->format, decoder->stream_idx, 0, AVSEEK_FLAG_BYTE);
    }
    if (error < 0) {
@@ -363,6 +367,15 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
                decoder->sound_seconds_per_tick = av_q2d(sound_stream->time_base);
                decoder->sound_zero_s = (F64)decoder->start_ticks * decoder->seconds_per_tick;
                info_out->has_sound = 1;
+
+               // Sound that goes on past the last frame is played to its
+               // end, so the video is as long as its sound.
+               if (sound_stream->duration != AV_NOPTS_VALUE && sound_stream->duration > 0) {
+                  S64 sound_start = (sound_stream->start_time != AV_NOPTS_VALUE) ? sound_stream->start_time : 0;
+                  F64 sound_end_s = (F64)(sound_start + sound_stream->duration) * decoder->sound_seconds_per_tick -
+                                    decoder->sound_zero_s;
+                  info_out->duration_s = Max(info_out->duration_s, sound_end_s);
+               }
             } else {
                LogUserErrorF("The sound of %S can't be decoded (%s): it plays without\n", path, sound_codec->name);
                av_frame_free(&decoder->sound_frame);
