@@ -464,41 +464,77 @@ _DECK_MoveSlideImage(DECK_Slide* dst, DECK_Slide* src) {
    src->video = 0;
 }
 
+// dst_slide is src_slide, as the deck was before: it gets what src_slide had.
+internal void
+_DECK_TakeFromCounterpart(DECK_Slide* dst_slide, DECK_Slide* src_slide) {
+   if (IMG_IsLoaded(&src_slide->image)) {
+      _DECK_MoveSlideImage(dst_slide, src_slide);
+   } else if (src_slide->load_failed) {
+      // A file that could not be loaded is not tried again either.
+      dst_slide->load_failed = 1;
+   }
+}
+
 internal void
 DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
-   //- bgz: first, each slide from its own counterpart
+   Temp scratch = ScratchBegin(0, 0);
+
+   // Several slides can show the same file, and each must get what it had
+   // itself: not what its neighbour had while the neighbour - the slide
+   // showing, perhaps, with its video playing - is left to load again from
+   // the start. So first each slide of dst is matched with the one of src it
+   // is, and takes only from that one: what that one did not have loaded, it
+   // does not have either. Only a slide that matches none takes from what is
+   // left over.
+   B32* dst_matched = PushArray(scratch.arena, B32, dst->slide_count + 1);
+   B32* src_matched = PushArray(scratch.arena, B32, src->slide_count + 1);
+
+   //- bgz: the same file and the same title: the same slide
    //
-   // Several slides can show the same file. The first of them in dst takes
-   // from the first of them in src, the second from the second, and so on:
-   // a slide keeps what it had loaded, and does not get what its neighbour
-   // had while the neighbour - the slide showing, perhaps, with its video
-   // playing - is left to load again from the start.
+   // Whatever was added, taken away or moved around it.
    for (U64 i = 0; i < dst->slide_count; i += 1) {
       DECK_Slide* dst_slide = &dst->slides[i];
       if (dst_slide->image_path.size == 0) {
          continue;
       }
+      for (U64 j = 0; j < src->slide_count; j += 1) {
+         DECK_Slide* src_slide = &src->slides[j];
+         if (!src_matched[j] && Str8Match(src_slide->image_path, dst_slide->image_path, 0) &&
+             Str8Match(src_slide->title, dst_slide->title, 0)) {
+            dst_matched[i] = 1;
+            src_matched[j] = 1;
+            _DECK_TakeFromCounterpart(dst_slide, src_slide);
+            break;
+         }
+      }
+   }
 
-      // Which of the slides with this file it is, in dst.
+   //- bgz: then by order, among the slides of a file not matched yet
+   //
+   // A title being typed: the first of them left in dst is the first of
+   // them left in src, the second the second, and so on.
+   for (U64 i = 0; i < dst->slide_count; i += 1) {
+      DECK_Slide* dst_slide = &dst->slides[i];
+      if (dst_slide->image_path.size == 0 || dst_matched[i]) {
+         continue;
+      }
+      // 1 is matched by title; 2, in this pass, is still counted on both
+      // sides, so that nth means the same in dst and in src.
       U64 nth = 0;
       for (U64 k = 0; k < i; k += 1) {
-         if (Str8Match(dst->slides[k].image_path, dst_slide->image_path, 0)) {
+         if (dst_matched[k] != 1 && Str8Match(dst->slides[k].image_path, dst_slide->image_path, 0)) {
             nth += 1;
          }
       }
-      // The same one in src, if src has that many.
       for (U64 j = 0, seen = 0; j < src->slide_count; j += 1) {
          DECK_Slide* src_slide = &src->slides[j];
-         if (!Str8Match(src_slide->image_path, dst_slide->image_path, 0)) {
+         if (src_matched[j] == 1 || !Str8Match(src_slide->image_path, dst_slide->image_path, 0)) {
             continue;
          }
          if (seen == nth) {
-            if (IMG_IsLoaded(&src_slide->image)) {
-               _DECK_MoveSlideImage(dst_slide, src_slide);
-            } else if (src_slide->load_failed) {
-               // A file that could not be loaded is not tried again either.
-               dst_slide->load_failed = 1;
-            }
+            dst_matched[i] = 2;
+            src_matched[j] = 2;
+            _DECK_TakeFromCounterpart(dst_slide, src_slide);
             break;
          }
          seen += 1;
@@ -507,20 +543,56 @@ DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
 
    //- bgz: then what is left over
    //
-   // Slides were added, taken away or moved, and the counts do not line up:
-   // a slide still without its picture takes it from any slide of src that
-   // still has it.
+   // A slide that is in dst but was not in src - one more slide of a file
+   // than src had, or one that was gone for an edit or two and is back -
+   // takes a picture of its file that no slide of src took: from a slide of
+   // src not matched, and then from src's spares.
    for (U64 i = 0; i < dst->slide_count; i += 1) {
       DECK_Slide* dst_slide = &dst->slides[i];
-      if (dst_slide->image_path.size == 0 || IMG_IsLoaded(&dst_slide->image) || dst_slide->load_failed) {
+      if (dst_slide->image_path.size == 0 || dst_matched[i] || IMG_IsLoaded(&dst_slide->image) || dst_slide->load_failed) {
          continue;
       }
-      for (U64 j = 0; j < src->slide_count; j += 1) {
-         DECK_Slide* src_slide = &src->slides[j];
+      for (U64 j = 0; j < src->slide_count + src->spare_count; j += 1) {
+         DECK_Slide* src_slide = (j < src->slide_count) ? &src->slides[j] : &src->spares[j - src->slide_count];
          if (IMG_IsLoaded(&src_slide->image) && Str8Match(src_slide->image_path, dst_slide->image_path, 0)) {
             _DECK_MoveSlideImage(dst_slide, src_slide);
             break;
          }
+      }
+   }
+
+   ScratchEnd(scratch);
+
+   //- bgz: and what no slide took, kept for a while
+   //
+   // A picture of a file that a slide of dst still shows: its own slide may
+   // be back at the next key. The rest stays in src, and goes with it.
+   U64 spare_count = 0;
+   for (U64 j = 0; j < src->slide_count + src->spare_count; j += 1) {
+      DECK_Slide* src_slide = (j < src->slide_count) ? &src->slides[j] : &src->spares[j - src->slide_count];
+      if (IMG_IsLoaded(&src_slide->image)) {
+         spare_count += 1;
+      }
+   }
+   spare_count = Min(spare_count, DECK_SPARE_MAX);
+   if (spare_count != 0) {
+      dst->spares = PushArray(dst->arena, DECK_Slide, spare_count);
+   }
+   for (U64 j = 0; j < src->slide_count + src->spare_count && dst->spare_count < spare_count; j += 1) {
+      DECK_Slide* src_slide = (j < src->slide_count) ? &src->slides[j] : &src->spares[j - src->slide_count];
+      if (!IMG_IsLoaded(&src_slide->image)) {
+         continue;
+      }
+      B32 is_shown = 0;
+      for (U64 i = 0; i < dst->slide_count && !is_shown; i += 1) {
+         is_shown = Str8Match(dst->slides[i].image_path, src_slide->image_path, 0);
+      }
+      if (is_shown) {
+         DECK_Slide* spare = &dst->spares[dst->spare_count];
+         dst->spare_count += 1;
+         spare->image_path = PushStr8Copy(dst->arena, src_slide->image_path);
+         spare->spared_us  = (j < src->slide_count) ? NowTimeUS() : src_slide->spared_us;
+         _DECK_MoveSlideImage(spare, src_slide);
       }
    }
 }
@@ -716,12 +788,27 @@ DECK_UpdateVideos(DECK_Deck* deck) {
          VID_Update(deck->slides[i].video);
       }
    }
+   // A spare's video keeps its time too, for when its slide is back. A
+   // spare whose slide has not come back by now is not kept any longer.
+   U64 now_us = NowTimeUS();
+   for (U64 i = 0; i < deck->spare_count; i += 1) {
+      DECK_Slide* spare = &deck->spares[i];
+      if (IMG_IsLoaded(&spare->image) && now_us - spare->spared_us > (U64)(DECK_SPARE_SECONDS * 1000000.0)) {
+         _DECK_ReleaseSlideImage(spare);
+      }
+      if (spare->video != 0) {
+         VID_Update(spare->video);
+      }
+   }
 }
 
 internal void
 DECK_Close(DECK_Deck* deck) {
    for (U64 i = 0; i < deck->slide_count; i += 1) {
       _DECK_ReleaseSlideImage(&deck->slides[i]);
+   }
+   for (U64 i = 0; i < deck->spare_count; i += 1) {
+      _DECK_ReleaseSlideImage(&deck->spares[i]);
    }
    ArenaRelease(deck->arena);
 }

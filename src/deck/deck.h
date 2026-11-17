@@ -100,6 +100,9 @@ struct DECK_Slide {
    // picture is, by code that does not know the difference.
    VID_Video* video;
 
+   // For one of a deck's spares only: when it lost its slide.
+   U64 spared_us;
+
    // Where in the deck's text the slide begins: the start of its first line.
    // 0 in a folder of images.
    U64 text_pos;
@@ -127,6 +130,10 @@ struct DECK_Slide {
    U64        item_count;
 };
 
+// A deck's spares (below): how many at most, and for how long.
+#define DECK_SPARE_MAX     8
+#define DECK_SPARE_SECONDS 5.0
+
 typedef struct DECK_Deck DECK_Deck;
 struct DECK_Deck {
    Arena*      arena;  // the deck's own: everything it points to is on it
@@ -142,6 +149,14 @@ struct DECK_Deck {
    DECK_Theme theme;
    B32        has_theme_line;
    Rng1U64    theme_line;
+
+   // Pictures that were loaded for slides that are gone, kept while a slide
+   // of the deck still shows their file (DECK_TakeImages). Typing over a
+   // title line takes its slide away for a key or two: when the slide is
+   // back it gets its picture back, and a video goes on from where it was.
+   // Only image_path, image and video are set. At most DECK_SPARE_MAX.
+   DECK_Slide* spares;
+   U64         spare_count;
 };
 
 // As written after @theme and @layout.
@@ -168,7 +183,8 @@ internal U64 DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos);
 // Moves the pictures src has loaded over to the slides of dst that show the
 // same file, so that a deck read again does not decode them again. src is
 // left with none of the ones moved. A file src could not load is marked as
-// not loadable in dst too.
+// not loadable in dst too. What no slide of dst takes, of a file a slide of
+// dst still shows, goes to dst's spares.
 internal void DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src);
 
 // Opens whichever kind of deck path is: a text file, a folder, or one image
@@ -201,7 +217,8 @@ internal VID_Video* DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx);
 // Whether the slide's picture is a video file, open or not. Not one that
 // could not be opened.
 internal B32 DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx);
-// Once a frame: every open video's VID_Update.
+// Once a frame: every open video's VID_Update, and spares kept for longer
+// than DECK_SPARE_SECONDS released.
 internal void DECK_UpdateVideos(DECK_Deck* deck);
 
 // Lets go of a slide's picture and loads it again: for a file that has
