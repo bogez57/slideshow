@@ -73,9 +73,19 @@ It is the LGPL build, used as separate DLLs and not changed. `LICENSE.txt` is
 its licence. A program that ships with these DLLs has to say that it uses
 FFmpeg and under which licence, and let the DLLs be replaced.
 
+## The graphics card
+
+`video_ffmpeg.c` decodes on the graphics card where the card has a decoder
+for the stream (H.264 and H.265 on nearly every card), through D3D11VA, and
+on the processor where it has not. The decoded frame is brought back to the
+program's memory and goes the same way as before, so nothing outside that
+one file knows which of the two did the work. The log says which, once per
+video. `_VID_USE_GRAPHICS_CARD` at the top of the file turns it off.
+
 ## Not done yet
 
-- Decoding on the graphics card. All decoding is on the processor.
+- A frame decoded on the card is copied back to memory and then up again as
+  a texture. Drawing it straight from the card would save both copies, and
+  would tie the decoder to the renderer.
 - A video turned on its side by its file's rotation mark (some phone videos)
   is shown as stored, not turned upright.
-- Looping.

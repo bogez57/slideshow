@@ -19,8 +19,21 @@
 //                  channels of F32 at the rate asked for
 //    libavutil     what the three share
 //
-// Decoding is on the processor, on as many threads as FFmpeg sees fit. The
-// graphics card's decoders are not used.
+// Decoding is on the graphics card where it can be (_VID_USE_GRAPHICS_CARD):
+// the card has circuits for H.264, H.265 and a few more, which take a 4K
+// frame in a fraction of the time the processor does. FFmpeg drives them
+// through Windows (D3D11VA, or DXVA2 on what has no D3D11). The frame is
+// then brought back from the card's memory to the program's, and from there
+// on nothing is different: libswscale makes RGBA of it. The card's device
+// is FFmpeg's own, not the renderer's - the frame does not stay on the card
+// to be drawn from there, which would tie this file to the renderer.
+//
+// Where the card can't - a codec it has no circuit for, a form of H.265 it
+// does not know, no card - decoding is on the processor, on as many threads
+// as FFmpeg sees fit, as it was before. That is found out when the file is
+// opened, or by FFmpeg at the first frame. A card that fails later, part
+// way through a file, is given up on: the file is opened again on the
+// processor and goes on from where it was (_VID_FallBackToProcessor).
 //
 // FFmpeg's memory is its own (malloc): its libraries are DLLs with no way
 // to be given an arena. Everything it allocates here is let go of in
@@ -45,11 +58,15 @@
 #include "libswscale/swscale.h"
 #include "libswresample/swresample.h"
 #include "libavutil/channel_layout.h"
+#include "libavutil/hwcontext.h"
 #if defined(__clang__)
 # pragma clang diagnostic pop
 #endif
 #pragma pop_macro("global")
 #pragma pop_macro("internal")
+
+// 0: every file is decoded on the processor.
+#define _VID_USE_GRAPHICS_CARD 1
 
 // Packets of the file read while looking for the other stream's: a file has
 // its video and its sound in turns, and the one asked for is rarely the
@@ -74,6 +91,13 @@ struct VID_Decoder {
    AVPacket*        packet;
    AVFrame*         frame;
    struct SwsContext* scale;
+
+   //- bgz: decoding on the graphics card. card is 0 when it is not used
+   AVBufferRef* card;        // FFmpeg's device on it
+   int          card_format; // the form a frame still on the card has (enum AVPixelFormat)
+   AVFrame*     card_frame;  // a frame brought back from it
+   B32          card_said;   // the log has been told that frames come from it
+   F64          skip_until_s; // after giving up on the card: frames before this were given out already
 
    Vec2S32 size;         // of the frames given out
    F64     seconds_per_tick; // the stream's time base
@@ -236,6 +260,80 @@ _VID_FFmpegError(Arena* arena, int code) {
    return result;
 }
 
+// FFmpeg asks which of the forms a stream's frames can come out in is
+// wanted: the card's, if it is among them. If it is not - the card has no
+// circuit for this stream after all - FFmpeg's own choice, which is the
+// processor.
+internal enum AVPixelFormat
+_VID_PickFormat(AVCodecContext* codec, const enum AVPixelFormat* formats) {
+   VID_Decoder* decoder = (VID_Decoder*)codec->opaque;
+   for (const enum AVPixelFormat* format = formats; *format != AV_PIX_FMT_NONE; format += 1) {
+      if ((int)*format == decoder->card_format) {
+         return *format;
+      }
+   }
+   return avcodec_default_get_format(codec, formats);
+}
+
+// Makes decoder->codec for the video stream and starts it: on the graphics
+// card if use_card and the card has a decoder for the stream, else on the
+// processor. Returns FFmpeg's error, under 0, if it could not be started;
+// decoder->codec is then 0.
+internal int
+_VID_OpenVideoCodec(VID_Decoder* decoder, const AVCodec* codec, B32 use_card) {
+   AVStream* stream = decoder->format->streams[decoder->stream_idx];
+   int       error = 0;
+
+   decoder->codec = avcodec_alloc_context3(codec);
+   if (decoder->codec == 0) {
+      return AVERROR(ENOMEM);
+   }
+   error = avcodec_parameters_to_context(decoder->codec, stream->codecpar);
+
+   if (error >= 0) {
+      //- bgz: the card, if it has a decoder for this: D3D11 first
+      if (use_card && _VID_USE_GRAPHICS_CARD) {
+         enum AVHWDeviceType kinds[] = {AV_HWDEVICE_TYPE_D3D11VA, AV_HWDEVICE_TYPE_DXVA2};
+         for (U64 kind_idx = 0; kind_idx < ArrayCount(kinds) && decoder->card == 0; kind_idx += 1) {
+            for (int i = 0;; i += 1) {
+               const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
+               if (config == 0) {
+                  break;
+               }
+               if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && config->device_type == kinds[kind_idx]) {
+                  if (av_hwdevice_ctx_create(&decoder->card, kinds[kind_idx], 0, 0, 0) >= 0) {
+                     decoder->card_format = (int)config->pix_fmt;
+                  } else {
+                     decoder->card = 0;
+                  }
+                  break;
+               }
+            }
+         }
+         if (decoder->card != 0) {
+            decoder->codec->hw_device_ctx = av_buffer_ref(decoder->card);
+            decoder->codec->opaque = decoder;
+            decoder->codec->get_format = _VID_PickFormat;
+            if (decoder->codec->hw_device_ctx == 0) {
+               av_buffer_unref(&decoder->card);
+               decoder->codec->get_format = avcodec_default_get_format;
+            }
+         }
+      }
+
+      // 0: as many threads as it sees fit - for the processor, when it is
+      // the one decoding.
+      decoder->codec->thread_count = 0;
+      error = avcodec_open2(decoder->codec, codec, 0);
+   }
+
+   if (error < 0) {
+      avcodec_free_context(&decoder->codec);
+      av_buffer_unref(&decoder->card);
+   }
+   return error;
+}
+
 internal void
 VID_DecoderClose(VID_Decoder* decoder) {
    if (decoder == 0) {
@@ -250,8 +348,10 @@ VID_DecoderClose(VID_Decoder* decoder) {
    avcodec_free_context(&decoder->sound_codec);
    sws_freeContext(decoder->scale);
    av_frame_free(&decoder->frame);
+   av_frame_free(&decoder->card_frame);
    av_packet_free(&decoder->packet);
    avcodec_free_context(&decoder->codec);
+   av_buffer_unref(&decoder->card);
    avformat_close_input(&decoder->format);
 }
 
@@ -285,27 +385,23 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
    } else {
       AVStream* stream = decoder->format->streams[decoder->stream_idx];
 
-      decoder->codec = avcodec_alloc_context3(codec);
-      if (decoder->codec == 0) {
-         LogUserErrorF("Out of memory opening %S\n", path);
-      } else if ((error = avcodec_parameters_to_context(decoder->codec, stream->codecpar)) < 0) {
-         LogUserErrorF("Could not set up the decoder for %S: %S\n", path, _VID_FFmpegError(scratch.arena, error));
+      // On the card, and if that will not even start, on the processor.
+      error = _VID_OpenVideoCodec(decoder, codec, 1);
+      if (error < 0) {
+         error = _VID_OpenVideoCodec(decoder, codec, 0);
+      }
+      if (error < 0) {
+         LogUserErrorF("Could not start the %s decoder for %S: %S\n", codec->name, path,
+                       _VID_FFmpegError(scratch.arena, error));
+      } else if (decoder->codec->width <= 0 || decoder->codec->height <= 0) {
+         LogUserErrorF("%S does not say how big its picture is\n", path);
       } else {
-         // 0: as many threads as it sees fit.
-         decoder->codec->thread_count = 0;
-         error = avcodec_open2(decoder->codec, codec, 0);
-         if (error < 0) {
-            LogUserErrorF("Could not start the %s decoder for %S: %S\n", codec->name, path,
-                          _VID_FFmpegError(scratch.arena, error));
-         } else if (decoder->codec->width <= 0 || decoder->codec->height <= 0) {
-            LogUserErrorF("%S does not say how big its picture is\n", path);
-         } else {
-            decoder->packet = av_packet_alloc();
-            decoder->frame = av_frame_alloc();
-            is_open = (decoder->packet != 0 && decoder->frame != 0);
-            if (!is_open) {
-               LogUserErrorF("Out of memory opening %S\n", path);
-            }
+         decoder->packet = av_packet_alloc();
+         decoder->frame = av_frame_alloc();
+         decoder->card_frame = av_frame_alloc();
+         is_open = (decoder->packet != 0 && decoder->frame != 0 && decoder->card_frame != 0);
+         if (!is_open) {
+            LogUserErrorF("Out of memory opening %S\n", path);
          }
       }
 
@@ -394,9 +490,37 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
    return decoder;
 }
 
+// The card has failed part way through the file: the stream is decoded on
+// the processor from here on, picked up at the last frame given out. 0 if
+// the processor can't either.
 internal B32
-VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
+_VID_FallBackToProcessor(VID_Decoder* decoder) {
+   if (decoder->card == 0) {
+      return 0;
+   }
+   LogInfoF("Video %S: the graphics card stopped decoding it. The processor goes on with it\n", decoder->path);
+
+   const AVCodec* codec = decoder->codec->codec;
+   F64            resume_s = decoder->last_time_s;
+   avcodec_free_context(&decoder->codec);
+   av_buffer_unref(&decoder->card);
+   av_frame_unref(decoder->frame);
+   av_frame_unref(decoder->card_frame);
+
+   B32 result = (_VID_OpenVideoCodec(decoder, codec, 0) >= 0);
+   if (result) {
+      // Back to the keyframe before where it was: the frames from there up
+      // to it were given out once already, and are passed over.
+      VID_DecoderSeek(decoder, resume_s);
+      decoder->skip_until_s = resume_s;
+   }
+   return result;
+}
+
+internal B32
+_VID_NextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out, B32* card_failed_out) {
    B32 result = 0;
+   *card_failed_out = 0;
 
    // The codec is asked for a frame. When it wants more of the file first,
    // it is fed the next packet of the video stream and asked again - several
@@ -417,6 +541,10 @@ VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
       if (error != AVERROR(EAGAIN)) {
          // AVERROR_EOF: the end. Anything else: it can't go on.
          if (error != AVERROR_EOF) {
+            if (decoder->card != 0) {
+               *card_failed_out = 1;
+               break;
+            }
             Temp scratch = ScratchBegin(0, 0);
             LogUserErrorF("%S stopped decoding: %S\n", decoder->path, _VID_FFmpegError(scratch.arena, error));
             ScratchEnd(scratch);
@@ -442,9 +570,30 @@ VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
 
    if (result) {
       AVFrame* frame = decoder->frame;
+      S64      ticks = frame->best_effort_timestamp;
+
+      //- bgz: a frame that is on the card: brought back to the program's memory
+      if (decoder->card != 0 && frame->format == decoder->card_format) {
+         av_frame_unref(decoder->card_frame);
+         if (av_hwframe_transfer_data(decoder->card_frame, frame, 0) < 0) {
+            av_frame_unref(frame);
+            *card_failed_out = 1;
+            return 0;
+         }
+         av_frame_unref(frame);
+         frame = decoder->card_frame;
+         if (!decoder->card_said) {
+            decoder->card_said = 1;
+            LogInfoF("Video %S: decoded on the graphics card (%s)\n", decoder->path,
+                     av_hwdevice_get_type_name(((AVHWDeviceContext*)decoder->card->data)->type));
+         }
+      } else if (decoder->card != 0 && !decoder->card_said) {
+         // FFmpeg found the card has no decoder for this stream after all.
+         decoder->card_said = 1;
+         LogInfoF("Video %S: decoded on the processor: the graphics card has no decoder for it\n", decoder->path);
+      }
 
       //- bgz: when it is shown
-      S64 ticks = frame->best_effort_timestamp;
       F64 time_s = 0;
       if (ticks != AV_NOPTS_VALUE) {
          time_s = (F64)(ticks - decoder->start_ticks) * decoder->seconds_per_tick;
@@ -453,7 +602,11 @@ VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
          time_s = decoder->last_time_s + ((decoder->frame_s > 0) ? decoder->frame_s : 0.04);
       }
       time_s = Max(time_s, 0.0);
-      decoder->last_time_s = time_s;
+      B32 is_skipped = (time_s <= decoder->skip_until_s && decoder->skip_until_s > 0);
+      if (!is_skipped) {
+         decoder->skip_until_s = 0;
+      }
+      decoder->last_time_s = Max(time_s, decoder->skip_until_s);
       *time_s_out = time_s;
 
       //- bgz: to RGBA, at the size given out
@@ -475,6 +628,28 @@ VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
    }
 
    return result;
+}
+
+internal B32
+VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
+   for (;;) {
+      F64 skip_until_s = decoder->skip_until_s;
+      B32 card_failed = 0;
+      B32 result = _VID_NextFrame(decoder, pixels, time_s_out, &card_failed);
+      if (card_failed) {
+         if (_VID_FallBackToProcessor(decoder)) {
+            continue;
+         }
+         LogUserErrorF("%S stopped decoding\n", decoder->path);
+         return 0;
+      }
+      // After a fall back: the frames given out before it are not given
+      // out again.
+      if (result && skip_until_s > 0 && *time_s_out <= skip_until_s) {
+         continue;
+      }
+      return result;
+   }
 }
 
 // A frame of the file's sound, just decoded, into sound_pending as two
@@ -589,6 +764,7 @@ VID_DecoderNextSound(VID_Decoder* decoder, F32* samples, U64 frame_cap, F64* tim
 internal void
 VID_DecoderSeek(VID_Decoder* decoder, F64 time_s) {
    decoder->last_time_s = time_s;
+   decoder->skip_until_s = 0;
 
    S64 ticks = decoder->start_ticks;
    if (decoder->seconds_per_tick > 0) {
