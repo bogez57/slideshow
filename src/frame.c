@@ -383,7 +383,7 @@ FR_SyncDeck(App_State* app_state) {
 //    slide number     I
 //    notes            N: the slide's @note lines and what comes next
 //    video            K plays and pauses the slide's video, J and L go back
-//                     and on 5 seconds (frame_video.c)
+//                     and on 5 seconds, M turns sound off and on (frame_video.c)
 //    presenter view   V: a second window with the slide, the next one, the
 //                     notes and a clock (frame_presenter.c)
 //    this list        H or F1
@@ -755,6 +755,7 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
           {Str8Lit("V"), Str8Lit("Presenter view, in a second window")},
           {Str8Lit("K"), Str8Lit("Play or pause the slide's video")},
           {Str8Lit("J / L"), Str8Lit("Video back or on 5 seconds")},
+          {Str8Lit("M"), Str8Lit("Sound off or on")},
           {Str8Lit("H, F1"), Str8Lit("This list")},
           {Str8Lit("F5, Esc"), Str8Lit("Back to editing (a text deck)")},
           {Str8Lit("Esc"), Str8Lit("Leave fullscreen, or quit")},

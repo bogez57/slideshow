@@ -2,7 +2,7 @@
 //~ bgz: video
 //
 // A video file, played into a texture: what a slide draws where a picture
-// would go. No sound yet.
+// would go, with its sound through the mixer (src\audio).
 //
 // The layer is in two parts, so that what decodes can be changed without
 // anything else knowing (video.md has the whole of it):
@@ -11,8 +11,8 @@
 //                           frames waiting, a clock, and the texture. Knows
 //                           nothing of file formats or codecs.
 //    video_decoder.h        what the player asks of a decoder: open, next
-//                           frame, seek, close. Five functions.
-//    video_ffmpeg.c         those five, done with FFmpeg. The only file
+//                           frame, next sound, seek, close.
+//    video_ffmpeg.c         those, done with FFmpeg. The only file
 //                           that knows FFmpeg is there.
 //
 // The rest of the program uses only what is declared in this file.

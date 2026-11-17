@@ -51,7 +51,7 @@ if not exist %bin%\bgz.lib (
 :: the DLLs, which are copied next to the exe - only if they are not there
 :: yet or are older, since they are large.
 set "ffmpeg=src\third_party\ffmpeg"
-set "ffmpeg_libs=%ffmpeg%\lib\avformat.lib %ffmpeg%\lib\avcodec.lib %ffmpeg%\lib\avutil.lib %ffmpeg%\lib\swscale.lib"
+set "ffmpeg_libs=%ffmpeg%\lib\avformat.lib %ffmpeg%\lib\avcodec.lib %ffmpeg%\lib\avutil.lib %ffmpeg%\lib\swscale.lib %ffmpeg%\lib\swresample.lib"
 xcopy /D /Y /Q %ffmpeg%\bin\*.dll %bin%\ >NUL || echo Failed to copy FFmpeg's DLLs
 ::--- (end) ffmpeg -----------------------------------------
 

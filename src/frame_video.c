@@ -9,15 +9,16 @@
 //
 // Its controls are a strip along the bottom of where it is drawn:
 //
-//    [Pause]  ====|--------------------  0:12 / 1:30
+//    [Pause]  ====|--------------------  0:12 / 1:30  [Sound]
 //
-// A click on the word plays and pauses, a click on the bar goes to that
-// point. The edit screen draws the strip in the preview and takes its clicks
+// A click on the first word plays and pauses, a click on the bar goes to
+// that point, a click on the last word turns all sound off and on. The edit screen draws the strip in the preview and takes its clicks
 // (frame_edit.c). The presentation draws it for a moment after one of the
 // video's keys, and while the video is paused (frame.c):
 //
 //    K            play, pause
 //    J / L        back / on, 5 seconds
+//    M            sound off, on (all of the program's: src\audio)
 //
 // Nothing here knows how a video is decoded: it uses video.h only.
 
@@ -30,6 +31,7 @@ struct _FR_VideoStrip {
    Rng2F32 strip;  // all of it
    Rng2F32 button; // the word that plays and pauses
    Rng2F32 bar;    // the length of the video, left to right
+   Rng2F32 sound;  // the word that turns sound off and on
    F32     px;
    F32     time_x; // where the time is written
 };
@@ -62,14 +64,20 @@ _FR_VideoStripFromRect(App_State* app_state, Rng2F32 video_rect, F32 ui) {
    result.button = R2F32P(result.strip.min.x, result.strip.min.y, Min(result.strip.min.x + button_w, result.strip.max.x),
                           result.strip.max.y);
 
+   // At the right end, as wide as the wider of its two words.
+   F32 sound_w = Max(TXT_Width(fonts->regular, px, Str8Lit("Sound")), TXT_Width(fonts->regular, px, Str8Lit("Muted"))) + pad * 2.0f;
+   result.sound = R2F32P(Max(result.strip.max.x - sound_w, result.button.max.x), result.strip.min.y, result.strip.max.x,
+                         result.strip.max.y);
+
    // The time takes as much room as its widest: "00:00 / 00:00".
    F32 time_w = TXT_Width(fonts->regular, px, Str8Lit("00:00 / 00:00"));
-   result.time_x = result.strip.max.x - pad - time_w;
+   result.time_x = result.sound.min.x - pad - time_w;
    result.bar = R2F32P(result.button.max.x + pad, result.strip.min.y, result.time_x - pad, result.strip.max.y);
    if (result.bar.max.x < result.bar.min.x) {
       // Too narrow for the bar and the time: the word alone.
       result.bar.max.x = result.bar.min.x;
       result.time_x = result.strip.max.x;
+      result.sound.min.x = result.sound.max.x; // nor for the last word
    }
 
    return result;
@@ -96,6 +104,18 @@ FR_VideoDrawStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F3
    F32     word_w = TXT_Width(fonts->regular, strip.px, word);
    TXT_Draw(fonts->regular, strip.px, V2F32(strip.button.min.x + (Dim2F32(strip.button).x - word_w) * 0.5f, text_y),
             color_text, word);
+
+   //- bgz: the last word: dim when sound is off
+   if (Dim2F32(strip.sound).x > 0) {
+      if (Contains2F32(strip.sound, mouse)) {
+         Core_D_Rect(strip.sound, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.18f));
+      }
+      B32     is_muted = AUD_IsMuted();
+      String8 sound_word = is_muted ? Str8Lit("Muted") : Str8Lit("Sound");
+      F32     sound_word_w = TXT_Width(fonts->regular, strip.px, sound_word);
+      TXT_Draw(fonts->regular, strip.px, V2F32(strip.sound.min.x + (Dim2F32(strip.sound).x - sound_word_w) * 0.5f, text_y),
+               is_muted ? V4F32(1, 1, 1, 0.5f) : color_text, sound_word);
+   }
 
    //- bgz: the bar: a thin line, the part played brighter, thicker under the mouse
    F64 duration_s = VID_Duration(video);
@@ -130,6 +150,8 @@ FR_VideoClickStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F
       result = 1;
       if (Contains2F32(strip.button, pos)) {
          VID_SetPlaying(video, !VID_IsPlaying(video));
+      } else if (Contains2F32(strip.sound, pos)) {
+         AUD_SetMuted(!AUD_IsMuted());
       } else if (Contains2F32(strip.bar, pos) && Dim2F32(strip.bar).x > 0 && VID_Duration(video) > 0) {
          F64 part = (F64)(pos.x - strip.bar.min.x) / (F64)Dim2F32(strip.bar).x;
          VID_Seek(video, VID_Duration(video) * Clamp(0.0, part, 1.0));
@@ -148,6 +170,10 @@ FR_VideoKeys(App_State* app_state, VID_Video* video) {
 
    if (Core_WM_KeyPress(events, window, 0, WM_Key_K)) {
       VID_SetPlaying(video, !VID_IsPlaying(video));
+      result = 1;
+   }
+   if (Core_WM_KeyPress(events, window, 0, WM_Key_M)) {
+      AUD_SetMuted(!AUD_IsMuted());
       result = 1;
    }
    // A key held down repeats: each is a step.

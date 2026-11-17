@@ -39,6 +39,8 @@
 //~ bgz: headers / public types
 
 #include "image/image.h"
+#include "audio/audio.h"
+#include "audio/audio_device.h"
 #include "video/video.h"
 #include "video/video_decoder.h"
 #include "text/text.h"
@@ -64,6 +66,8 @@
 # pragma clang diagnostic pop
 #endif
 #include "image/image.c"
+#include "audio/audio.c"
+#include "audio/audio_wasapi.c" // the device: the one file to change for another (audio_device.h)
 #include "video/video.c"
 #include "video/video_ffmpeg.c" // the decoder: the one file to change for another (video_decoder.h)
 #include "text/text.c"
@@ -188,6 +192,9 @@ _EntryPoint(CmdLine* cmdline) {
    // option - a folder, an image or a text deck. With nothing there, the
    // deck that was open last. And with no such deck - the first run - an
    // empty one, under the open screen.
+   // Sound, before any deck: a deck's videos take a voice each as they open.
+   AUD_Init();
+
    FR_LoadRecents(&app_state);
    if (cmdline->inputs.first != 0) {
       FR_OpenPath(&app_state, cmdline->inputs.first->string);
@@ -252,6 +259,7 @@ _EntryPoint(CmdLine* cmdline) {
       PRES_Toggle(&app_state);
    }
    COPY_CancelAll(&app_state);
+   AUD_Shutdown();
    if (app_state.deck_watch != 0) {
       FileWatchClose(app_state.deck_watch);
    }

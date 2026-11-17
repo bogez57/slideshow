@@ -1,7 +1,7 @@
 # video
 
 A video file played into a texture, which a slide draws where a picture would
-go. No sound yet.
+go, with its sound played through the mixer in `src\audio`.
 
 ## The parts
 
@@ -9,10 +9,10 @@ go. No sound yet.
 the app (deck, frame_video.c, presenter)
         |  uses only video.h
         v
-video.h / video.c          the player: decode thread, frame queue, clock, texture
+video.h / video.c          the player: decode thread, frame queue, sound ring, clock, texture
         |  uses only video_decoder.h
         v
-video_decoder.h            what a decoder is: five functions
+video_decoder.h            what a decoder is: open, next frame, next sound, seek, close
         ^
         |  defines them
 video_ffmpeg.c             the decoder there is, done with FFmpeg
@@ -26,7 +26,7 @@ video_ffmpeg.c             the decoder there is, done with FFmpeg
   main thread, moves the clock on and copies the frame that is due into the
   texture.
 - **`video_decoder.h`** is the seam: `VID_DecoderOpen`, `VID_DecoderClose`,
-  `VID_DecoderNextFrame`, `VID_DecoderSeek`, and the `VID_DecoderInfo` that open
+  `VID_DecoderNextFrame`, `VID_DecoderNextSound`, `VID_DecoderSeek`, and the `VID_DecoderInfo` that open
   fills in. Plain, one call at a time, no threads of its own to answer for.
 - **`video_ffmpeg.c`** is those functions done with FFmpeg. It is the only
   file that includes FFmpeg's headers.
@@ -49,13 +49,25 @@ it would decode an image, and gives the slide's `IMG_Image` the player's
 texture, so the view draws a video exactly as it draws a picture. When it
 plays and its controls are in `src\frame_video.c`.
 
+## Sound and the clock
+
+The decoder gives sound as two channels of `F32` at the mixer's rate. The
+player keeps a couple of seconds of it in a ring and has a voice in the mixer
+(`AUD_VoiceAdd`) that plays from the ring.
+
+A video with sound keeps time by its sound: the clock is "what is being heard
+now", worked out from what the audio thread last took from the ring and when
+that reaches the speakers. Frames are shown when the clock gets to them.
+Picture follows sound, so they can't drift apart. A file with no sound, or
+whose sound ends before its picture, goes by the computer's clock.
+
 ## FFmpeg
 
 `src\third_party\ffmpeg` has FFmpeg as it is given out by the BtbN builds
 (`ffmpeg-master-latest-win64-lgpl-shared`, version `N-128959-g4dbee3b241`,
 2026-11-16): `include`, `lib` (import libraries) and `bin` (the DLLs, which
 `build.bat` copies next to the exe). Only what playing needs is there:
-avformat, avcodec, avutil, swscale, and swresample, which avcodec loads.
+avformat, avcodec, avutil, swscale and swresample.
 
 It is the LGPL build, used as separate DLLs and not changed. `LICENSE.txt` is
 its licence. A program that ships with these DLLs has to say that it uses
@@ -63,8 +75,6 @@ FFmpeg and under which licence, and let the DLLs be replaced.
 
 ## Not done yet
 
-- Sound. The plan is the same split: `audio.h` and one file behind it that
-  plays through Windows (WASAPI), with the player's clock following the sound.
 - Decoding on the graphics card. All decoding is on the processor.
 - A video turned on its side by its file's rotation mark (some phone videos)
   is shown as stored, not turned upright.
