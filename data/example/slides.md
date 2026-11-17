@@ -68,7 +68,7 @@ Two # make a heading, which belongs to the slide it is on.
 
 @place text 0.060 0.300 0.440 0.560
 ![](circles.png)
-@place picture 0.560 0.330 0.380 0.500
+@place picture 0.560 0.300 0.380 0.375
 
 - Drag the picture or the words in the preview to move them
 - Drag a corner to resize them
