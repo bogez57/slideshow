@@ -172,12 +172,14 @@ COPY_Update(App_State* app_state) {
          is_finished = 1;
       } else if (done) {
          B32 is_playing = 0;
-         for (U64 i = 0; i < deck->slide_count; i += 1) {
-            DECK_Slide* slide = &deck->slides[i];
-            if (slide->video != 0 && VID_IsPlaying(slide->video) &&
-                Str8Match(slide->image_path, job->dst, StringMatchFlag_CaseInsensitive)) {
-               is_playing = 1;
-               break;
+         for (U64 i = 0; i < deck->slide_count && !is_playing; i += 1) {
+            for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
+               DECK_Picture* picture = &deck->slides[i].pictures[k];
+               if (picture->video != 0 && VID_IsPlaying(picture->video) &&
+                   Str8Match(picture->path, job->dst, StringMatchFlag_CaseInsensitive)) {
+                  is_playing = 1;
+                  break;
+               }
             }
          }
 
@@ -191,15 +193,17 @@ COPY_Update(App_State* app_state) {
             // file is opened again, on the copy, where it was.
             DECK_ClearPathAlias(job->dst);
             for (U64 i = 0; i < deck->slide_count; i += 1) {
-               DECK_Slide* slide = &deck->slides[i];
-               // One that could not be opened from the original is tried
-               // again too, now that the file is where the slide says.
-               if ((slide->video != 0 || slide->load_failed) &&
-                   Str8Match(slide->image_path, job->dst, StringMatchFlag_CaseInsensitive)) {
-                  F64 position_s = (slide->video != 0) ? VID_Position(slide->video) : 0;
-                  DECK_ReopenImage(deck, i);
-                  if (slide->video != 0 && position_s > 0) {
-                     VID_Seek(slide->video, position_s);
+               for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
+                  DECK_Picture* picture = &deck->slides[i].pictures[k];
+                  // One that could not be opened from the original is tried
+                  // again too, now that the file is where the slide says.
+                  if ((picture->video != 0 || picture->load_failed) &&
+                      Str8Match(picture->path, job->dst, StringMatchFlag_CaseInsensitive)) {
+                     F64 position_s = (picture->video != 0) ? VID_Position(picture->video) : 0;
+                     DECK_ReopenPicture(picture);
+                     if (picture->video != 0 && position_s > 0) {
+                        VID_Seek(picture->video, position_s);
+                     }
                   }
                }
             }

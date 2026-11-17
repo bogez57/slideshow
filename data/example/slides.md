@@ -62,7 +62,17 @@ Two # make a heading, which belongs to the slide it is on.
 - ![](path) puts a picture on the slide
 - The path is found from the text file's folder
 - With text, the picture has the right half
-- A slide has one picture: the first
+- A slide can have several: they share the room
+
+# Several pictures
+
+![](hills.png)
+![](bars.jpg)
+![](clip.mp4)
+
+- Each picture line is one more picture or video
+- They share the half beside the words
+- Drop a file on the window to add one
 
 # Moved with the mouse
 
@@ -70,7 +80,7 @@ Two # make a heading, which belongs to the slide it is on.
 ![](circles.png)
 @place picture 0.560 0.300 0.380 0.375
 
-- Drag the picture or the words in the preview to move them
+- Drag a picture, the title or the words in the preview to move them
 - Drag a corner to resize them
 - A line of @place is written for it: right-click to take it away
 

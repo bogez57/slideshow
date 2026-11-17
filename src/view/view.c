@@ -82,12 +82,12 @@ VIEW_PageRectFromRect(Rng2F32 rect) {
 // Where a picture that could not be loaded would have been: a box, with the
 // file's name, so a wrong path can be seen and read.
 internal void
-_VIEW_DrawMissingPicture(TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, Rng2F32 rect, F32 scale, F32 alpha) {
+_VIEW_DrawMissingPicture(TXT_Fonts* fonts, VIEW_Colors* colors, String8 path, Rng2F32 rect, F32 scale, F32 alpha) {
    Vec2F32 dim = Dim2F32(rect);
    if (dim.x > 0 && dim.y > 0) {
       Core_D_Rect(rect, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.07f * alpha));
 
-      String8 lines[] = {Str8Lit("Picture not found"), Str8SkipLastSlash(slide->image_path)};
+      String8 lines[] = {Str8Lit("Picture not found"), Str8SkipLastSlash(path)};
       F32     px = 22.0f * scale;
       F32     line_height = TXT_LineHeight(fonts->regular, px);
       F32     y = rect.min.y + (dim.y - line_height * (F32)ArrayCount(lines)) * 0.5f;
@@ -512,8 +512,93 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
 }
 
 internal void
-VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, IMG_Image* image, Rng2F32 rect,
-               F32 alpha, VIEW_HitList* hits) {
+_VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 picture_idx, Rng2F32 rect) {
+   if (hits != 0 && hits->box_count < ArrayCount(hits->boxes) && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
+      VIEW_Box* box = &hits->boxes[hits->box_count];
+      hits->box_count += 1;
+      box->kind = kind;
+      box->picture_idx = picture_idx;
+      box->rect = rect;
+   }
+}
+
+// An @place line's rect, from parts of the page to pixels.
+internal Rng2F32
+_VIEW_PlacedRect(Rng2F32 page, DECK_Place* place) {
+   Vec2F32 page_dim = Dim2F32(page);
+   return R2F32P(page.min.x + place->rect.min.x * page_dim.x, page.min.y + place->rect.min.y * page_dim.y,
+                 page.min.x + place->rect.max.x * page_dim.x, page.min.y + place->rect.max.y * page_dim.y);
+}
+
+// The room the idx-th of count pictures has, of the room they share: all
+// of it for one, else a cell of a grid - side by side in a room wider than
+// it is tall, one above the other in a taller one, and in two rows or two
+// columns past three.
+internal Rng2F32
+_VIEW_PictureCell(Rng2F32 room, U64 idx, U64 count, F32 gap) {
+   if (count <= 1) {
+      return room;
+   }
+   Vec2F32 dim = Dim2F32(room);
+   B32     is_wide = (dim.x >= dim.y);
+   U64     along = (count <= 3) ? count : (count + 1) / 2; // cells in the long direction
+   U64     across = (count <= 3) ? 1 : 2;
+   U64     cols = is_wide ? along : across;
+   U64     rows = is_wide ? across : along;
+   F32     cell_w = (dim.x - gap * (F32)(cols - 1)) / (F32)cols;
+   F32     cell_h = (dim.y - gap * (F32)(rows - 1)) / (F32)rows;
+   U64     col = idx % cols;
+   U64     row = idx / cols;
+   F32     x = room.min.x + (cell_w + gap) * (F32)col;
+   F32     y = room.min.y + (cell_h + gap) * (F32)row;
+   return R2F32P(x, y, x + Max(cell_w, 1.0f), y + Max(cell_h, 1.0f));
+}
+
+// The slide's title, in rect: from its top, no wider than it. With measure
+// 0 it is drawn, with the bar under it, and its hit and its box are given.
+// Returns the y under the bar.
+internal F32
+_VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, Rng2F32 rect, F32 scale, B32 is_big,
+            B32 centered, F32 alpha, B32 measure, VIEW_HitList* hits) {
+   F32 px = (is_big ? _VIEW_BIG_TITLE_PX : _VIEW_TITLE_PX) * scale;
+   F32 width = Dim2F32(rect).x;
+   F32 line_height = TXT_LineHeight(fonts->bold, px);
+   F32 widest = 0;
+   F32 y = _VIEW_Lines(arena, fonts->bold, px, slide->title, rect.min.x, rect.min.y, width, _VIEW_Faded(colors->title, alpha),
+                       !measure, centered, &widest);
+   y = Max(y, rect.min.y + line_height); // a title with no words yet still has its line
+
+   F32 bar_w = (is_big ? 96.0f : 72.0f) * scale;
+   F32 bar_h = (is_big ? 5.0f : 4.0f) * scale;
+   F32 bar_gap = (is_big ? 14.0f : 8.0f) * scale;
+   if (!measure) {
+      // A title with no words yet is still something to click.
+      widest = Max(widest, px * 2.0f);
+      F32 title_x = centered ? rect.min.x + (width - widest) * 0.5f : rect.min.x;
+      _VIEW_PushHit(arena, hits, R2F32P(title_x, rect.min.y, title_x + widest, y), slide->title_range);
+
+      // The box to move it by: placed, as wide as the place. Not placed, as
+      // wide as the words and a little over, so that they wrap the same
+      // once it is.
+      Rng2F32 box = R2F32P(rect.min.x, rect.min.y, rect.max.x, y);
+      if (!slide->places[DECK_PlaceKind_Title].is_set) {
+         F32 slack = 8.0f * scale;
+         box.min.x = Max(title_x - (centered ? slack : 0), rect.min.x);
+         box.max.x = Min(title_x + widest + slack, rect.max.x);
+      }
+      _VIEW_PushBox(hits, DECK_PlaceKind_Title, 0, box);
+
+      // The bar under it is under its start - or its middle, when centered.
+      F32 bar_x = centered ? rect.min.x + (width - bar_w) * 0.5f : rect.min.x;
+      Core_D_Rect(R2F32P(bar_x, y + bar_gap, bar_x + bar_w, y + bar_gap + bar_h), R2F32P(0, 0, 1, 1),
+                  _VIEW_Faded(colors->accent, alpha));
+   }
+   return y + bar_gap + bar_h;
+}
+
+internal void
+VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, Rng2F32 rect, F32 alpha,
+               VIEW_HitList* hits) {
    Vec2F32 rect_dim = Dim2F32(rect);
    if (rect_dim.x <= 0 || rect_dim.y <= 0) {
       return;
@@ -523,53 +608,38 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
 
    F32     scale = VIEW_ScaleFromDim(rect_dim);
    Rng2F32 page = VIEW_PageRectFromRect(rect);
-   B32     picture_is_missing = (image == 0 && slide->load_failed);
-
-   // An @place line's rect, from parts of the page to pixels.
-   DECK_Place* picture_place = &slide->places[DECK_PlaceKind_Picture];
-   DECK_Place* text_place = &slide->places[DECK_PlaceKind_Text];
-   Vec2F32     page_dim = Dim2F32(page);
-#define _VIEW_PlacedRect(place) \
-   R2F32P(page.min.x + (place)->rect.min.x * page_dim.x, page.min.y + (place)->rect.min.y * page_dim.y, \
-          page.min.x + (place)->rect.max.x * page_dim.x, page.min.y + (place)->rect.max.y * page_dim.y)
    if (hits != 0) {
       hits->page = page;
    }
 
    VIEW_Colors colors = VIEW_ColorsFromTheme(theme);
-   B32         has_picture = (slide->image_path.size != 0);
+   B32         has_text = DECK_SlideHasText(slide);
    B32         centered = (slide->layout == DECK_Layout_Center);
-   B32         picture_is_behind = (has_picture && slide->layout == DECK_Layout_PictureBehind && DECK_SlideHasText(slide));
+   DECK_Place* text_place = &slide->places[DECK_PlaceKind_Text];
+   DECK_Place* title_place = &slide->places[DECK_PlaceKind_Title];
 
-   //- bgz: only a picture: all of the rect, or where it has been placed
-   if (!DECK_SlideHasText(slide)) {
-      Rng2F32 room = picture_place->is_set ? _VIEW_PlacedRect(picture_place) : rect;
-      Rng2F32 drawn = picture_place->is_set ? room : page;
-      if (image != 0) {
-         VIEW_DrawImageFit(image, room, alpha);
-         drawn = _VIEW_FitRect(image, room);
-      } else if (picture_is_missing) {
-         _VIEW_DrawMissingPicture(fonts, &colors, slide, drawn, scale, alpha);
+   //- bgz: which pictures go where
+   //
+   // With the picture-behind layout the slide's first picture is behind
+   // the words. A picture with an @place line is where that says. The rest
+   // share the room the layout has for pictures (below).
+   U64 behind_idx = (slide->picture_count != 0 && slide->layout == DECK_Layout_PictureBehind && has_text) ? 0 : max_U64;
+   U64 shared_count = 0;
+   for (U64 i = 0; i < slide->picture_count; i += 1) {
+      if (i != behind_idx && !slide->pictures[i].place.is_set) {
+         shared_count += 1;
       }
-      if (has_picture) {
-         _VIEW_PushHit(arena, hits, picture_place->is_set ? drawn : rect, slide->image_range);
-         if (hits != 0 && drawn.max.x > drawn.min.x) {
-            hits->has_box[DECK_PlaceKind_Picture] = 1;
-            hits->boxes[DECK_PlaceKind_Picture] = drawn;
-         }
-      }
-      Core_D_PopClip();
-      return;
    }
 
-   //- bgz: a picture behind the words: all of the page, under a wash of the
-   // background's colour, and no hit of its own - it is under everything
-   if (picture_is_behind) {
-      if (image != 0) {
-         _VIEW_DrawImageFill(image, page, alpha);
+   //- bgz: the picture behind the words: all of the page, under a wash of
+   // the background's colour, and no hit of its own - it is under everything
+   if (behind_idx != max_U64) {
+      DECK_Picture* picture = &slide->pictures[behind_idx];
+      if (IMG_IsLoaded(&picture->image)) {
+         _VIEW_DrawImageFill(&picture->image, page, alpha);
          Core_D_Rect(page, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors.background, _VIEW_BEHIND_SCRIM * alpha));
-      } else if (picture_is_missing) {
-         _VIEW_DrawMissingPicture(fonts, &colors, slide, page, scale, alpha);
+      } else if (picture->load_failed) {
+         _VIEW_DrawMissingPicture(fonts, &colors, picture->path, page, scale, alpha);
       }
    }
 
@@ -578,115 +648,107 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
                             page.min.y + _VIEW_MARGIN_TOP * scale,
                             page.max.x - _VIEW_MARGIN_X * scale,
                             page.max.y - _VIEW_MARGIN_BOTTOM * scale);
-   F32     content_w = Dim2F32(content).x;
+   F32     gutter = _VIEW_PICTURE_GUTTER * scale;
 
-   //- bgz: only a title: large, in the middle
-   if (slide->item_count == 0 && (!has_picture || picture_is_behind)) {
-      F32         px = _VIEW_BIG_TITLE_PX * scale;
-      F32         line_height = TXT_LineHeight(fonts->bold, px);
-      String8List lines = TXT_Wrap(arena, fonts->bold, px, slide->title, content_w);
-
-      F32 y = (content.min.y + content.max.y) * 0.5f - line_height * (F32)lines.node_count * 0.5f;
-      F32 title_y = y;
-      F32 widest = px * 2.0f; // a title with no words yet is still something to click
-      for (String8Node* node = lines.first; node != 0; node = node->next) {
-         F32 line_w = TXT_Width(fonts->bold, px, node->string);
-         widest = Max(widest, line_w);
-         TXT_Draw(fonts->bold, px, V2F32(content.min.x + (content_w - line_w) * 0.5f, y),
-                  _VIEW_Faded(colors.title, alpha), node->string);
-         y += line_height;
-      }
-      _VIEW_PushHit(arena, hits,
-                    R2F32P(content.min.x + (content_w - widest) * 0.5f, title_y, content.min.x + (content_w + widest) * 0.5f,
-                           Max(y, title_y + line_height)),
-                    slide->title_range);
-
-      // A short bar under it.
-      F32 bar_w = 96.0f * scale;
-      F32 bar_h = 5.0f * scale;
-      F32 bar_x = content.min.x + (content_w - bar_w) * 0.5f;
-      y += 14.0f * scale;
-      Core_D_Rect(R2F32P(bar_x, y, bar_x + bar_w, y + bar_h), R2F32P(0, 0, 1, 1), _VIEW_Faded(colors.accent, alpha));
-      Core_D_PopClip();
-      return;
-   }
-
-   //- bgz: the title, at the top
-   F32 y = content.min.y;
-   if (slide->title.size != 0) {
-      F32 title_y = y;
-      F32 widest = 0;
-      y = _VIEW_Lines(arena, fonts->bold, _VIEW_TITLE_PX * scale, slide->title, content.min.x, y, content_w,
-                      _VIEW_Faded(colors.title, alpha), 1, centered, &widest);
-
-      // The bar under it is under its start - or its middle, when centered.
-      F32 title_x = centered ? content.min.x + (content_w - widest) * 0.5f : content.min.x;
-      _VIEW_PushHit(arena, hits, R2F32P(title_x, title_y, title_x + widest, y), slide->title_range);
-
-      F32 bar_w = 72.0f * scale;
-      F32 bar_h = 4.0f * scale;
-      F32 bar_x = centered ? content.min.x + (content_w - bar_w) * 0.5f : content.min.x;
-      y += 8.0f * scale;
-      Core_D_Rect(R2F32P(bar_x, y, bar_x + bar_w, y + bar_h), R2F32P(0, 0, 1, 1), _VIEW_Faded(colors.accent, alpha));
-      y += bar_h + 30.0f * scale;
-   }
-
-   //- bgz: under it, the body and the picture
+   //- bgz: where the title is
    //
-   // The body has the full width, or half of it when there is a picture
-   // beside it, which then has the other half: which half is the slide's
-   // layout. With no body the picture has it all. The
-   // picture's room is kept even when it is not loaded (image == 0), so the
-   // body does not move when it arrives.
+   // Alone on the slide - no body, and no picture but one behind it or
+   // placed somewhere - it is large, in the middle. Else it is at the top.
+   // An @place line puts it where that says, wrapped at that width; the
+   // body stays where the title's own place would have left it.
+   B32     has_title = (slide->title.size != 0);
+   B32     title_is_big = (has_title && slide->item_count == 0 && shared_count == 0);
+   Rng2F32 title_rect = content;
+   F32     y = content.min.y;
+   if (has_title) {
+      if (title_is_big) {
+         // Its words are what is in the middle: the bar is under that.
+         F32 height = _VIEW_Title(arena, fonts, &colors, slide, content, scale, 1, 1, alpha, 1, 0) - content.min.y - 19.0f * scale;
+         title_rect.min.y = Max((content.min.y + content.max.y - height) * 0.5f, content.min.y);
+      }
+      y = _VIEW_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 1, 0);
+      y += 30.0f * scale;
+      if (title_place->is_set) {
+         title_rect = _VIEW_PlacedRect(page, title_place);
+      }
+   }
+
+   //- bgz: the room of the body, and of the pictures that share one
+   //
+   // The body has the full width under the title, or half of it when there
+   // are pictures beside it, which then have the other half: which half is
+   // the slide's layout. With no body the pictures have it all - and with
+   // no title either, all of the rect: a slide that is only a picture
+   // fills the window, not the page. The pictures' room is kept even when
+   // they are not loaded, so the body does not move when they arrive.
    Rng2F32 body_rect = R2F32P(content.min.x, y, content.max.x, content.max.y);
    Rng2F32 picture_rect = body_rect;
-   B32     picture_is_beside = (has_picture && !picture_is_behind);
-   if (picture_is_beside && slide->item_count != 0) {
+   if (!has_text) {
+      picture_rect = (shared_count == 1) ? rect : R2F32P(page.min.x + gutter, page.min.y + gutter, page.max.x - gutter,
+                                                         page.max.y - gutter);
+   } else if (shared_count != 0 && slide->item_count != 0) {
       F32 middle = (content.min.x + content.max.x) * 0.5f;
-      F32 half_gutter = _VIEW_PICTURE_GUTTER * scale * 0.5f;
       if (slide->layout == DECK_Layout_PictureLeft) {
-         picture_rect.max.x = middle - half_gutter;
-         body_rect.min.x = middle + half_gutter;
+         picture_rect.max.x = middle - gutter * 0.5f;
+         body_rect.min.x = middle + gutter * 0.5f;
       } else {
-         body_rect.max.x = middle - half_gutter;
-         picture_rect.min.x = middle + half_gutter;
+         body_rect.max.x = middle - gutter * 0.5f;
+         picture_rect.min.x = middle + gutter * 0.5f;
       }
    }
-
-   // An @place line puts either where it says. The other stays where the
-   // layout has it: moving the picture does not move the words.
-   if (picture_place->is_set) {
-      picture_rect = _VIEW_PlacedRect(picture_place);
-   }
+   // An @place line puts the body where it says. The pictures stay where
+   // the layout has them: moving the one does not move the other.
    if (text_place->is_set) {
-      body_rect = _VIEW_PlacedRect(text_place);
+      body_rect = _VIEW_PlacedRect(page, text_place);
    }
 
-   if (picture_is_beside) {
-      Rng2F32 drawn = picture_rect;
-      if (image != 0) {
-         // Beside a body, the picture starts level with the body's first
-         // line, not in the middle of its half's height: its room is cut
-         // down to the picture's own height, from the top.
-         if (!picture_place->is_set && slide->item_count != 0 && image->size.x > 0 && image->size.y > 0) {
-            Vec2F32 room = Dim2F32(picture_rect);
-            F32     fit = Min(room.x / (F32)image->size.x, room.y / (F32)image->size.y);
-            picture_rect.max.y = picture_rect.min.y + (F32)image->size.y * fit;
+   //- bgz: the pictures, under the words
+   for (U64 i = 0, shared_idx = 0; i < slide->picture_count; i += 1) {
+      if (i == behind_idx) {
+         continue;
+      }
+      DECK_Picture* picture = &slide->pictures[i];
+      B32           is_placed = picture->place.is_set;
+      B32           is_loaded = IMG_IsLoaded(&picture->image);
+      Rng2F32       room = is_placed ? _VIEW_PlacedRect(page, &picture->place)
+                                     : _VIEW_PictureCell(picture_rect, shared_idx, shared_count, gutter * 0.5f);
+      if (!is_placed) {
+         shared_idx += 1;
+      }
+
+      // The one picture beside a body starts level with the body's first
+      // line, not in the middle of its half's height: its room is cut down
+      // to the picture's own height, from the top.
+      if (!is_placed && shared_count == 1 && slide->item_count != 0 && is_loaded && picture->image.size.x > 0 &&
+          picture->image.size.y > 0) {
+         Vec2F32 room_dim = Dim2F32(room);
+         F32     fit = Min(room_dim.x / (F32)picture->image.size.x, room_dim.y / (F32)picture->image.size.y);
+         room.max.y = room.min.y + (F32)picture->image.size.y * fit;
+      }
+
+      Rng2F32 drawn = room;
+      if (is_loaded) {
+         VIEW_DrawImageFit(&picture->image, room, alpha);
+         drawn = _VIEW_FitRect(&picture->image, room);
+      } else if (picture->load_failed) {
+         // In the page, for the one picture that would fill the window.
+         if (!has_text && !is_placed && shared_count == 1) {
+            drawn = page;
          }
-         VIEW_DrawImageFit(image, picture_rect, alpha);
-         drawn = _VIEW_FitRect(image, picture_rect);
-      } else if (picture_is_missing) {
-         _VIEW_DrawMissingPicture(fonts, &colors, slide, picture_rect, scale, alpha);
+         _VIEW_DrawMissingPicture(fonts, &colors, picture->path, drawn, scale, alpha);
       }
       // A placed picture's hit is the picture as drawn. One that is not
       // placed keeps all of its room, as before there were places.
-      _VIEW_PushHit(arena, hits, picture_place->is_set ? drawn : picture_rect, slide->image_range);
-      if (hits != 0 && drawn.max.x > drawn.min.x) {
-         hits->has_box[DECK_PlaceKind_Picture] = 1;
-         hits->boxes[DECK_PlaceKind_Picture] = drawn;
-      }
+      _VIEW_PushHit(arena, hits, is_placed ? drawn : room, picture->range);
+      _VIEW_PushBox(hits, DECK_PlaceKind_Picture, i, drawn);
    }
 
+   //- bgz: the title
+   if (has_title) {
+      _VIEW_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 0, hits);
+   }
+
+   //- bgz: the body
    if (slide->item_count != 0) {
       // Full size if it fits above the bottom margin, else the largest of a
       // few smaller sizes that does - or the smallest, if none do.
@@ -706,16 +768,12 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
       // that box would be mostly empty, and would already touch the page's
       // bottom, so it could hardly be dragged down at all. A little over,
       // so that the words still fit at the same size once it is placed.
-      if (hits != 0) {
-         Rng2F32 box = body_rect;
-         if (!text_place->is_set) {
-            box.max.y = Clamp(body_rect.min.y + 1.0f, end_y + 8.0f * scale, body_rect.max.y);
-         }
-         hits->has_box[DECK_PlaceKind_Text] = 1;
-         hits->boxes[DECK_PlaceKind_Text] = box;
+      Rng2F32 box = body_rect;
+      if (!text_place->is_set) {
+         box.max.y = Clamp(body_rect.min.y + 1.0f, end_y + 8.0f * scale, body_rect.max.y);
       }
+      _VIEW_PushBox(hits, DECK_PlaceKind_Text, 0, box);
    }
 
-#undef _VIEW_PlacedRect
    Core_D_PopClip();
 }

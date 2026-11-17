@@ -26,10 +26,11 @@
 //    ## Heading         a heading inside the slide
 //    - point            a bullet. Two more spaces in front for each level in
 //    * point            (up to DECK_MAX_BULLET_LEVEL)
-//    ![](picture.png)   the slide's picture, found from the text file's folder.
-//                       A slide has one: the first
-//    ![](clip.mp4)      the same line with a video file: the slide's picture is
-//                       the video, playing (src\video)
+//    ![](picture.png)   a picture on the slide, found from the text file's
+//                       folder. A slide can have several, up to
+//                       DECK_MAX_PICTURES: they share the room pictures have
+//    ![](clip.mp4)      the same line with a video file: the picture is the
+//                       video, playing (src\video)
 //    @theme light       the whole deck's colours: dark (as with no such line),
 //                       light, blue or paper. Anywhere in the file
 //    @layout center     how the slide it is in is laid out: picture-right (as
@@ -41,16 +42,21 @@
 //                       this one), manual (waits for K, not starting when
 //                       the slide comes up)
 //    @place picture 0.55 0.2 0.4 0.6
-//                       where on the slide it is in the picture - or video -
-//                       goes, in place of where the layout would put it: its
-//                       left, top, width and height, each as a part of the
-//                       page's width or height (0.5 is half). The picture is
-//                       as large as fits in that with its shape kept
+//                       where on the slide a picture - or video - goes, in
+//                       place of where the layout would put it: its left,
+//                       top, width and height, each as a part of the page's
+//                       width or height (0.5 is half). The picture is as
+//                       large as fits in that with its shape kept. Which
+//                       picture: the one whose line is the last above this
+//                       one on the slide - or the slide's first, with none
+//                       above
 //    @place text 0.05 0.3 0.5 0.6
 //                       the same for the slide's body: every line under the
 //                       title. The words wrap at its width, and are made
-//                       smaller if they do not fit its height. The edit
-//                       screen writes both lines, from the mouse
+//                       smaller if they do not fit its height
+//    @place title 0.05 0.05 0.6 0.2
+//                       the same for the title, which wraps at the width.
+//                       The edit screen writes all three, from the mouse
 //    @note Say this     a note for whoever presents, on the slide it is in: not
 //                       drawn on the slide, shown beside it on request
 //    anything else      a paragraph. Each line is its own
@@ -65,6 +71,9 @@
 #define DECK_H
 
 #define DECK_MAX_BULLET_LEVEL 3
+
+// How many pictures a slide can have: lines past these are passed over.
+#define DECK_MAX_PICTURES 8
 
 // The colours of a whole deck. The names, as written after @theme, are in
 // deck.c (DECK_ThemeName), in this order.
@@ -89,8 +98,9 @@ typedef enum DECK_Layout {
 // What of a slide an @place line can put somewhere. The names, as written
 // after @place, are in deck.c (DECK_PlaceName), in this order.
 typedef enum DECK_PlaceKind {
-   DECK_PlaceKind_Picture, // or video
+   DECK_PlaceKind_Picture, // or video: one of the slide's (DECK_Picture's place)
    DECK_PlaceKind_Text,    // the body: every line under the title
+   DECK_PlaceKind_Title,
    DECK_PlaceKind_COUNT,
 } DECK_PlaceKind;
 
@@ -126,9 +136,10 @@ struct DECK_Item {
    Rng1U64       text_range; // where its words are in the deck's text. Empty, at the line's end, for no words
 };
 
-typedef struct DECK_Slide DECK_Slide;
-struct DECK_Slide {
-   String8   image_path;  // empty: the slide has no picture
+// One of a slide's pictures.
+typedef struct DECK_Picture DECK_Picture;
+struct DECK_Picture {
+   String8   path;        // of the file
    IMG_Image image;       // zero until loaded
    B32       load_failed; // tried once and could not be: not tried again
 
@@ -138,18 +149,30 @@ struct DECK_Slide {
    // picture is, by code that does not know the difference.
    VID_Video* video;
 
+   // Where in the deck's text the path is: as DECK_Item's text_range. Zero
+   // in a folder of images.
+   Rng1U64 range;
+
+   // From its @place line.
+   DECK_Place place;
+
    // For one of a deck's spares only: when it lost its slide.
    U64 spared_us;
+};
+
+typedef struct DECK_Slide DECK_Slide;
+struct DECK_Slide {
+   // The slide's pictures, in the order of their lines. On the deck's arena.
+   DECK_Picture* pictures;
+   U64           picture_count;
 
    // Where in the deck's text the slide begins: the start of its first line.
    // 0 in a folder of images.
    U64 text_pos;
 
-   // Where in the deck's text the title's words are, and the picture's
-   // path: as DECK_Item's text_range. Zero for a slide without the one or
-   // the other, and in a folder of images.
+   // Where in the deck's text the title's words are: as DECK_Item's
+   // text_range. Zero for a slide without one, and in a folder of images.
    Rng1U64 title_range;
-   Rng1U64 image_range;
 
    // From the slide's @layout line, which is at layout_line in the deck's
    // text (the line without its ending) when has_layout_line.
@@ -157,7 +180,8 @@ struct DECK_Slide {
    B32         has_layout_line;
    Rng1U64     layout_line;
 
-   // From the slide's @place lines, by DECK_PlaceKind.
+   // From the slide's @place lines, by DECK_PlaceKind. The pictures' are
+   // their own (DECK_Picture's place): the one here is not used.
    DECK_Place places[DECK_PlaceKind_COUNT];
 
    // From the slide's @video line: how its video plays (frame_video.c).
@@ -200,9 +224,9 @@ struct DECK_Deck {
    // of the deck still shows their file (DECK_TakeImages). Typing over a
    // title line takes its slide away for a key or two: when the slide is
    // back it gets its picture back, and a video goes on from where it was.
-   // Only image_path, image and video are set. At most DECK_SPARE_MAX.
-   DECK_Slide* spares;
-   U64         spare_count;
+   // Only path, image, video and spared_us are set. At most DECK_SPARE_MAX.
+   DECK_Picture* spares;
+   U64           spare_count;
 };
 
 // As written after @theme and @layout.
@@ -228,7 +252,7 @@ internal DECK_Deck* DECK_OpenText(String8 text, String8 file);
 // before it. 0 if there are no slides.
 internal U64 DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos);
 
-// Moves the pictures src has loaded over to the slides of dst that show the
+// Moves the pictures src has loaded over to the pictures of dst's slides that show the
 // same file, so that a deck read again does not decode them again. src is
 // left with none of the ones moved. A file src could not load is marked as
 // not loadable in dst too. What no slide of dst takes, of a file a slide of
@@ -251,27 +275,33 @@ internal String8Array DECK_PictureNamesFromFolder(Arena* arena, String8 folder);
 // Releases every image the deck has loaded, and the deck itself.
 internal void DECK_Close(DECK_Deck* deck);
 
-// The image of a slide, loaded now if it is not yet. 0 if there is no such
-// slide, it has no picture, or the file could not be loaded. Slides more than one away from this
-// one have their images released.
-internal IMG_Image* DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx);
+// Loads the pictures of a slide that are not loaded yet, and releases those
+// of slides more than one away from it: for the slide that is showing. A
+// slide is drawn with whichever of its pictures are loaded (VIEW_DrawSlide).
+internal void DECK_LoadSlide(DECK_Deck* deck, U64 slide_idx);
 
 // The same, but releases nothing: for a second look at a slide close to the
-// one DECK_ImageFromSlide was last asked for (the presenter's next slide).
-internal IMG_Image* DECK_LoadImageOfSlide(DECK_Deck* deck, U64 slide_idx);
+// one DECK_LoadSlide was last asked for (the presenter's next slide).
+internal void DECK_LoadSlideOnly(DECK_Deck* deck, U64 slide_idx);
 
-// A slide's video while it is open - as long as its image is loaded - else 0.
+// The first of a slide's videos that is open - as long as its image is
+// loaded - else 0: the one whose time and state stand for the slide's.
 internal VID_Video* DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx);
-// Whether the slide's picture is a video file, open or not. Not one that
-// could not be opened.
+// Every open video of a slide, into videos, which has room for
+// DECK_MAX_PICTURES. Returns how many.
+internal U64 DECK_VideosFromSlide(DECK_Deck* deck, U64 slide_idx, VID_Video** videos);
+// Whether any of the slide's pictures is a video file, open or not. Not one
+// that could not be opened.
 internal B32 DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx);
+// Whether all of them that are video files are open: none still to load.
+internal B32 DECK_SlideVideosAreOpen(DECK_Deck* deck, U64 slide_idx);
 // Once a frame: every open video's VID_Update, and spares kept for longer
 // than DECK_SPARE_SECONDS released.
 internal void DECK_UpdateVideos(DECK_Deck* deck);
 
-// Lets go of a slide's picture and loads it again: for a file that has
-// changed, or whose path now leads somewhere else (below).
-internal void DECK_ReopenImage(DECK_Deck* deck, U64 slide_idx);
+// Lets go of a picture and loads it again: for a file that has changed, or
+// whose path now leads somewhere else (below).
+internal void DECK_ReopenPicture(DECK_Picture* picture);
 
 // From now on, a slide whose picture is at path is shown the file at
 // stands_for instead - until DECK_ClearPathAlias(path). For a file that is
@@ -281,9 +311,5 @@ internal void DECK_ReopenImage(DECK_Deck* deck, U64 slide_idx);
 // that.
 internal void DECK_SetPathAlias(String8 path, String8 stands_for);
 internal void DECK_ClearPathAlias(String8 path);
-
-// The image of a slide only if it is loaded already, else 0. Loads nothing
-// and releases nothing.
-internal IMG_Image* DECK_LoadedImageFromSlide(DECK_Deck* deck, U64 slide_idx);
 
 #endif // DECK_H

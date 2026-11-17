@@ -430,8 +430,7 @@ _FR_PresentInput(App_State* app_state) {
 
    //- bgz: the slide's video, if it has one (frame_video.c)
    {
-      VID_Video* video = DECK_VideoFromSlide(app_state->deck, app_state->slide_idx);
-      if (video != 0 && FR_VideoKeys(app_state, video)) {
+      if (FR_VideoKeys(app_state)) {
          app_state->video_key_us = now_us;
       }
    }
@@ -585,7 +584,7 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
 
    // The slide showing is asked for first: that is what loads its picture,
    // and what releases the pictures of slides far from it.
-   IMG_Image* image = DECK_ImageFromSlide(deck, app_state->slide_idx);
+   DECK_LoadSlide(deck, app_state->slide_idx);
 
    // How far through the fade this frame is, 0 to 1. The clock starts here,
    // after the load above, and not at the key press: decoding a big photo can
@@ -610,12 +609,11 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
    // it has been released, and the slide goes without it. fade_from_idx past
    // the last slide is no slide: the new one fades in over the background.
    if (app_state->fade_active && app_state->fade_from_idx < deck->slide_count) {
-      IMG_Image* from_image = DECK_LoadedImageFromSlide(deck, app_state->fade_from_idx);
-      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->fade_from_idx], from_image,
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->fade_from_idx],
                      window_rect, 1.0f - fade_t, 0);
    }
    if (app_state->slide_idx < deck->slide_count) {
-      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], image,
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx],
                      window_rect, fade_t, 0);
    }
    // The slide's video has its strip of controls along the bottom of the
@@ -674,7 +672,8 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
    //- bgz: the slide's number, and the name of the file it is from
    if (app_state->show_info && deck->slide_count != 0) {
       DECK_Slide* slide = &deck->slides[app_state->slide_idx];
-      String8     name = Str8SkipLastSlash(deck->file.size != 0 ? deck->file : slide->image_path);
+      String8     name = Str8SkipLastSlash(deck->file.size != 0 ? deck->file
+                                                                    : (slide->picture_count != 0 ? slide->pictures[0].path : Str8Lit("")));
       String8     text = PushStr8F(scratch.arena, "%llu / %llu   %S", (unsigned long long)(app_state->slide_idx + 1),
                                    (unsigned long long)deck->slide_count, name);
 
@@ -708,8 +707,8 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
          DECK_Slide* next_slide = &deck->slides[app_state->slide_idx + 1];
          String8     next_name = next_slide->title;
          if (next_name.size == 0) {
-            next_name = (next_slide->image_path.size != 0) ? Str8SkipLastSlash(next_slide->image_path)
-                                                           : Str8Lit("a slide with no title");
+            next_name = (next_slide->picture_count != 0) ? Str8SkipLastSlash(next_slide->pictures[0].path)
+                                                         : Str8Lit("a slide with no title");
          }
          next = PushStr8F(scratch.arena, "Next: %S", next_name);
       }

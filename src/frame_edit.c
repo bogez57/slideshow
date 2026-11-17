@@ -55,7 +55,9 @@
 //    move a piece     drag the picture or the body in the preview, or a
 //                     corner of it to resize it. Right-click puts it back
 //                     (frame_place.c)
-//    add a picture    drop an image on the window
+//    add a picture    drop an image or a video on the window: one more on the
+//                     slide. With the cursor on a picture's line - click the
+//                     picture - that one is changed for it
 //    add a slide      click the + at the end of the row of small slides
 //    move a slide     Alt+Left earlier, Alt+Right later
 //    bold, code       Ctrl+B and Ctrl+E: ** or ` around what is selected
@@ -91,7 +93,7 @@ global _EDIT_FormatRow _edit_format_rows[] = {
     {Str8LitComp("## Heading"), Str8LitComp("a heading inside the slide"), Str8LitComp("## Heading"), 3, 10},
     {Str8LitComp("- point"), Str8LitComp("a bullet. Tab moves it in"), Str8LitComp("- point"), 2, 7},
     {Str8LitComp("  - point"), Str8LitComp("an inner bullet. Shift+Tab moves it out"), Str8LitComp("  - point"), 4, 9},
-    {Str8LitComp("![](picture.png)"), Str8LitComp("the slide's picture. Click to pick one"), Str8LitComp("![](picture.png)"), 4, 15, _EDIT_FormatAction_Pictures},
+    {Str8LitComp("![](picture.png)"), Str8LitComp("a picture or video on the slide. Click to pick one"), Str8LitComp("![](picture.png)"), 4, 15, _EDIT_FormatAction_Pictures},
     {Str8LitComp("Any other line"), Str8LitComp("a paragraph. An empty line adds room"), Str8LitComp("Text"), 0, 4},
     {Str8LitComp("**bold**"), Str8LitComp("bold words. Select some first, or Ctrl+B"), Str8LitComp("**"), 0, 0, _EDIT_FormatAction_Wrap},
     {Str8LitComp("`code`"), Str8LitComp("words as code. Select some first, or Ctrl+E"), Str8LitComp("`"), 0, 0, _EDIT_FormatAction_Wrap},
@@ -415,10 +417,10 @@ _EDIT_ScanPictures(App_State* app_state) {
    app_state->pictures_scanned_us = NowTimeUS();
 }
 
-// Makes name the picture of the slide the cursor is on: in place of the
-// picture line the slide has, if it has one, else on a new line at the
-// cursor. A slide shows only its first picture, so a second line would do
-// nothing.
+// Puts name on the slide the cursor is on, as a picture: one more, under
+// the pictures the slide has - or on a new line at the cursor, if it has
+// none. With the cursor on a picture's line, that picture is changed for
+// this one instead.
 internal void
 _EDIT_PutPicture(App_State* app_state, String8 name) {
    ED_Editor* editor = app_state->editor;
@@ -440,8 +442,14 @@ _EDIT_PutPicture(App_State* app_state, String8 name) {
       }
    }
 
-   // Its first line that starts with ![ - spaces before it aside.
+   // The slide's lines that start with ![ - spaces before them aside: the
+   // one the cursor is on, if it is on one, is written over - that picture
+   // is changed for this one. Else the new line goes under the last of
+   // them, and under that one's @place line: one more picture on the slide.
    B32 found = 0;
+   B32 has_last = 0;
+   U64 last_end = 0; // the end of the last picture's line, or of its @place line
+   U64 picture_count = 0;
    U64 pos = slide_start;
    while (pos < slide_end && !found) {
       U64 line_start = pos;
@@ -452,11 +460,27 @@ _EDIT_PutPicture(App_State* app_state, String8 name) {
       U64 first = line_start;
       while (first < line_end && text.str[first] == ' ') first += 1;
       if (first + 1 < line_end && text.str[first] == '!' && text.str[first + 1] == '[') {
-         ED_ReplaceRange(editor, line_start, line_end, line);
-         found = 1;
+         picture_count += 1;
+         if (editor->cursor >= line_start && editor->cursor <= line_end) {
+            ED_ReplaceRange(editor, line_start, line_end, line);
+            found = 1;
+         }
+         has_last = 1;
+         last_end = line_end;
+      } else if (has_last && last_end + 1 == line_start &&
+                 Str8Match(Str8Prefix(Str8Substr(text, R1U64(first, line_end)), 6), Str8Lit("@place"), StringMatchFlag_CaseInsensitive)) {
+         last_end = line_end;
       }
    }
-   if (!found) {
+   if (!found && picture_count >= DECK_MAX_PICTURES) {
+      FR_Notice(app_state, Str8Lit("The slide has as many pictures as a slide can. Click one to change it for this one"));
+   } else if (!found && has_last) {
+      String8 added = PushStr8F(scratch.arena, "\n%S", line);
+      ED_ReplaceRange(editor, last_end, last_end, added);
+      // On the new line, at its end: the next one put goes under it, and
+      // the preview marks it.
+      ED_SetCursor(editor, last_end + added.size);
+   } else if (!found) {
       ED_InsertLine(editor, line, line.size, line.size);
    }
    editor->last_input_us = NowTimeUS();
@@ -522,6 +546,26 @@ _EDIT_ClickIn(App_State* app_state, Rng2F32 rect) {
    return result;
 }
 
+// Bold and code are for words: 0, with a notice, when the cursor is on a
+// picture's line or an @ line, where the marks would be part of a file's
+// name or of a setting - a picture that can no longer be found.
+internal B32
+_EDIT_CanWrap(App_State* app_state) {
+   ED_Editor* editor = app_state->editor;
+   String8    text = ED_Text(editor);
+   U64        line_start = Min(editor->cursor, text.size);
+   while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
+   while (line_start < text.size && (text.str[line_start] == ' ' || text.str[line_start] == '\t')) line_start += 1;
+
+   B32 is_picture = (line_start + 1 < text.size && text.str[line_start] == '!' && text.str[line_start + 1] == '[');
+   B32 is_setting = (line_start < text.size && text.str[line_start] == '@');
+   B32 result = !(is_picture || is_setting);
+   if (!result) {
+      FR_Notice(app_state, Str8Lit("Bold and code are for words, not for a picture's line or an @ line"));
+   }
+   return result;
+}
+
 // F1, or a click on the Format panel's header: closes the list of pictures
 // if that is what is open, else opens and closes the panel.
 internal void
@@ -533,29 +577,33 @@ _EDIT_ToggleFormat(App_State* app_state) {
    }
 }
 
-// Where the slide's video is drawn in the preview, if the slide showing has
-// one that is open: the place the preview last drew its picture. 0 if not,
-// or if the text has changed since the preview was drawn. A picture behind
-// the words has no place of its own to click (view.c): it is all of page,
-// as the presentation has it.
+// Where a video of the slide showing is drawn in the preview: the place the
+// preview last drew the picture_idx-th of the slide's pictures, if that is
+// a video that is open. 0 if not, or if the text has changed since the
+// preview was drawn. A picture behind the words has no place of its own to
+// click (view.c): it is all of page, as the presentation has it.
 internal VID_Video*
-_EDIT_PreviewVideo(App_State* app_state, Rng2F32 page, Rng2F32* rect_out) {
+_EDIT_PreviewVideo(App_State* app_state, Rng2F32 page, U64 picture_idx, Rng2F32* rect_out) {
    VID_Video* result = 0;
    DECK_Deck* deck = app_state->deck;
-   VID_Video* video = DECK_VideoFromSlide(deck, app_state->slide_idx);
 
-   if (video != 0 && app_state->editor != 0 && app_state->editor->edit_count == app_state->preview_hits_edit_count) {
-      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
-      if (slide->layout == DECK_Layout_PictureBehind && DECK_SlideHasText(slide)) {
-         *rect_out = page;
-         return video;
+   if (app_state->slide_idx < deck->slide_count && app_state->editor != 0 &&
+       app_state->editor->edit_count == app_state->preview_hits_edit_count &&
+       picture_idx < deck->slides[app_state->slide_idx].picture_count) {
+      DECK_Slide*   slide = &deck->slides[app_state->slide_idx];
+      DECK_Picture* picture = &slide->pictures[picture_idx];
+      if (picture->video == 0) {
+         return 0;
       }
-      Rng1U64 range = slide->image_range;
+      if (picture_idx == 0 && slide->layout == DECK_Layout_PictureBehind && DECK_SlideHasText(slide)) {
+         *rect_out = page;
+         return picture->video;
+      }
       for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
          VIEW_Hit* hit = &app_state->preview_hits[i];
-         if (hit->text_range.min == range.min && hit->text_range.max == range.max) {
+         if (hit->text_range.min == picture->range.min && hit->text_range.max == picture->range.max) {
             *rect_out = hit->rect;
-            result = video;
+            result = picture->video;
             break;
          }
       }
@@ -628,11 +676,11 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
 
    // Bold and code, around what is selected (the Format panel's two lines
    // for them do the same).
-   if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_B)) {
+   if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_B) && _EDIT_CanWrap(app_state)) {
       ED_WrapSelection(editor, Str8Lit("**"), Str8Lit("bold"));
       editor->last_input_us = NowTimeUS();
    }
-   if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_E)) {
+   if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_E) && _EDIT_CanWrap(app_state)) {
       ED_WrapSelection(editor, Str8Lit("`"), Str8Lit("code"));
       editor->last_input_us = NowTimeUS();
    }
@@ -645,7 +693,9 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
          // A picture that was not found is looked for again: saving is when
          // the file is likely to have been put in place.
          for (U64 i = 0; i < app_state->deck->slide_count; i += 1) {
-            app_state->deck->slides[i].load_failed = 0;
+            for (U64 k = 0; k < app_state->deck->slides[i].picture_count; k += 1) {
+               app_state->deck->slides[i].pictures[k].load_failed = 0;
+            }
          }
       } else {
          FR_Notice(app_state, Str8Lit("Could not save: the file could not be written"));
@@ -671,9 +721,9 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    // are from was worked out for the text as it was drawn.
    // The video's strip of controls first: it is over the picture, and a
    // click on it is not a click on the picture.
-   {
+   for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES; picture_idx += 1) {
       Rng2F32    video_rect = {0};
-      VID_Video* video = _EDIT_PreviewVideo(app_state, layout.page, &video_rect);
+      VID_Video* video = _EDIT_PreviewVideo(app_state, layout.page, picture_idx, &video_rect);
       if (video != 0) {
          for (WM_Event* event = events->first; event != 0; event = event->next) {
             if (event->kind == WM_EventKind_Press && event->key == WM_Key_LeftMouseButton &&
@@ -743,7 +793,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       if (app_state->deck->slide_count != 0) {
          app_state->is_editing = 0;
          app_state->preview_hit_count = 0; // not drawn while presenting, and the window can change
-         MemoryZeroArray(app_state->preview_has_box);
+         app_state->preview_box_count = 0;
          app_state->place_drag.state = EDIT_PlaceDragState_None;
          app_state->fade_active = 0;
          app_state->slide_changed_us = 0;
@@ -991,6 +1041,8 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
             _EDIT_NextLayout(editor, app_state->deck, DECK_SlideFromTextPos(app_state->deck, editor->cursor));
          }
          editor->last_input_us = NowTimeUS();
+      } else if (row->action == _EDIT_FormatAction_Wrap && !_EDIT_CanWrap(app_state)) {
+         // Said by the notice.
       } else if (row->action == _EDIT_FormatAction_Wrap) {
          B32 is_bold = Str8Match(row->insert, Str8Lit("**"), 0);
          ED_WrapSelection(editor, row->insert, is_bold ? Str8Lit("bold") : Str8Lit("code"));
@@ -1031,7 +1083,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
 
    //- bgz: the preview
    app_state->preview_hit_count = 0; // made again below, if a slide is drawn
-   MemoryZeroArray(app_state->preview_has_box);
+   app_state->preview_box_count = 0;
    Core_D_Rect(layout.preview, R2F32P(0, 0, 1, 1), V4F32(0.125f, 0.13f, 0.15f, 1.0f));
    // A line where the text ends and the preview begins.
    Core_D_Rect(R2F32P(layout.preview.min.x, 0, layout.preview.min.x + 1.0f, window_dim.y), R2F32P(0, 0, 1, 1),
@@ -1042,12 +1094,11 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
 
       String8 caption = {0};
       if (app_state->slide_idx < deck->slide_count) {
-         // Asking for the picture is what loads it, and what releases the
-         // pictures of slides far from this one.
-         IMG_Image* image = DECK_ImageFromSlide(deck, app_state->slide_idx);
+         // Asking for the slide is what loads its pictures, and what
+         // releases the pictures of slides far from this one.
+         DECK_LoadSlide(deck, app_state->slide_idx);
          VIEW_HitList hits = {0};
-         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], image, layout.page, 1.0f,
-                        &hits);
+         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], layout.page, 1.0f, &hits);
 
          //- bgz: the slide's pieces, kept for the next frame's clicks
          if (app_state->preview_hits_arena == 0) {
@@ -1058,8 +1109,8 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          app_state->preview_hit_count = 0;
          // The deck drawn is of the text at parsed_edit_count.
          app_state->preview_hits_edit_count = app_state->parsed_edit_count;
-         MemoryCopyArray(app_state->preview_has_box, hits.has_box);
          MemoryCopyArray(app_state->preview_boxes, hits.boxes);
+         app_state->preview_box_count = hits.box_count;
          app_state->preview_page = hits.page;
 
          F32 grow = 4.0f * ui;
@@ -1103,15 +1154,15 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                Core_D_Rect(R2F32P(rect.max.x - thick, rect.min.y, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
             }
          }
-         // The slide's video: its strip of controls, over the bottom of it.
-         {
+         // The slide's videos: each its strip of controls, over the bottom of it.
+         for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES; picture_idx += 1) {
             Rng2F32    video_rect = {0};
-            VID_Video* video = _EDIT_PreviewVideo(app_state, layout.page, &video_rect);
+            VID_Video* video = _EDIT_PreviewVideo(app_state, layout.page, picture_idx, &video_rect);
             if (video != 0) {
                FR_VideoDrawStrip(app_state, video, video_rect, ui, mouse);
             }
          }
-         // The box the mouse is over - the picture's, the body's - with its
+         // The box the mouse is over - a picture's, the title's, the body's - with its
          // corners, and what can be done with it said under the slide.
          if (PLACE_Draw(app_state, ui, mouse)) {
             caption = Str8Lit("Drag to move it      Drag a corner to resize it      Right-click puts it back");
@@ -1162,8 +1213,8 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
 
          // Only a picture that is loaded already is drawn: the slide showing
          // and the ones next to it. Loading every picture of a long deck for
-         // its small slides would take the memory DECK_ImageFromSlide saves.
-         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[i], DECK_LoadedImageFromSlide(deck, i), rect,
+         // its small slides would take the memory DECK_LoadSlide saves.
+         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[i], rect,
                         is_showing ? 1.0f : 0.8f, 0);
       }
    }

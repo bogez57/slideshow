@@ -115,10 +115,7 @@ PRES_Input(App_State* app_state) {
                      }
                   } break;
                   case PRES_HitKind_Video: {
-                     VID_Video* video = DECK_VideoFromSlide(app_state->deck, app_state->slide_idx);
-                     if (video != 0) {
-                        VID_SetPlaying(video, !VID_IsPlaying(video));
-                     }
+                     FR_VideoToggleSlide(app_state->deck, app_state->slide_idx);
                   } break;
                   default: break;
                }
@@ -231,7 +228,7 @@ PRES_Draw(App_State* app_state) {
          Rng2F32 slide_rect = VIEW_PageRectFromRect(R2F32P(left.min.x, left.min.y, left.max.x, left.min.y + slide_h));
          slide_rect = R2F32P(left.min.x, left.min.y, left.min.x + Dim2F32(slide_rect).x, left.min.y + Dim2F32(slide_rect).y);
          Core_D_Rect(slide_rect, R2F32P(0, 0, 1, 1), colors.background);
-         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, slide, DECK_LoadedImageFromSlide(deck, slide_idx),
+         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, slide,
                         slide_rect, 1.0f, 0);
 
          //- bgz: its notes, under it
@@ -333,8 +330,8 @@ PRES_Draw(App_State* app_state) {
             // Its picture is loaded here: the main window only loads the one
             // showing. Being next to that one, it is not released again
             // until the deck moves on from both.
-            VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[slide_idx + 1],
-                           DECK_LoadImageOfSlide(deck, slide_idx + 1), next_rect, 1.0f, 0);
+            DECK_LoadSlideOnly(deck, slide_idx + 1);
+            VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[slide_idx + 1], next_rect, 1.0f, 0);
          } else {
             Core_D_Rect(next_rect, R2F32P(0, 0, 1, 1), V4F32(1, 1, 1, 0.04f));
             String8 end = Str8Lit("The end");
@@ -433,7 +430,7 @@ PRES_Draw(App_State* app_state) {
                // Only a picture that is loaded already is drawn, as in the
                // edit screen's row: loading every picture of a long deck for
                // its small slides is what the deck avoids.
-               VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[i], DECK_LoadedImageFromSlide(deck, i),
+               VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[i],
                               rect, (is_showing || is_hot) ? 1.0f : 0.7f, 0);
                // The one showing has a bar under it, in the clock's colour.
                if (is_showing || is_hot) {

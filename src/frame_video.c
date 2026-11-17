@@ -171,15 +171,33 @@ FR_VideoStripContains(App_State* app_state, Rng2F32 video_rect, F32 ui, Vec2F32 
    return Contains2F32(strip.strip, pos);
 }
 
-// The video's keys, while presenting. Returns whether one was pressed.
+// A slide with several videos plays and pauses them together: all as the
+// first was not.
+internal void
+FR_VideoToggleSlide(DECK_Deck* deck, U64 slide_idx) {
+   VID_Video* videos[DECK_MAX_PICTURES] = {0};
+   U64        count = DECK_VideosFromSlide(deck, slide_idx, videos);
+   B32        play = (count != 0 && !VID_IsPlaying(videos[0]));
+   for (U64 i = 0; i < count; i += 1) {
+      VID_SetPlaying(videos[i], play);
+   }
+}
+
+// The keys of the videos of the slide showing, while presenting: one key
+// is for all of them. Returns whether one was pressed.
 internal B32
-FR_VideoKeys(App_State* app_state, VID_Video* video) {
+FR_VideoKeys(App_State* app_state) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;
    B32           result = 0;
+   VID_Video*    videos[DECK_MAX_PICTURES] = {0};
+   U64           count = DECK_VideosFromSlide(app_state->deck, app_state->slide_idx, videos);
+   if (count == 0) {
+      return 0;
+   }
 
    if (Core_WM_KeyPress(events, window, 0, WM_Key_K)) {
-      VID_SetPlaying(video, !VID_IsPlaying(video));
+      FR_VideoToggleSlide(app_state->deck, app_state->slide_idx);
       result = 1;
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_M)) {
@@ -188,11 +206,15 @@ FR_VideoKeys(App_State* app_state, VID_Video* video) {
    }
    // A key held down repeats: each is a step.
    while (Core_WM_KeyPress(events, window, 0, WM_Key_J)) {
-      VID_Seek(video, VID_Position(video) - FR_VIDEO_STEP_SECONDS);
+      for (U64 i = 0; i < count; i += 1) {
+         VID_Seek(videos[i], VID_Position(videos[i]) - FR_VIDEO_STEP_SECONDS);
+      }
       result = 1;
    }
    while (Core_WM_KeyPress(events, window, 0, WM_Key_L)) {
-      VID_Seek(video, VID_Position(video) + FR_VIDEO_STEP_SECONDS);
+      for (U64 i = 0; i < count; i += 1) {
+         VID_Seek(videos[i], VID_Position(videos[i]) + FR_VIDEO_STEP_SECONDS);
+      }
       result = 1;
    }
 
@@ -210,22 +232,26 @@ FR_VideoUpdate(App_State* app_state) {
    // editing. Plus one, so that 0 is none.
    U64 want = (!app_state->is_editing && deck->slide_count != 0) ? app_state->slide_idx + 1 : 0;
    if (want != app_state->video_auto_slide) {
-      VID_Video* old_video = (app_state->video_auto_slide != 0) ? DECK_VideoFromSlide(deck, app_state->video_auto_slide - 1) : 0;
-      if (old_video != 0) {
-         VID_SetPlaying(old_video, 0);
+      VID_Video* videos[DECK_MAX_PICTURES] = {0};
+      U64        old_count = (app_state->video_auto_slide != 0) ? DECK_VideosFromSlide(deck, app_state->video_auto_slide - 1, videos) : 0;
+      for (U64 i = 0; i < old_count; i += 1) {
+         VID_SetPlaying(videos[i], 0);
       }
 
       if (want == 0 || !DECK_SlideHasVideo(deck, want - 1)) {
          app_state->video_auto_slide = want;
       } else {
          // Opened when the slide is first drawn, which may be later this
-         // frame: until then this is asked again.
-         VID_Video* video = DECK_VideoFromSlide(deck, want - 1);
-         if (video != 0) {
-            VID_Seek(video, 0);
-            // manual: at its start, and waiting. Paused, its strip shows,
-            // which says there is something to play.
-            VID_SetPlaying(video, !deck->slides[want - 1].video_manual);
+         // frame: until then this is asked again. All of the slide's
+         // videos start together.
+         U64 count = DECK_VideosFromSlide(deck, want - 1, videos);
+         if (count != 0 && DECK_SlideVideosAreOpen(deck, want - 1)) {
+            for (U64 i = 0; i < count; i += 1) {
+               VID_Seek(videos[i], 0);
+               // manual: at its start, and waiting. Paused, its strip
+               // shows, which says there is something to play.
+               VID_SetPlaying(videos[i], !deck->slides[want - 1].video_manual);
+            }
             app_state->video_auto_slide = want;
          }
       }
@@ -235,10 +261,13 @@ FR_VideoUpdate(App_State* app_state) {
    // every frame: the line can be written or taken away at any time.
    for (U64 i = 0; i < deck->slide_count; i += 1) {
       DECK_Slide* slide = &deck->slides[i];
-      if (slide->video != 0) {
-         VID_SetMuted(slide->video, slide->video_mute);
-         if (slide->video_loop && VID_HasEnded(slide->video)) {
-            VID_SetPlaying(slide->video, 1); // from its start
+      for (U64 k = 0; k < slide->picture_count; k += 1) {
+         VID_Video* video = slide->pictures[k].video;
+         if (video != 0) {
+            VID_SetMuted(video, slide->video_mute);
+            if (slide->video_loop && VID_HasEnded(video)) {
+               VID_SetPlaying(video, 1); // from its start
+            }
          }
       }
    }

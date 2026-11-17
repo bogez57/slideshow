@@ -15,9 +15,10 @@
 // the rect.
 //
 // The deck's theme gives the colours, and each slide's layout says where its
-// picture goes - beside the words on either side, or behind them - or puts
-// every line in the middle. An @place line puts the picture, or the body,
-// where it says instead.
+// pictures go - beside the words on either side, or the first behind them -
+// or puts every line in the middle. Several pictures share the room the
+// layout has for them, as a grid. An @place line puts one picture, the
+// title or the body where it says instead.
 
 #ifndef VIEW_H
 #define VIEW_H
@@ -56,23 +57,31 @@ struct VIEW_Hit {
    Rng1U64   text_range;
 };
 
+// Where something an @place line can move was put. In pixels. A picture's
+// is the picture as drawn, the body's as tall as its words, the title's as
+// wide as its words.
+typedef struct VIEW_Box VIEW_Box;
+struct VIEW_Box {
+   DECK_PlaceKind kind;
+   U64            picture_idx; // which of the slide's pictures, for a picture's
+   Rng2F32        rect;
+};
+
 typedef struct VIEW_HitList VIEW_HitList;
 struct VIEW_HitList {
    VIEW_Hit* first;
    VIEW_Hit* last;
    U64       count;
 
-   // Where the slide's picture and its body were put, by DECK_PlaceKind: what
-   // an @place line would move. In pixels. The picture's is the picture as
-   // drawn, the body's all the room its lines had. None for a picture
-   // behind the words, or a slide without the one or the other.
-   B32     has_box[DECK_PlaceKind_COUNT];
-   Rng2F32 boxes[DECK_PlaceKind_COUNT];
-   Rng2F32 page; // the page the slide was drawn on
+   // Where the slide's title, its body and each of its pictures were put:
+   // what an @place line would move. None for a picture behind the words.
+   VIEW_Box boxes[DECK_MAX_PICTURES + 2];
+   U64      box_count;
+   Rng2F32  page; // the page the slide was drawn on
 };
 
-// image is the slide's picture, or 0 to draw the slide without it: loading is
-// the caller's business (DECK_ImageFromSlide). alpha is as for
+// The slide is drawn with whichever of its pictures are loaded: loading is
+// the caller's business (DECK_LoadSlide). alpha is as for
 // VIEW_DrawImageFit, for the whole slide. Line lists for wrapped text go on
 // arena, and are not needed after the call. Nothing is drawn outside rect.
 //
@@ -80,12 +89,12 @@ struct VIEW_HitList {
 // with its file's name in it.
 //
 // hits, if not 0, is given a hit for the title, for each line of the body
-// and for the picture, on arena.
+// and for each picture, on arena, and the boxes of what can be moved.
 //
 // theme is the deck's, for the colours. The slide's own layout
 // (slide->layout) says where its picture and words go, and its @place lines
 // (slide->places) put either somewhere else.
-internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, IMG_Image* image,
-                             Rng2F32 rect, F32 alpha, VIEW_HitList* hits);
+internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, Rng2F32 rect, F32 alpha,
+                             VIEW_HitList* hits);
 
 #endif // VIEW_H

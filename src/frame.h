@@ -102,7 +102,8 @@ internal void FR_VideoDrawStrip(App_State* app_state, VID_Video* video, Rng2F32 
 internal B32  FR_VideoClickStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 pos);
 // Whether pos is on the strip FR_VideoDrawStrip draws for a video at video_rect.
 internal B32  FR_VideoStripContains(App_State* app_state, Rng2F32 video_rect, F32 ui, Vec2F32 pos);
-internal B32  FR_VideoKeys(App_State* app_state, VID_Video* video);
+internal void FR_VideoToggleSlide(DECK_Deck* deck, U64 slide_idx);
+internal B32  FR_VideoKeys(App_State* app_state);
 internal void FR_VideoUpdate(App_State* app_state);
 
 // The edit screen's picture and body, moved and resized with the mouse:

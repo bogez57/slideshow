@@ -143,7 +143,9 @@ DECK_OpenFolder(String8 folder) {
       deck->slide_count = sorted.count;
       deck->slides = PushArray(arena, DECK_Slide, Max(sorted.count, 1));
       for (U64 i = 0; i < sorted.count; i += 1) {
-         deck->slides[i].image_path = PushStr8F(arena, "%S\\%S", deck->folder, sorted.v[i]);
+         deck->slides[i].pictures = PushArray(arena, DECK_Picture, 1);
+         deck->slides[i].picture_count = 1;
+         deck->slides[i].pictures[0].path = PushStr8F(arena, "%S\\%S", deck->folder, sorted.v[i]);
       }
 
       ScratchEnd(scratch);
@@ -217,7 +219,7 @@ DECK_LayoutName(DECK_Layout layout) {
 
 internal String8
 DECK_PlaceName(DECK_PlaceKind kind) {
-   String8 names[DECK_PlaceKind_COUNT] = {Str8Lit("picture"), Str8Lit("text")};
+   String8 names[DECK_PlaceKind_COUNT] = {Str8Lit("picture"), Str8Lit("text"), Str8Lit("title")};
    return names[(kind < DECK_PlaceKind_COUNT) ? kind : 0];
 }
 
@@ -303,8 +305,10 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
    B32 waiting_video_loop = 0;
    B32 waiting_video_mute = 0;
    B32 waiting_video_manual = 0;
-   // And for @place lines.
+   // And for @place lines. A picture's waits for the slide's first picture,
+   // which can be a few lines on in a slide that has started already.
    DECK_Place waiting_places[DECK_PlaceKind_COUNT] = {0};
+   DECK_Place waiting_picture_place = {0};
 
    U64 pos = 0;
    while (pos < text.size) {
@@ -337,6 +341,7 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
       if (is_rule) {
          slide = 0;
          gap_before = 0;
+         MemoryZeroStruct(&waiting_picture_place);
          has_rule_pos = 1;
          rule_pos = line_start;
          continue;
@@ -426,8 +431,14 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
                x = Clamp(-1.0f, x, 1.0f);
                y = Clamp(-1.0f, y, 1.0f);
 
-               // The first such line of a slide is the one that counts.
+               // The first such line of a slide - or of a picture - is the
+               // one that counts. A picture's is for the picture last
+               // written above it.
                DECK_Place* place = (slide != 0) ? &slide->places[kind] : &waiting_places[kind];
+               if (kind == DECK_PlaceKind_Picture) {
+                  place = (slide != 0 && slide->picture_count != 0) ? &slide->pictures[slide->picture_count - 1].place
+                                                                    : &waiting_picture_place;
+               }
                if (!place->is_set) {
                   place->is_set = 1;
                   place->rect = R2F32P(x, y, x + w, y + h);
@@ -487,6 +498,10 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          slide = &node->slide;
          slide->text_pos = (has_rule_pos && !is_title) ? rule_pos : line_start;
          gap_before = 0;
+         if (is_title) {
+            // What waited for a picture waited on the slide before.
+            MemoryZeroStruct(&waiting_picture_place);
+         }
 
          if (has_waiting_layout) {
             slide->layout = waiting_layout;
@@ -518,15 +533,24 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          slide->title = _DECK_Trim(Str8Skip(line, hash_count));
          slide->title_range = _DECK_RangeOf(slide->title);
       } else if (image_path.size != 0) {
-         if (slide->image_path.size == 0) {
-            slide->image_range = _DECK_RangeOf(image_path);
+         if (slide->pictures == 0) {
+            slide->pictures = PushArray(arena, DECK_Picture, DECK_MAX_PICTURES);
+         }
+         if (slide->picture_count < DECK_MAX_PICTURES) {
+            DECK_Picture* picture = &slide->pictures[slide->picture_count];
+            slide->picture_count += 1;
+            picture->range = _DECK_RangeOf(image_path);
             // A path that says where it starts from is used as it is.
             B32 is_absolute = (image_path.str[0] == '/' || image_path.str[0] == '\\' ||
                                (image_path.size >= 2 && image_path.str[1] == ':'));
             if (is_absolute) {
-               slide->image_path = image_path;
+               picture->path = image_path;
             } else {
-               slide->image_path = PushStr8F(arena, "%S\\%S", deck->folder, image_path);
+               picture->path = PushStr8F(arena, "%S\\%S", deck->folder, image_path);
+            }
+            if (slide->picture_count == 1) {
+               picture->place = waiting_picture_place;
+               MemoryZeroStruct(&waiting_picture_place);
             }
          }
       } else {
@@ -579,87 +603,110 @@ DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos) {
    return result;
 }
 
-// The slide's picture goes from src to dst, with its video if it is one: a
+// A picture's image goes from src to dst, with its video if it is one: a
 // video goes on playing from where it is.
 internal void
-_DECK_MoveSlideImage(DECK_Slide* dst, DECK_Slide* src) {
+_DECK_MovePictureImage(DECK_Picture* dst, DECK_Picture* src) {
    dst->image = src->image;
    dst->video = src->video;
    MemoryZeroStruct(&src->image);
    src->video = 0;
 }
 
-// dst_slide is src_slide, as the deck was before: it gets what src_slide had.
+// dst_picture is src_picture, as the deck was before: it gets what that had.
 internal void
-_DECK_TakeFromCounterpart(DECK_Slide* dst_slide, DECK_Slide* src_slide) {
-   if (IMG_IsLoaded(&src_slide->image)) {
-      _DECK_MoveSlideImage(dst_slide, src_slide);
-   } else if (src_slide->load_failed) {
+_DECK_TakeFromCounterpart(DECK_Picture* dst_picture, DECK_Picture* src_picture) {
+   if (IMG_IsLoaded(&src_picture->image)) {
+      _DECK_MovePictureImage(dst_picture, src_picture);
+   } else if (src_picture->load_failed) {
       // A file that could not be loaded is not tried again either.
-      dst_slide->load_failed = 1;
+      dst_picture->load_failed = 1;
    }
+}
+
+// Every picture of a deck's slides, in order, each with its slide's title.
+typedef struct _DECK_PictureRef _DECK_PictureRef;
+struct _DECK_PictureRef {
+   DECK_Picture* picture;
+   String8       title;
+   U32           matched; // 0 not, 1 by title, 2 by order
+};
+
+internal _DECK_PictureRef*
+_DECK_PictureRefs(Arena* arena, DECK_Deck* deck, U64* count_out) {
+   U64 count = 0;
+   for (U64 i = 0; i < deck->slide_count; i += 1) {
+      count += deck->slides[i].picture_count;
+   }
+   _DECK_PictureRef* refs = PushArray(arena, _DECK_PictureRef, count + 1);
+   U64               at = 0;
+   for (U64 i = 0; i < deck->slide_count; i += 1) {
+      for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
+         refs[at].picture = &deck->slides[i].pictures[k];
+         refs[at].title = deck->slides[i].title;
+         at += 1;
+      }
+   }
+   *count_out = count;
+   return refs;
 }
 
 internal void
 DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
    Temp scratch = ScratchBegin(0, 0);
 
-   // Several slides can show the same file, and each must get what it had
-   // itself: not what its neighbour had while the neighbour - the slide
-   // showing, perhaps, with its video playing - is left to load again from
-   // the start. So first each slide of dst is matched with the one of src it
-   // is, and takes only from that one: what that one did not have loaded, it
-   // does not have either. Only a slide that matches none takes from what is
+   // Several slides can show the same file - and one slide the same file
+   // twice - and each picture must get what it had itself: not what its
+   // neighbour had while the neighbour - on the slide showing, perhaps,
+   // with its video playing - is left to load again from the start. So
+   // first each picture of dst is matched with the one of src it is, and
+   // takes only from that one: what that one did not have loaded, it does
+   // not have either. Only a picture that matches none takes from what is
    // left over.
-   B32* dst_matched = PushArray(scratch.arena, B32, dst->slide_count + 1);
-   B32* src_matched = PushArray(scratch.arena, B32, src->slide_count + 1);
+   U64               dst_count = 0;
+   U64               src_count = 0;
+   _DECK_PictureRef* dst_refs = _DECK_PictureRefs(scratch.arena, dst, &dst_count);
+   _DECK_PictureRef* src_refs = _DECK_PictureRefs(scratch.arena, src, &src_count);
 
-   //- bgz: the same file and the same title: the same slide
+   //- bgz: the same file on a slide of the same title: the same picture
    //
    // Whatever was added, taken away or moved around it.
-   for (U64 i = 0; i < dst->slide_count; i += 1) {
-      DECK_Slide* dst_slide = &dst->slides[i];
-      if (dst_slide->image_path.size == 0) {
-         continue;
-      }
-      for (U64 j = 0; j < src->slide_count; j += 1) {
-         DECK_Slide* src_slide = &src->slides[j];
-         if (!src_matched[j] && Str8Match(src_slide->image_path, dst_slide->image_path, 0) &&
-             Str8Match(src_slide->title, dst_slide->title, 0)) {
-            dst_matched[i] = 1;
-            src_matched[j] = 1;
-            _DECK_TakeFromCounterpart(dst_slide, src_slide);
+   for (U64 i = 0; i < dst_count; i += 1) {
+      for (U64 j = 0; j < src_count; j += 1) {
+         if (!src_refs[j].matched && Str8Match(src_refs[j].picture->path, dst_refs[i].picture->path, 0) &&
+             Str8Match(src_refs[j].title, dst_refs[i].title, 0)) {
+            dst_refs[i].matched = 1;
+            src_refs[j].matched = 1;
+            _DECK_TakeFromCounterpart(dst_refs[i].picture, src_refs[j].picture);
             break;
          }
       }
    }
 
-   //- bgz: then by order, among the slides of a file not matched yet
+   //- bgz: then by order, among the pictures of a file not matched yet
    //
    // A title being typed: the first of them left in dst is the first of
    // them left in src, the second the second, and so on.
-   for (U64 i = 0; i < dst->slide_count; i += 1) {
-      DECK_Slide* dst_slide = &dst->slides[i];
-      if (dst_slide->image_path.size == 0 || dst_matched[i]) {
+   for (U64 i = 0; i < dst_count; i += 1) {
+      if (dst_refs[i].matched) {
          continue;
       }
       // 1 is matched by title; 2, in this pass, is still counted on both
       // sides, so that nth means the same in dst and in src.
       U64 nth = 0;
       for (U64 k = 0; k < i; k += 1) {
-         if (dst_matched[k] != 1 && Str8Match(dst->slides[k].image_path, dst_slide->image_path, 0)) {
+         if (dst_refs[k].matched != 1 && Str8Match(dst_refs[k].picture->path, dst_refs[i].picture->path, 0)) {
             nth += 1;
          }
       }
-      for (U64 j = 0, seen = 0; j < src->slide_count; j += 1) {
-         DECK_Slide* src_slide = &src->slides[j];
-         if (src_matched[j] == 1 || !Str8Match(src_slide->image_path, dst_slide->image_path, 0)) {
+      for (U64 j = 0, seen = 0; j < src_count; j += 1) {
+         if (src_refs[j].matched == 1 || !Str8Match(src_refs[j].picture->path, dst_refs[i].picture->path, 0)) {
             continue;
          }
          if (seen == nth) {
-            dst_matched[i] = 2;
-            src_matched[j] = 2;
-            _DECK_TakeFromCounterpart(dst_slide, src_slide);
+            dst_refs[i].matched = 2;
+            src_refs[j].matched = 2;
+            _DECK_TakeFromCounterpart(dst_refs[i].picture, src_refs[j].picture);
             break;
          }
          seen += 1;
@@ -668,58 +715,58 @@ DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
 
    //- bgz: then what is left over
    //
-   // A slide that is in dst but was not in src - one more slide of a file
-   // than src had, or one that was gone for an edit or two and is back -
-   // takes a picture of its file that no slide of src took: from a slide of
+   // A picture that is in dst but was not in src - one more of a file than
+   // src had, or one that was gone for an edit or two and is back - takes
+   // an image of its file that no picture of src took: from a picture of
    // src not matched, and then from src's spares.
-   for (U64 i = 0; i < dst->slide_count; i += 1) {
-      DECK_Slide* dst_slide = &dst->slides[i];
-      if (dst_slide->image_path.size == 0 || dst_matched[i] || IMG_IsLoaded(&dst_slide->image) || dst_slide->load_failed) {
+   for (U64 i = 0; i < dst_count; i += 1) {
+      DECK_Picture* dst_picture = dst_refs[i].picture;
+      if (dst_refs[i].matched || IMG_IsLoaded(&dst_picture->image) || dst_picture->load_failed) {
          continue;
       }
-      for (U64 j = 0; j < src->slide_count + src->spare_count; j += 1) {
-         DECK_Slide* src_slide = (j < src->slide_count) ? &src->slides[j] : &src->spares[j - src->slide_count];
-         if (IMG_IsLoaded(&src_slide->image) && Str8Match(src_slide->image_path, dst_slide->image_path, 0)) {
-            _DECK_MoveSlideImage(dst_slide, src_slide);
+      for (U64 j = 0; j < src_count + src->spare_count; j += 1) {
+         DECK_Picture* src_picture = (j < src_count) ? src_refs[j].picture : &src->spares[j - src_count];
+         if (IMG_IsLoaded(&src_picture->image) && Str8Match(src_picture->path, dst_picture->path, 0)) {
+            _DECK_MovePictureImage(dst_picture, src_picture);
             break;
          }
       }
    }
 
-   ScratchEnd(scratch);
-
-   //- bgz: and what no slide took, kept for a while
+   //- bgz: and what no picture took, kept for a while
    //
-   // A picture of a file that a slide of dst still shows: its own slide may
+   // An image of a file that a slide of dst still shows: its own slide may
    // be back at the next key. The rest stays in src, and goes with it.
    U64 spare_count = 0;
-   for (U64 j = 0; j < src->slide_count + src->spare_count; j += 1) {
-      DECK_Slide* src_slide = (j < src->slide_count) ? &src->slides[j] : &src->spares[j - src->slide_count];
-      if (IMG_IsLoaded(&src_slide->image)) {
+   for (U64 j = 0; j < src_count + src->spare_count; j += 1) {
+      DECK_Picture* src_picture = (j < src_count) ? src_refs[j].picture : &src->spares[j - src_count];
+      if (IMG_IsLoaded(&src_picture->image)) {
          spare_count += 1;
       }
    }
    spare_count = Min(spare_count, DECK_SPARE_MAX);
    if (spare_count != 0) {
-      dst->spares = PushArray(dst->arena, DECK_Slide, spare_count);
+      dst->spares = PushArray(dst->arena, DECK_Picture, spare_count);
    }
-   for (U64 j = 0; j < src->slide_count + src->spare_count && dst->spare_count < spare_count; j += 1) {
-      DECK_Slide* src_slide = (j < src->slide_count) ? &src->slides[j] : &src->spares[j - src->slide_count];
-      if (!IMG_IsLoaded(&src_slide->image)) {
+   for (U64 j = 0; j < src_count + src->spare_count && dst->spare_count < spare_count; j += 1) {
+      DECK_Picture* src_picture = (j < src_count) ? src_refs[j].picture : &src->spares[j - src_count];
+      if (!IMG_IsLoaded(&src_picture->image)) {
          continue;
       }
       B32 is_shown = 0;
-      for (U64 i = 0; i < dst->slide_count && !is_shown; i += 1) {
-         is_shown = Str8Match(dst->slides[i].image_path, src_slide->image_path, 0);
+      for (U64 i = 0; i < dst_count && !is_shown; i += 1) {
+         is_shown = Str8Match(dst_refs[i].picture->path, src_picture->path, 0);
       }
       if (is_shown) {
-         DECK_Slide* spare = &dst->spares[dst->spare_count];
+         DECK_Picture* spare = &dst->spares[dst->spare_count];
          dst->spare_count += 1;
-         spare->image_path = PushStr8Copy(dst->arena, src_slide->image_path);
-         spare->spared_us  = (j < src->slide_count) ? NowTimeUS() : src_slide->spared_us;
-         _DECK_MoveSlideImage(spare, src_slide);
+         spare->path = PushStr8Copy(dst->arena, src_picture->path);
+         spare->spared_us = (j < src_count) ? NowTimeUS() : src_picture->spared_us;
+         _DECK_MovePictureImage(spare, src_picture);
       }
    }
+
+   ScratchEnd(scratch);
 }
 
 internal B32
@@ -766,7 +813,7 @@ DECK_OpenPath(String8 path, U64* first_slide_out) {
 
       deck = DECK_OpenFolder(folder);
       for (U64 i = 0; i < deck->slide_count; i += 1) {
-         if (Str8Match(Str8SkipLastSlash(deck->slides[i].image_path), name, StringMatchFlag_CaseInsensitive)) {
+         if (Str8Match(Str8SkipLastSlash(deck->slides[i].pictures[0].path), name, StringMatchFlag_CaseInsensitive)) {
             first_slide = i;
             break;
          }
@@ -850,49 +897,62 @@ _DECK_FileFromPath(String8 path) {
    return result;
 }
 
-// The slide's picture, loaded if it is not and can be: an image decoded, a
-// video opened, paused at its start.
+// The picture, loaded if it is not and can be: an image decoded, a video
+// opened, paused at its start.
 internal void
-_DECK_LoadSlideImage(DECK_Slide* slide) {
-   if (!IMG_IsLoaded(&slide->image) && !slide->load_failed && slide->image_path.size != 0) {
-      if (VID_NameIsVideo(slide->image_path)) {
-         slide->video = VID_Open(_DECK_FileFromPath(slide->image_path));
-         if (slide->video != 0) {
-            slide->image.texture = VID_Texture(slide->video);
-            slide->image.size = VID_Size(slide->video);
+_DECK_LoadPicture(DECK_Picture* picture) {
+   if (!IMG_IsLoaded(&picture->image) && !picture->load_failed && picture->path.size != 0) {
+      if (VID_NameIsVideo(picture->path)) {
+         picture->video = VID_Open(_DECK_FileFromPath(picture->path));
+         if (picture->video != 0) {
+            picture->image.texture = VID_Texture(picture->video);
+            picture->image.size = VID_Size(picture->video);
          }
       } else {
-         slide->image = IMG_LoadFromPath(slide->image_path);
+         picture->image = IMG_LoadFromPath(picture->path);
       }
-      slide->load_failed = !IMG_IsLoaded(&slide->image);
+      picture->load_failed = !IMG_IsLoaded(&picture->image);
    }
 }
 
 internal void
-_DECK_ReleaseSlideImage(DECK_Slide* slide) {
-   if (slide->video != 0) {
+_DECK_ReleasePicture(DECK_Picture* picture) {
+   if (picture->video != 0) {
       // The texture is the player's, and goes with it.
-      VID_Close(slide->video);
-      slide->video = 0;
-      MemoryZeroStruct(&slide->image);
+      VID_Close(picture->video);
+      picture->video = 0;
+      MemoryZeroStruct(&picture->image);
    } else {
-      IMG_Release(&slide->image);
+      IMG_Release(&picture->image);
    }
 }
 
 internal void
-DECK_ReopenImage(DECK_Deck* deck, U64 slide_idx) {
+DECK_ReopenPicture(DECK_Picture* picture) {
+   _DECK_ReleasePicture(picture);
+   picture->load_failed = 0;
+   _DECK_LoadPicture(picture);
+}
+
+internal U64
+DECK_VideosFromSlide(DECK_Deck* deck, U64 slide_idx, VID_Video** videos) {
+   U64 count = 0;
    if (slide_idx < deck->slide_count) {
       DECK_Slide* slide = &deck->slides[slide_idx];
-      _DECK_ReleaseSlideImage(slide);
-      slide->load_failed = 0;
-      _DECK_LoadSlideImage(slide);
+      for (U64 k = 0; k < slide->picture_count && count < DECK_MAX_PICTURES; k += 1) {
+         if (slide->pictures[k].video != 0) {
+            videos[count] = slide->pictures[k].video;
+            count += 1;
+         }
+      }
    }
+   return count;
 }
 
 internal VID_Video*
 DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx) {
-   VID_Video* result = (slide_idx < deck->slide_count) ? deck->slides[slide_idx].video : 0;
+   VID_Video* videos[DECK_MAX_PICTURES] = {0};
+   VID_Video* result = (DECK_VideosFromSlide(deck, slide_idx, videos) != 0) ? videos[0] : 0;
    return result;
 }
 
@@ -901,7 +961,24 @@ DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx) {
    B32 result = 0;
    if (slide_idx < deck->slide_count) {
       DECK_Slide* slide = &deck->slides[slide_idx];
-      result = (slide->image_path.size != 0 && !slide->load_failed && VID_NameIsVideo(slide->image_path));
+      for (U64 k = 0; k < slide->picture_count && !result; k += 1) {
+         result = (!slide->pictures[k].load_failed && VID_NameIsVideo(slide->pictures[k].path));
+      }
+   }
+   return result;
+}
+
+internal B32
+DECK_SlideVideosAreOpen(DECK_Deck* deck, U64 slide_idx) {
+   B32 result = 1;
+   if (slide_idx < deck->slide_count) {
+      DECK_Slide* slide = &deck->slides[slide_idx];
+      for (U64 k = 0; k < slide->picture_count && result; k += 1) {
+         DECK_Picture* picture = &slide->pictures[k];
+         if (!picture->load_failed && VID_NameIsVideo(picture->path) && picture->video == 0) {
+            result = 0;
+         }
+      }
    }
    return result;
 }
@@ -909,17 +986,19 @@ DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx) {
 internal void
 DECK_UpdateVideos(DECK_Deck* deck) {
    for (U64 i = 0; i < deck->slide_count; i += 1) {
-      if (deck->slides[i].video != 0) {
-         VID_Update(deck->slides[i].video);
+      for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
+         if (deck->slides[i].pictures[k].video != 0) {
+            VID_Update(deck->slides[i].pictures[k].video);
+         }
       }
    }
    // A spare's video keeps its time too, for when its slide is back. A
    // spare whose slide has not come back by now is not kept any longer.
    U64 now_us = NowTimeUS();
    for (U64 i = 0; i < deck->spare_count; i += 1) {
-      DECK_Slide* spare = &deck->spares[i];
+      DECK_Picture* spare = &deck->spares[i];
       if (IMG_IsLoaded(&spare->image) && now_us - spare->spared_us > (U64)(DECK_SPARE_SECONDS * 1000000.0)) {
-         _DECK_ReleaseSlideImage(spare);
+         _DECK_ReleasePicture(spare);
       }
       if (spare->video != 0) {
          VID_Update(spare->video);
@@ -930,60 +1009,37 @@ DECK_UpdateVideos(DECK_Deck* deck) {
 internal void
 DECK_Close(DECK_Deck* deck) {
    for (U64 i = 0; i < deck->slide_count; i += 1) {
-      _DECK_ReleaseSlideImage(&deck->slides[i]);
+      for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
+         _DECK_ReleasePicture(&deck->slides[i].pictures[k]);
+      }
    }
    for (U64 i = 0; i < deck->spare_count; i += 1) {
-      _DECK_ReleaseSlideImage(&deck->spares[i]);
+      _DECK_ReleasePicture(&deck->spares[i]);
    }
    ArenaRelease(deck->arena);
 }
 
-internal IMG_Image*
-DECK_ImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
-   IMG_Image* result = 0;
+internal void
+DECK_LoadSlideOnly(DECK_Deck* deck, U64 slide_idx) {
+   if (slide_idx < deck->slide_count) {
+      DECK_Slide* slide = &deck->slides[slide_idx];
+      for (U64 k = 0; k < slide->picture_count; k += 1) {
+         _DECK_LoadPicture(&slide->pictures[k]);
+      }
+   }
+}
 
+internal void
+DECK_LoadSlide(DECK_Deck* deck, U64 slide_idx) {
    if (slide_idx < deck->slide_count) {
       // Everything but this slide and its two neighbours goes. The neighbours
       // stay if they were shown, so going back a slide does not decode again.
       for (U64 i = 0; i < deck->slide_count; i += 1) {
          B32 is_near = (i + 1 >= slide_idx && i <= slide_idx + 1);
-         if (!is_near) {
-            _DECK_ReleaseSlideImage(&deck->slides[i]);
+         for (U64 k = 0; k < deck->slides[i].picture_count && !is_near; k += 1) {
+            _DECK_ReleasePicture(&deck->slides[i].pictures[k]);
          }
       }
-
-      DECK_Slide* slide = &deck->slides[slide_idx];
-      _DECK_LoadSlideImage(slide);
-      if (IMG_IsLoaded(&slide->image)) {
-         result = &slide->image;
-      }
+      DECK_LoadSlideOnly(deck, slide_idx);
    }
-
-   return result;
-}
-
-internal IMG_Image*
-DECK_LoadImageOfSlide(DECK_Deck* deck, U64 slide_idx) {
-   IMG_Image* result = 0;
-
-   if (slide_idx < deck->slide_count) {
-      DECK_Slide* slide = &deck->slides[slide_idx];
-      _DECK_LoadSlideImage(slide);
-      if (IMG_IsLoaded(&slide->image)) {
-         result = &slide->image;
-      }
-   }
-
-   return result;
-}
-
-internal IMG_Image*
-DECK_LoadedImageFromSlide(DECK_Deck* deck, U64 slide_idx) {
-   IMG_Image* result = 0;
-
-   if (slide_idx < deck->slide_count && IMG_IsLoaded(&deck->slides[slide_idx].image)) {
-      result = &deck->slides[slide_idx].image;
-   }
-
-   return result;
 }

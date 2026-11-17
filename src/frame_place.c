@@ -1,8 +1,9 @@
 ////////////////////////////////
 //~ bgz: the edit screen: a slide's picture and its body, moved and resized with the mouse
 //
-// In the preview, the slide's picture - or video - and its body (every line
-// under the title) each have a box: where VIEW_DrawSlide put them. With the
+// In the preview, each of the slide's pictures - or videos - its title and
+// its body (every line under the title) have a box: where VIEW_DrawSlide
+// put them. With the
 // mouse over one, its outline and a handle at each corner show.
 //
 //    move it          press inside the box and drag
@@ -54,43 +55,88 @@ _PLACE_BoxesAreGood(App_State* app_state) {
            Dim2F32(app_state->preview_page).x > 0 && Dim2F32(app_state->preview_page).y > 0);
 }
 
-// Which box a point is on: DECK_PlaceKind_COUNT for neither. Where the body's
-// box and the picture's are over each other, a point on a line of words is
-// on the body, and any other on the picture.
-internal DECK_PlaceKind
-_PLACE_KindAt(App_State* app_state, Vec2F32 pos) {
-   B32 on_picture = (app_state->preview_has_box[DECK_PlaceKind_Picture] &&
-                     Contains2F32(app_state->preview_boxes[DECK_PlaceKind_Picture], pos));
-   B32 on_text = (app_state->preview_has_box[DECK_PlaceKind_Text] &&
-                  Contains2F32(app_state->preview_boxes[DECK_PlaceKind_Text], pos));
-
-   if (on_picture && on_text) {
-      DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
-      on_text = 0;
-      for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
-         VIEW_Hit* hit = &app_state->preview_hits[i];
-         B32       is_picture = (hit->text_range.min == slide->image_range.min && hit->text_range.max == slide->image_range.max);
-         B32       is_title = (hit->text_range.min == slide->title_range.min && hit->text_range.max == slide->title_range.max);
-         if (!is_picture && !is_title && Contains2F32(hit->rect, pos)) {
-            on_text = 1;
-            break;
-         }
-      }
-   }
-
-   DECK_PlaceKind result = DECK_PlaceKind_COUNT;
-   if (on_text) {
-      result = DECK_PlaceKind_Text;
-   } else if (on_picture) {
-      result = DECK_PlaceKind_Picture;
+// The slide's place of a kind: a picture's is the picture's own.
+internal DECK_Place*
+_PLACE_PlaceOf(DECK_Slide* slide, DECK_PlaceKind kind, U64 picture_idx) {
+   DECK_Place* result = &slide->places[kind];
+   if (kind == DECK_PlaceKind_Picture && picture_idx < slide->picture_count) {
+      result = &slide->pictures[picture_idx].place;
    }
    return result;
 }
 
-// Writes the slide's @place line for kind: over the one it has (before), or
-// as a new line beside the picture's line, or the body's first.
+// Which box a point is on: 0 for none. Where boxes are over each other, a
+// point on a line of the body's words is on the body, one on the title's
+// words on the title, and any other on the picture drawn last - the one on
+// top - then the title, then the body.
+internal VIEW_Box*
+_PLACE_BoxAt(App_State* app_state, Vec2F32 pos) {
+   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   VIEW_Box*   title = 0;
+   VIEW_Box*   text = 0;
+   VIEW_Box*   picture = 0;
+   for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+      VIEW_Box* box = &app_state->preview_boxes[i];
+      if (Contains2F32(box->rect, pos)) {
+         if (box->kind == DECK_PlaceKind_Title) {
+            title = box;
+         } else if (box->kind == DECK_PlaceKind_Text) {
+            text = box;
+         } else if (box->picture_idx < slide->picture_count) {
+            picture = box;
+         }
+      }
+   }
+
+   // What words the point is on, if any.
+   B32 on_title_words = 0;
+   B32 on_body_words = 0;
+   for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
+      VIEW_Hit* hit = &app_state->preview_hits[i];
+      if (!Contains2F32(hit->rect, pos)) {
+         continue;
+      }
+      B32 is_picture = 0;
+      for (U64 k = 0; k < slide->picture_count; k += 1) {
+         is_picture |= (hit->text_range.min == slide->pictures[k].range.min && hit->text_range.max == slide->pictures[k].range.max);
+      }
+      B32 is_title = (hit->text_range.min == slide->title_range.min && hit->text_range.max == slide->title_range.max);
+      on_title_words |= (is_title && !is_picture);
+      on_body_words |= (!is_title && !is_picture);
+   }
+
+   VIEW_Box* result = 0;
+   if (text != 0 && on_body_words) {
+      result = text;
+   } else if (title != 0 && on_title_words) {
+      result = title;
+   } else if (picture != 0) {
+      result = picture;
+   } else if (title != 0) {
+      result = title;
+   } else {
+      result = text;
+   }
+   return result;
+}
+
+// Whether pos is on the strip of controls of one of the preview's videos.
+internal B32
+_PLACE_IsOnVideoStrip(App_State* app_state, F32 ui, Vec2F32 pos) {
+   B32 result = 0;
+   for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES && !result; picture_idx += 1) {
+      Rng2F32    video_rect = {0};
+      VID_Video* video = _EDIT_PreviewVideo(app_state, app_state->preview_page, picture_idx, &video_rect);
+      result = (video != 0 && FR_VideoStripContains(app_state, video_rect, ui, pos));
+   }
+   return result;
+}
+
+// Writes the slide's @place line for kind - for the picture_idx-th picture,
+// if a picture's: over the one it has (before), or as a new line under the
+// picture's line, under the title's, or above the body's first.
 internal void
-_PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, DECK_Place* before, Rng2F32 rect) {
+_PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 picture_idx, DECK_Place* before, Rng2F32 rect) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 text = ED_Text(editor);
    String8 line = PushStr8F(scratch.arena, "@place %S %.3f %.3f %.3f %.3f", DECK_PlaceName(kind), rect.min.x, rect.min.y,
@@ -99,10 +145,16 @@ _PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, DECK
    if (before->has_line && before->line.max <= text.size) {
       _EDIT_ReplaceKeepingCursor(editor, before->line.min, before->line.max, line);
    } else {
-      // The line of the text the thing is on: the picture's, or the first of
-      // the body's.
-      U64 on = (kind == DECK_PlaceKind_Picture) ? slide->image_range.min
-                                                : (slide->first_item != 0 ? slide->first_item->text_range.min : slide->text_pos);
+      // The line of the text the thing is on: the picture's, the title's,
+      // or the first of the body's.
+      U64 on = slide->text_pos;
+      if (kind == DECK_PlaceKind_Picture && picture_idx < slide->picture_count) {
+         on = slide->pictures[picture_idx].range.min;
+      } else if (kind == DECK_PlaceKind_Title) {
+         on = slide->title_range.min;
+      } else if (kind == DECK_PlaceKind_Text && slide->first_item != 0) {
+         on = slide->first_item->text_range.min;
+      }
       on = Min(on, text.size);
       U64 line_start = on;
       while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
@@ -111,8 +163,9 @@ _PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, DECK
 
       // The body's goes above its first line, where it does not come between
       // two lines of the body - unless that line is what starts the slide:
-      // above it would be the slide before. The picture's goes under the
-      // picture's line.
+      // above it would be the slide before. A picture's goes under the
+      // picture's line: it is for the picture last written above it. The
+      // title's goes under the title's, which is what starts the slide.
       if (kind == DECK_PlaceKind_Text && line_start > slide->text_pos) {
          _EDIT_ReplaceKeepingCursor(editor, line_start, line_start, PushStr8F(scratch.arena, "%S\n", line));
       } else {
@@ -172,7 +225,7 @@ _PLACE_RectFromMouse(EDIT_PlaceDrag* drag, Rng2F32 page, Vec2F32 mouse) {
       // The least it can be: the body's box more than a picture's. Its words
       // wrap at its width and get smaller only so far, so a box much
       // narrower than this has a word a line, running down off the page.
-      B32 is_text = (drag->kind == DECK_PlaceKind_Text);
+      B32 is_text = (drag->kind != DECK_PlaceKind_Picture);
       F32 min_w = is_text ? Min(_PLACE_TEXT_MIN_W, w0) : DECK_PLACE_MIN;
       F32 min_h = is_text ? Min(_PLACE_TEXT_MIN_H, h0) : DECK_PLACE_MIN;
 
@@ -202,15 +255,18 @@ _PLACE_RectFromMouse(EDIT_PlaceDrag* drag, Rng2F32 page, Vec2F32 mouse) {
 }
 
 internal void
-_PLACE_Begin(App_State* app_state, DECK_PlaceKind kind, U32 corner, Vec2F32 pos, EDIT_PlaceDragState state) {
+_PLACE_Begin(App_State* app_state, VIEW_Box* from, U32 corner, Vec2F32 pos, EDIT_PlaceDragState state) {
    EDIT_PlaceDrag* drag = &app_state->place_drag;
    Rng2F32         page = app_state->preview_page;
    Vec2F32         page_dim = Dim2F32(page);
-   Rng2F32         box = app_state->preview_boxes[kind];
+   Rng2F32         box = from->rect;
+   DECK_PlaceKind  kind = from->kind;
+   U64             picture_idx = from->picture_idx;
 
    MemoryZeroStruct(drag);
    drag->state = state;
    drag->kind = kind;
+   drag->picture_idx = picture_idx;
    drag->corner = corner;
    drag->slide_idx = app_state->slide_idx;
    drag->edit_count = app_state->editor->edit_count;
@@ -218,7 +274,7 @@ _PLACE_Begin(App_State* app_state, DECK_PlaceKind kind, U32 corner, Vec2F32 pos,
    drag->start = R2F32P((box.min.x - page.min.x) / page_dim.x, (box.min.y - page.min.y) / page_dim.y,
                         (box.max.x - page.min.x) / page_dim.x, (box.max.y - page.min.y) / page_dim.y);
    drag->now = drag->start;
-   drag->before = app_state->deck->slides[app_state->slide_idx].places[kind];
+   drag->before = *_PLACE_PlaceOf(&app_state->deck->slides[app_state->slide_idx], kind, picture_idx);
 }
 
 // Before the edit screen's own keys and clicks (EDIT_Input), and before
@@ -238,7 +294,7 @@ PLACE_Input(App_State* app_state, F32 ui) {
          // The text has changed under it, or the slide: given up. A deck
          // made again from the text has the place the text says already.
          if (editor != 0 && editor->edit_count == drag->edit_count && drag->slide_idx < deck->slide_count) {
-            deck->slides[drag->slide_idx].places[drag->kind] = drag->before;
+            *_PLACE_PlaceOf(&deck->slides[drag->slide_idx], drag->kind, drag->picture_idx) = drag->before;
          }
          drag->state = EDIT_PlaceDragState_None;
          return;
@@ -247,16 +303,18 @@ PLACE_Input(App_State* app_state, F32 ui) {
       DECK_Slide* slide = &deck->slides[drag->slide_idx];
       Vec2F32     mouse = Core_WM_MouseFromWindow(app_state->window);
 
+      DECK_Place* place = _PLACE_PlaceOf(slide, drag->kind, drag->picture_idx);
+
       if (drag->state == EDIT_PlaceDragState_Dragging && Core_WM_KeyPress(events, app_state->window, 0, WM_Key_Esc)) {
-         slide->places[drag->kind] = drag->before;
+         *place = drag->before;
          drag->state = EDIT_PlaceDragState_None;
          return;
       }
 
       if (!Core_WM_KeyIsDown(WM_Key_LeftMouseButton)) {
          if (drag->state == EDIT_PlaceDragState_Dragging) {
-            slide->places[drag->kind] = drag->before;
-            _PLACE_WriteLine(editor, slide, drag->kind, &drag->before, drag->now);
+            *place = drag->before;
+            _PLACE_WriteLine(editor, slide, drag->kind, drag->picture_idx, &drag->before, drag->now);
             editor->last_input_us = NowTimeUS();
          }
          drag->state = EDIT_PlaceDragState_None;
@@ -274,8 +332,8 @@ PLACE_Input(App_State* app_state, F32 ui) {
       }
       if (drag->state == EDIT_PlaceDragState_Dragging) {
          drag->now = _PLACE_RectFromMouse(drag, app_state->preview_page, mouse);
-         slide->places[drag->kind].is_set = 1;
-         slide->places[drag->kind].rect = drag->now;
+         place->is_set = 1;
+         place->rect = drag->now;
       }
       return;
    }
@@ -291,41 +349,39 @@ PLACE_Input(App_State* app_state, F32 ui) {
 
       if (event->key == WM_Key_LeftMouseButton) {
          // A corner first: its handle reaches past the box, and over
-         // whatever else is there.
-         B32 began = 0;
-         for (U64 kind = 0; kind < DECK_PlaceKind_COUNT && !began; kind += 1) {
-            if (!app_state->preview_has_box[kind]) {
-               continue;
-            }
-            for (U32 corner = 1; corner <= 4; corner += 1) {
-               if (Contains2F32(_PLACE_HandleRect(app_state->preview_boxes[kind], corner, ui), event->pos)) {
-                  _PLACE_Begin(app_state, (DECK_PlaceKind)kind, corner, event->pos, EDIT_PlaceDragState_Dragging);
-                  Core_WM_EatEvent(events, event);
-                  began = 1;
+         // whatever else is there. Of the box the point is on, if it is on
+         // one, then of any - the last drawn, which is on top, first.
+         VIEW_Box* on = _PLACE_BoxAt(app_state, event->pos);
+         VIEW_Box* held = 0;
+         U32       held_corner = 0;
+         for (U64 i = app_state->preview_box_count + 1; i > 0 && held == 0; i -= 1) {
+            VIEW_Box* box = (i == app_state->preview_box_count + 1) ? on : &app_state->preview_boxes[i - 1];
+            for (U32 corner = 1; corner <= 4 && box != 0; corner += 1) {
+               if (Contains2F32(_PLACE_HandleRect(box->rect, corner, ui), event->pos)) {
+                  held = box;
+                  held_corner = corner;
                   break;
                }
             }
          }
-         if (began) {
+         if (held != 0) {
+            _PLACE_Begin(app_state, held, held_corner, event->pos, EDIT_PlaceDragState_Dragging);
+            Core_WM_EatEvent(events, event);
             break;
          }
 
          // Inside a box: watched, and left for the click it may be. Not on
          // a video's strip of controls: a press there is the strip's.
-         DECK_PlaceKind kind = _PLACE_KindAt(app_state, event->pos);
-         Rng2F32        video_rect = {0};
-         VID_Video*     video = _EDIT_PreviewVideo(app_state, app_state->preview_page, &video_rect);
-         B32            on_strip = (video != 0 && FR_VideoStripContains(app_state, video_rect, ui, event->pos));
-         if (kind != DECK_PlaceKind_COUNT && !on_strip) {
-            _PLACE_Begin(app_state, kind, 0, event->pos, EDIT_PlaceDragState_Pressed);
+         if (on != 0 && !_PLACE_IsOnVideoStrip(app_state, ui, event->pos)) {
+            _PLACE_Begin(app_state, on, 0, event->pos, EDIT_PlaceDragState_Pressed);
             break;
          }
       }
 
       if (event->key == WM_Key_RightMouseButton) {
-         DECK_PlaceKind kind = _PLACE_KindAt(app_state, event->pos);
-         if (kind != DECK_PlaceKind_COUNT) {
-            DECK_Place* place = &deck->slides[app_state->slide_idx].places[kind];
+         VIEW_Box* on = _PLACE_BoxAt(app_state, event->pos);
+         if (on != 0) {
+            DECK_Place* place = _PLACE_PlaceOf(&deck->slides[app_state->slide_idx], on->kind, on->picture_idx);
             if (place->has_line) {
                _PLACE_RemoveLine(editor, place);
                editor->last_input_us = NowTimeUS();
@@ -349,20 +405,30 @@ PLACE_Draw(App_State* app_state, F32 ui, Vec2F32 mouse) {
       return 0;
    }
 
-   B32            is_dragging = (drag->state == EDIT_PlaceDragState_Dragging);
-   DECK_PlaceKind over = is_dragging ? drag->kind : _PLACE_KindAt(app_state, mouse);
-   // A corner's handle reaches past its box.
-   for (U64 kind = 0; kind < DECK_PlaceKind_COUNT && !is_dragging && over == DECK_PlaceKind_COUNT; kind += 1) {
-      for (U32 corner = 1; corner <= 4 && app_state->preview_has_box[kind]; corner += 1) {
-         if (Contains2F32(_PLACE_HandleRect(app_state->preview_boxes[kind], corner, ui), mouse)) {
-            over = (DECK_PlaceKind)kind;
-            break;
+   B32       is_dragging = (drag->state == EDIT_PlaceDragState_Dragging);
+   VIEW_Box* over = 0;
+   if (is_dragging) {
+      for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+         VIEW_Box* candidate = &app_state->preview_boxes[i];
+         if (candidate->kind == drag->kind && (drag->kind != DECK_PlaceKind_Picture || candidate->picture_idx == drag->picture_idx)) {
+            over = candidate;
+         }
+      }
+   } else if (_PLACE_BoxesAreGood(app_state)) {
+      over = _PLACE_BoxAt(app_state, mouse);
+      // A corner's handle reaches past its box.
+      for (U64 i = app_state->preview_box_count; i > 0 && over == 0; i -= 1) {
+         for (U32 corner = 1; corner <= 4; corner += 1) {
+            if (Contains2F32(_PLACE_HandleRect(app_state->preview_boxes[i - 1].rect, corner, ui), mouse)) {
+               over = &app_state->preview_boxes[i - 1];
+               break;
+            }
          }
       }
    }
 
-   if (over != DECK_PlaceKind_COUNT && app_state->preview_has_box[over]) {
-      Rng2F32 box = app_state->preview_boxes[over];
+   if (over != 0) {
+      Rng2F32 box = over->rect;
       Vec4F32 accent = VIEW_ColorsFromTheme(app_state->deck->theme).accent;
       Vec4F32 line_color = accent;
       line_color.w = is_dragging ? 1.0f : 0.7f;
