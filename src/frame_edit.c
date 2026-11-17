@@ -48,6 +48,7 @@
 //    save             Ctrl+S
 //    format panel     F1 opens and closes it
 //    fullscreen       F11 or Alt+Return. Esc leaves it
+//    deselect         Esc: nothing selected, and no box in the preview
 //    pictures         click the picture line under Format. Esc closes the list,
 //                     the wheel or the scroll bar moves through it
 //    edit a piece     click it in the preview
@@ -601,10 +602,17 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
        Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Return)) {
       app_state->toggle_fullscreen = 1;
    }
-   // Esc closes what is open: the list of pictures, then fullscreen.
+   // Esc closes what is open, one thing a press: the list of pictures, then
+   // what is selected - the words, and the box in the preview around the
+   // piece the cursor is in - then fullscreen.
    if (Core_WM_KeyPress(events, window, 0, WM_Key_Esc)) {
+      B32 has_selection = (editor->mark != editor->cursor);
       if (app_state->show_pictures) {
          app_state->show_pictures = 0;
+      } else if (has_selection || !app_state->preview_focus_hidden) {
+         editor->mark = editor->cursor;
+         app_state->preview_focus_hidden = 1;
+         app_state->preview_focus_hidden_cursor = editor->cursor;
       } else if (is_fullscreen) {
          app_state->toggle_fullscreen = 1;
       }
@@ -683,6 +691,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
          if (hit->text_range.max <= editor->size && _EDIT_ClickIn(app_state, hit->rect)) {
             ED_SetCursor(editor, hit->text_range.max);
             editor->mark = hit->text_range.min;
+            app_state->preview_focus_hidden = 0;
             editor->last_input_us = NowTimeUS();
             break;
          }
@@ -1077,7 +1086,13 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                lit.w = 0.12f;
                Core_D_Rect(rect, R2F32P(0, 0, 1, 1), lit);
             }
-            if (editor->cursor >= hit->text_range.min && editor->cursor <= hit->text_range.max) {
+            // Not after Esc, until the cursor goes somewhere or a piece is
+            // clicked.
+            if (app_state->preview_focus_hidden && editor->cursor != app_state->preview_focus_hidden_cursor) {
+               app_state->preview_focus_hidden = 0;
+            }
+            if (!app_state->preview_focus_hidden && editor->cursor >= hit->text_range.min &&
+                editor->cursor <= hit->text_range.max) {
                // A thin box around it, in a blue that is the same on every
                // theme: it is the editor's mark, not part of the slide.
                F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));

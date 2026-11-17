@@ -186,6 +186,12 @@ struct App_State {
    U64       preview_hit_count;
    U64       preview_hits_edit_count;
 
+   // Edit screen: Esc has taken the box around the piece the cursor is in
+   // off the preview. It is back when the cursor is anywhere but
+   // preview_focus_hidden_cursor, or a piece is clicked.
+   B32 preview_focus_hidden;
+   U64 preview_focus_hidden_cursor;
+
    // Edit screen: where the preview's slide had its picture and its body
    // last frame (VIEW_HitList's boxes), and its page: what the mouse moves
    // and resizes. Good for the same text as preview_hits.
