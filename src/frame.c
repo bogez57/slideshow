@@ -46,7 +46,7 @@ FR_RequestQuit(App_State* app_state) {
    } else if (COPY_IsBusy(app_state) && !app_state->quit_warned_copy) {
       // Its slide names the file as it will be in the deck's folder.
       app_state->quit_warned_copy = 1;
-      FR_Notice(app_state, Str8Lit("Still copying a video into the deck's folder. Close again to quit: its slide will have no video."));
+      FR_Notice(app_state, Str8Lit("Still copying a video into the deck's folder. Close again to quit anyway."));
    } else {
       app_state->quit = 1;
    }

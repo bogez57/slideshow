@@ -47,7 +47,9 @@ _COPY_Thread(void* p) {
    SetThreadNameF("file copy");
 
    Arena* arena = ArenaAlloc();
-   File   in = FileOpen(AccessFlag_Read, job->src);
+   // Shared: the video is played from the original while it is copied, and
+   // the original is not ours to lock.
+   File   in = FileOpen(AccessFlag_Read | AccessFlag_ShareRead | AccessFlag_ShareWrite, job->src);
    File   out = FileOpen(AccessFlag_Write, job->tmp);
    B32    ok = (!FileMatch(in, FileZero()) && !FileMatch(out, FileZero()));
    B32    cancelled = 0;
@@ -166,7 +168,7 @@ COPY_Update(App_State* app_state) {
          // The alias stays: the video goes on playing from where it is, for
          // as long as the program runs.
          LogUserErrorF("Could not copy %S to %S\n", job->src, job->dst);
-         FR_Notice(app_state, Str8Lit("Could not copy the video into the deck's folder. It plays from where it is for now."));
+         FR_Notice(app_state, Str8Lit("Could not copy the video into the deck's folder. It plays from the original."));
          is_finished = 1;
       } else if (done) {
          B32 is_playing = 0;
