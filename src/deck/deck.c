@@ -454,29 +454,72 @@ DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos) {
    return result;
 }
 
+// The slide's picture goes from src to dst, with its video if it is one: a
+// video goes on playing from where it is.
+internal void
+_DECK_MoveSlideImage(DECK_Slide* dst, DECK_Slide* src) {
+   dst->image = src->image;
+   dst->video = src->video;
+   MemoryZeroStruct(&src->image);
+   src->video = 0;
+}
+
 internal void
 DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
+   //- bgz: first, each slide from its own counterpart
+   //
+   // Several slides can show the same file. The first of them in dst takes
+   // from the first of them in src, the second from the second, and so on:
+   // a slide keeps what it had loaded, and does not get what its neighbour
+   // had while the neighbour - the slide showing, perhaps, with its video
+   // playing - is left to load again from the start.
    for (U64 i = 0; i < dst->slide_count; i += 1) {
       DECK_Slide* dst_slide = &dst->slides[i];
-      if (dst_slide->image_path.size == 0 || IMG_IsLoaded(&dst_slide->image)) {
+      if (dst_slide->image_path.size == 0) {
          continue;
       }
 
-      for (U64 j = 0; j < src->slide_count; j += 1) {
+      // Which of the slides with this file it is, in dst.
+      U64 nth = 0;
+      for (U64 k = 0; k < i; k += 1) {
+         if (Str8Match(dst->slides[k].image_path, dst_slide->image_path, 0)) {
+            nth += 1;
+         }
+      }
+      // The same one in src, if src has that many.
+      for (U64 j = 0, seen = 0; j < src->slide_count; j += 1) {
          DECK_Slide* src_slide = &src->slides[j];
          if (!Str8Match(src_slide->image_path, dst_slide->image_path, 0)) {
             continue;
          }
-         if (IMG_IsLoaded(&src_slide->image)) {
-            dst_slide->image = src_slide->image;
-            dst_slide->video = src_slide->video; // a video goes on playing from where it is
-            MemoryZeroStruct(&src_slide->image);
-            src_slide->video = 0;
+         if (seen == nth) {
+            if (IMG_IsLoaded(&src_slide->image)) {
+               _DECK_MoveSlideImage(dst_slide, src_slide);
+            } else if (src_slide->load_failed) {
+               // A file that could not be loaded is not tried again either.
+               dst_slide->load_failed = 1;
+            }
             break;
          }
-         // A file that could not be loaded is not tried again either.
-         if (src_slide->load_failed) {
-            dst_slide->load_failed = 1;
+         seen += 1;
+      }
+   }
+
+   //- bgz: then what is left over
+   //
+   // Slides were added, taken away or moved, and the counts do not line up:
+   // a slide still without its picture takes it from any slide of src that
+   // still has it.
+   for (U64 i = 0; i < dst->slide_count; i += 1) {
+      DECK_Slide* dst_slide = &dst->slides[i];
+      if (dst_slide->image_path.size == 0 || IMG_IsLoaded(&dst_slide->image) || dst_slide->load_failed) {
+         continue;
+      }
+      for (U64 j = 0; j < src->slide_count; j += 1) {
+         DECK_Slide* src_slide = &src->slides[j];
+         if (IMG_IsLoaded(&src_slide->image) && Str8Match(src_slide->image_path, dst_slide->image_path, 0)) {
+            _DECK_MoveSlideImage(dst_slide, src_slide);
+            break;
          }
       }
    }
