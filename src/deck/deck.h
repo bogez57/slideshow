@@ -36,6 +36,10 @@
 //                       with no such line), picture-left, picture-behind (the
 //                       picture fills the slide, behind the words) or center
 //                       (every line in the middle, bullets without their dots)
+//    @video loop mute   how the video of the slide it is in plays, any of:
+//                       loop (starts over at its end), mute (no sound from
+//                       this one), manual (waits for K, not starting when
+//                       the slide comes up)
 //    @note Say this     a note for whoever presents, on the slide it is in: not
 //                       drawn on the slide, shown beside it on request
 //    anything else      a paragraph. Each line is its own
@@ -118,6 +122,11 @@ struct DECK_Slide {
    DECK_Layout layout;
    B32         has_layout_line;
    Rng1U64     layout_line;
+
+   // From the slide's @video line: how its video plays (frame_video.c).
+   B32 video_loop;   // starts over when it reaches its end
+   B32 video_mute;   // no sound from it
+   B32 video_manual; // does not start when the slide comes up
 
    // The slide's @note lines, in order: for whoever presents, not on the
    // slide.

@@ -253,6 +253,10 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
    B32         has_waiting_layout = 0;
    DECK_Layout waiting_layout = DECK_Layout_PictureRight;
    Rng1U64     waiting_layout_line = {0};
+   // The same for an @video line: 1 if it said so, by word.
+   B32 waiting_video_loop = 0;
+   B32 waiting_video_mute = 0;
+   B32 waiting_video_manual = 0;
 
    U64 pos = 0;
    while (pos < text.size) {
@@ -290,9 +294,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          continue;
       }
 
-      //- bgz: @theme, @layout and @note: about the deck or the slide, not on it
+      //- bgz: @theme, @layout, @video and @note: about the deck or the slide, not on it
       //
-      // Only those three: any other line that starts with an @ is a paragraph.
+      // Only those four: any other line that starts with an @ is a paragraph.
       // A name that is not one of the names gives the first, as no line would.
       if (line.str[0] == '@') {
          U64 word_end = 0;
@@ -317,6 +321,32 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
             // A note with no slide to be on - above the first - is dropped.
             if (slide != 0 && name.size != 0) {
                Str8ListPush(arena, &slide->notes, name);
+            }
+            continue;
+         }
+         if (Str8Match(word, Str8Lit("@video"), StringMatchFlag_CaseInsensitive)) {
+            // Its words, in any order. One that is not known is passed over.
+            B32 loop = 0;
+            B32 mute = 0;
+            B32 manual = 0;
+            for (U64 i = 0; i < name.size;) {
+               while (i < name.size && (name.str[i] == ' ' || name.str[i] == '\t' || name.str[i] == ',')) i += 1;
+               U64 option_start = i;
+               while (i < name.size && name.str[i] != ' ' && name.str[i] != '\t' && name.str[i] != ',') i += 1;
+               String8 option = Str8Substr(name, R1U64(option_start, i));
+               loop |= Str8Match(option, Str8Lit("loop"), StringMatchFlag_CaseInsensitive);
+               mute |= Str8Match(option, Str8Lit("mute"), StringMatchFlag_CaseInsensitive);
+               manual |= Str8Match(option, Str8Lit("manual"), StringMatchFlag_CaseInsensitive);
+            }
+            // Several such lines on a slide add up.
+            if (slide != 0) {
+               slide->video_loop |= loop;
+               slide->video_mute |= mute;
+               slide->video_manual |= manual;
+            } else {
+               waiting_video_loop |= loop;
+               waiting_video_mute |= mute;
+               waiting_video_manual |= manual;
             }
             continue;
          }
@@ -376,8 +406,14 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
             slide->has_layout_line = 1;
             slide->layout_line = waiting_layout_line;
          }
+         slide->video_loop |= waiting_video_loop;
+         slide->video_mute |= waiting_video_mute;
+         slide->video_manual |= waiting_video_manual;
       }
       has_waiting_layout = 0;
+      waiting_video_loop = 0;
+      waiting_video_mute = 0;
+      waiting_video_manual = 0;
       has_rule_pos = 0;
 
       //- bgz: add it

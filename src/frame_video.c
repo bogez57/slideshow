@@ -7,6 +7,10 @@
 //    comes up, and stops when the slide goes.
 //  - Editing, it waits at wherever it is, until it is played by hand.
 //
+// A slide's @video line changes that (deck.h): loop has it start over at
+// its end, mute keeps it silent, manual has it wait for K when the slide
+// comes up.
+//
 // Its controls are a strip along the bottom of where it is drawn:
 //
 //    [Pause]  ====|--------------------  0:12 / 1:30  [Sound]
@@ -213,8 +217,22 @@ FR_VideoUpdate(App_State* app_state) {
          VID_Video* video = DECK_VideoFromSlide(deck, want - 1);
          if (video != 0) {
             VID_Seek(video, 0);
-            VID_SetPlaying(video, 1);
+            // manual: at its start, and waiting. Paused, its strip shows,
+            // which says there is something to play.
+            VID_SetPlaying(video, !deck->slides[want - 1].video_manual);
             app_state->video_auto_slide = want;
+         }
+      }
+   }
+
+   // What each slide's @video line says, of the videos that are open. Asked
+   // every frame: the line can be written or taken away at any time.
+   for (U64 i = 0; i < deck->slide_count; i += 1) {
+      DECK_Slide* slide = &deck->slides[i];
+      if (slide->video != 0) {
+         VID_SetMuted(slide->video, slide->video_mute);
+         if (slide->video_loop && VID_HasEnded(slide->video)) {
+            VID_SetPlaying(slide->video, 1); // from its start
          }
       }
    }

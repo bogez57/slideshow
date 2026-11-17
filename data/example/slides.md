@@ -45,6 +45,16 @@ Two # make a heading, which belongs to the slide it is on.
 - M turns sound off and on
 - Drop a video on the window to add one
 
+# A video behind the words
+
+@layout picture-behind
+@video loop mute
+![](clip.mp4)
+
+- A line of @video says how the slide's video plays
+- loop starts it over at its end, mute keeps it silent
+- manual has it wait for K when the slide comes up
+
 # A picture beside the text
 
 ![](hills.png)

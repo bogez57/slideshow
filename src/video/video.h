@@ -51,6 +51,11 @@ internal F64 VID_Position(VID_Video* video);
 internal B32  VID_IsPlaying(VID_Video* video);
 internal void VID_SetPlaying(VID_Video* video, B32 playing);
 internal void VID_Seek(VID_Video* video, F64 time_s);
+// Whether it has played to its end and stopped there.
+internal B32  VID_HasEnded(VID_Video* video);
+
+// No sound from this one. It keeps its time by its sound all the same.
+internal void VID_SetMuted(VID_Video* video, B32 muted);
 
 // Once a frame: moves the clock on and puts the frame that is due in the
 // texture. A video that reaches its end stops there, on its last frame.

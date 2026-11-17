@@ -80,6 +80,7 @@ struct VID_Video {
    F64  ring_time_s;
    B32  sound_at_end; // the decoder has no more sound, since the last seek
    B32  sound_on;     // the audio thread takes from the ring: playing, and the picture is there
+   B32  sound_muted;  // what it takes is not heard (VID_SetMuted)
    // The note the audio thread leaves: the sound that is heard at
    // heard_us (NowTimeUS) is the video's at heard_time_s. heard_us 0: no
    // note, since the last seek or pause.
@@ -111,6 +112,10 @@ _VID_Voice(void* user, F32* samples, U64 frame_count, F64 delay_s) {
       U64 until_wrap = Min(taken, video->ring_cap - video->ring_first);
       MemoryCopy(samples, video->ring + video->ring_first * AUD_CHANNELS, until_wrap * AUD_CHANNELS * sizeof(F32));
       MemoryCopy(samples + until_wrap * AUD_CHANNELS, video->ring, (taken - until_wrap) * AUD_CHANNELS * sizeof(F32));
+      if (video->sound_muted) {
+         // Taken all the same: the clock goes by what is taken.
+         MemoryZero(samples, taken * AUD_CHANNELS * sizeof(F32));
+      }
 
       // The first of these is heard delay_s from now.
       video->heard_time_s = video->ring_time_s;
@@ -379,6 +384,18 @@ VID_Position(VID_Video* video) {
 internal B32
 VID_IsPlaying(VID_Video* video) {
    return video->playing;
+}
+
+internal B32
+VID_HasEnded(VID_Video* video) {
+   return video->ended;
+}
+
+internal void
+VID_SetMuted(VID_Video* video, B32 muted) {
+   MutexTake(video->mutex);
+   video->sound_muted = muted;
+   MutexDrop(video->mutex);
 }
 
 internal void
