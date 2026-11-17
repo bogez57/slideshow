@@ -51,6 +51,9 @@
 //    pictures         click the picture line under Format. Esc closes the list,
 //                     the wheel or the scroll bar moves through it
 //    edit a piece     click it in the preview
+//    move a piece     drag the picture or the body in the preview, or a
+//                     corner of it to resize it. Right-click puts it back
+//                     (frame_place.c)
 //    add a picture    drop an image on the window
 //    add a slide      click the + at the end of the row of small slides
 //    move a slide     Alt+Left earlier, Alt+Right later
@@ -581,6 +584,10 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    ED_Editor*   editor = app_state->editor;
    _EDIT_Layout layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
 
+   //- bgz: the picture or the body under the mouse's hand (frame_place.c):
+   // before the keys - Esc gives up a drag - and before the clicks below
+   PLACE_Input(app_state, layout.ui);
+
    //- bgz: the screen's own keys, taken before the editor sees them
    B32 is_fullscreen = Core_WM_WindowIsFullscreen(window);
    if (Core_WM_KeyPress(events, window, 0, WM_Key_F11) ||
@@ -720,6 +727,8 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       if (app_state->deck->slide_count != 0) {
          app_state->is_editing = 0;
          app_state->preview_hit_count = 0; // not drawn while presenting, and the window can change
+         MemoryZeroArray(app_state->preview_has_box);
+         app_state->place_drag.state = EDIT_PlaceDragState_None;
          app_state->fade_active = 0;
          app_state->slide_changed_us = 0;
          app_state->scroll_left_over = 0;
@@ -1006,6 +1015,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
 
    //- bgz: the preview
    app_state->preview_hit_count = 0; // made again below, if a slide is drawn
+   MemoryZeroArray(app_state->preview_has_box);
    Core_D_Rect(layout.preview, R2F32P(0, 0, 1, 1), V4F32(0.125f, 0.13f, 0.15f, 1.0f));
    // A line where the text ends and the preview begins.
    Core_D_Rect(R2F32P(layout.preview.min.x, 0, layout.preview.min.x + 1.0f, window_dim.y), R2F32P(0, 0, 1, 1),
@@ -1032,6 +1042,9 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          app_state->preview_hit_count = 0;
          // The deck drawn is of the text at parsed_edit_count.
          app_state->preview_hits_edit_count = app_state->parsed_edit_count;
+         MemoryCopyArray(app_state->preview_has_box, hits.has_box);
+         MemoryCopyArray(app_state->preview_boxes, hits.boxes);
+         app_state->preview_page = hits.page;
 
          F32 grow = 4.0f * ui;
          for (VIEW_Hit* hit = hits.first; hit != 0; hit = hit->next) {
@@ -1071,8 +1084,14 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                FR_VideoDrawStrip(app_state, video, video_rect, ui, mouse);
             }
          }
-         caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Alt+Left / Alt+Right moves it",
-                             (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count);
+         // The box the mouse is over - the picture's, the body's - with its
+         // corners, and what can be done with it said under the slide.
+         if (PLACE_Draw(app_state, ui, mouse)) {
+            caption = Str8Lit("Drag to move it      Drag a corner to resize it      Right-click puts it back");
+         } else {
+            caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Alt+Left / Alt+Right moves it",
+                                (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count);
+         }
       } else {
          // No slides yet: how to make the first.
          String8 lines[] = {

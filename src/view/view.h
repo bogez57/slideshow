@@ -16,7 +16,8 @@
 //
 // The deck's theme gives the colours, and each slide's layout says where its
 // picture goes - beside the words on either side, or behind them - or puts
-// every line in the middle.
+// every line in the middle. An @place line puts the picture, or the body,
+// where it says instead.
 
 #ifndef VIEW_H
 #define VIEW_H
@@ -60,6 +61,14 @@ struct VIEW_HitList {
    VIEW_Hit* first;
    VIEW_Hit* last;
    U64       count;
+
+   // Where the slide's picture and its body were put, by DECK_PlaceKind: what
+   // an @place line would move. In pixels. The picture's is the picture as
+   // drawn, the body's all the room its lines had. None for a picture
+   // behind the words, or a slide without the one or the other.
+   B32     has_box[DECK_PlaceKind_COUNT];
+   Rng2F32 boxes[DECK_PlaceKind_COUNT];
+   Rng2F32 page; // the page the slide was drawn on
 };
 
 // image is the slide's picture, or 0 to draw the slide without it: loading is
@@ -74,7 +83,8 @@ struct VIEW_HitList {
 // and for the picture, on arena.
 //
 // theme is the deck's, for the colours. The slide's own layout
-// (slide->layout) says where its picture and words go.
+// (slide->layout) says where its picture and words go, and its @place lines
+// (slide->places) put either somewhere else.
 internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, IMG_Image* image,
                              Rng2F32 rect, F32 alpha, VIEW_HitList* hits);
 

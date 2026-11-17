@@ -40,6 +40,17 @@
 //                       loop (starts over at its end), mute (no sound from
 //                       this one), manual (waits for K, not starting when
 //                       the slide comes up)
+//    @place picture 0.55 0.2 0.4 0.6
+//                       where on the slide it is in the picture - or video -
+//                       goes, in place of where the layout would put it: its
+//                       left, top, width and height, each as a part of the
+//                       page's width or height (0.5 is half). The picture is
+//                       as large as fits in that with its shape kept
+//    @place text 0.05 0.3 0.5 0.6
+//                       the same for the slide's body: every line under the
+//                       title. The words wrap at its width, and are made
+//                       smaller if they do not fit its height. The edit
+//                       screen writes both lines, from the mouse
 //    @note Say this     a note for whoever presents, on the slide it is in: not
 //                       drawn on the slide, shown beside it on request
 //    anything else      a paragraph. Each line is its own
@@ -74,6 +85,29 @@ typedef enum DECK_Layout {
    DECK_Layout_Center,        // every line in the middle
    DECK_Layout_COUNT,
 } DECK_Layout;
+
+// What of a slide an @place line can put somewhere. The names, as written
+// after @place, are in deck.c (DECK_PlaceName), in this order.
+typedef enum DECK_PlaceKind {
+   DECK_PlaceKind_Picture, // or video
+   DECK_PlaceKind_Text,    // the body: every line under the title
+   DECK_PlaceKind_COUNT,
+} DECK_PlaceKind;
+
+// From an @place line.
+typedef struct DECK_Place DECK_Place;
+struct DECK_Place {
+   B32     is_set;
+   Rng2F32 rect; // in parts of the page: 0,0 its top left, 1,1 its bottom right
+   // Where in the deck's text the line is (without its ending) when
+   // has_line: is_set without it is a place the edit screen is trying out
+   // (frame_edit.c), not yet written.
+   B32     has_line;
+   Rng1U64 line;
+};
+
+// The smallest a placed thing can be, as a part of the page.
+#define DECK_PLACE_MIN 0.04f
 
 typedef enum DECK_ItemKind {
    DECK_ItemKind_Text,
@@ -123,6 +157,9 @@ struct DECK_Slide {
    B32         has_layout_line;
    Rng1U64     layout_line;
 
+   // From the slide's @place lines, by DECK_PlaceKind.
+   DECK_Place places[DECK_PlaceKind_COUNT];
+
    // From the slide's @video line: how its video plays (frame_video.c).
    B32 video_loop;   // starts over when it reaches its end
    B32 video_mute;   // no sound from it
@@ -171,6 +208,8 @@ struct DECK_Deck {
 // As written after @theme and @layout.
 internal String8 DECK_ThemeName(DECK_Theme theme);
 internal String8 DECK_LayoutName(DECK_Layout layout);
+// As written after @place.
+internal String8 DECK_PlaceName(DECK_PlaceKind kind);
 
 // Never 0. A folder that is missing, or has no images in it, gives a deck
 // with no slides.

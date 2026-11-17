@@ -99,8 +99,11 @@ _VIEW_DrawMissingPicture(TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
    }
 }
 
-internal void
-VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha) {
+// Where VIEW_DrawImageFit draws the image in rect. Nothing of a rect - all
+// zero - for an image or a rect with no size.
+internal Rng2F32
+_VIEW_FitRect(IMG_Image* image, Rng2F32 rect) {
+   Rng2F32 result = {0};
    Vec2F32 rect_dim = Dim2F32(rect);
    F32     image_w = (F32)image->size.x;
    F32     image_h = (F32)image->size.y;
@@ -111,9 +114,17 @@ VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha) {
       F32 h = image_h * scale;
       F32 x = rect.min.x + (rect_dim.x - w) * 0.5f;
       F32 y = rect.min.y + (rect_dim.y - h) * 0.5f;
+      result = R2F32P(x, y, x + w, y + h);
+   }
+   return result;
+}
 
+internal void
+VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha) {
+   Rng2F32 fit = _VIEW_FitRect(image, rect);
+   if (fit.max.x > fit.min.x) {
       // The source rect is in the image's own pixels.
-      Core_D_Img(R2F32P(x, y, x + w, y + h), R2F32P(0, 0, image_w, image_h), image->texture, V4F32(1, 1, 1, alpha));
+      Core_D_Img(fit, R2F32P(0, 0, (F32)image->size.x, (F32)image->size.y), image->texture, V4F32(1, 1, 1, alpha));
    }
 }
 
@@ -514,20 +525,38 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    Rng2F32 page = VIEW_PageRectFromRect(rect);
    B32     picture_is_missing = (image == 0 && slide->load_failed);
 
+   // An @place line's rect, from parts of the page to pixels.
+   DECK_Place* picture_place = &slide->places[DECK_PlaceKind_Picture];
+   DECK_Place* text_place = &slide->places[DECK_PlaceKind_Text];
+   Vec2F32     page_dim = Dim2F32(page);
+#define _VIEW_PlacedRect(place) \
+   R2F32P(page.min.x + (place)->rect.min.x * page_dim.x, page.min.y + (place)->rect.min.y * page_dim.y, \
+          page.min.x + (place)->rect.max.x * page_dim.x, page.min.y + (place)->rect.max.y * page_dim.y)
+   if (hits != 0) {
+      hits->page = page;
+   }
+
    VIEW_Colors colors = VIEW_ColorsFromTheme(theme);
    B32         has_picture = (slide->image_path.size != 0);
    B32         centered = (slide->layout == DECK_Layout_Center);
    B32         picture_is_behind = (has_picture && slide->layout == DECK_Layout_PictureBehind && DECK_SlideHasText(slide));
 
-   //- bgz: only a picture: all of the rect
+   //- bgz: only a picture: all of the rect, or where it has been placed
    if (!DECK_SlideHasText(slide)) {
+      Rng2F32 room = picture_place->is_set ? _VIEW_PlacedRect(picture_place) : rect;
+      Rng2F32 drawn = picture_place->is_set ? room : page;
       if (image != 0) {
-         VIEW_DrawImageFit(image, rect, alpha);
+         VIEW_DrawImageFit(image, room, alpha);
+         drawn = _VIEW_FitRect(image, room);
       } else if (picture_is_missing) {
-         _VIEW_DrawMissingPicture(fonts, &colors, slide, page, scale, alpha);
+         _VIEW_DrawMissingPicture(fonts, &colors, slide, drawn, scale, alpha);
       }
-      if (slide->image_path.size != 0) {
-         _VIEW_PushHit(arena, hits, rect, slide->image_range);
+      if (has_picture) {
+         _VIEW_PushHit(arena, hits, picture_place->is_set ? drawn : rect, slide->image_range);
+         if (hits != 0 && drawn.max.x > drawn.min.x) {
+            hits->has_box[DECK_PlaceKind_Picture] = 1;
+            hits->boxes[DECK_PlaceKind_Picture] = drawn;
+         }
       }
       Core_D_PopClip();
       return;
@@ -624,24 +653,45 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
       }
    }
 
+   // An @place line puts either where it says. The other stays where the
+   // layout has it: moving the picture does not move the words.
+   if (picture_place->is_set) {
+      picture_rect = _VIEW_PlacedRect(picture_place);
+   }
+   if (text_place->is_set) {
+      body_rect = _VIEW_PlacedRect(text_place);
+   }
+
    if (picture_is_beside) {
+      Rng2F32 drawn = picture_rect;
       if (image != 0) {
          // Beside a body, the picture starts level with the body's first
          // line, not in the middle of its half's height: its room is cut
          // down to the picture's own height, from the top.
-         if (slide->item_count != 0 && image->size.x > 0 && image->size.y > 0) {
+         if (!picture_place->is_set && slide->item_count != 0 && image->size.x > 0 && image->size.y > 0) {
             Vec2F32 room = Dim2F32(picture_rect);
             F32     fit = Min(room.x / (F32)image->size.x, room.y / (F32)image->size.y);
             picture_rect.max.y = picture_rect.min.y + (F32)image->size.y * fit;
          }
          VIEW_DrawImageFit(image, picture_rect, alpha);
+         drawn = _VIEW_FitRect(image, picture_rect);
       } else if (picture_is_missing) {
          _VIEW_DrawMissingPicture(fonts, &colors, slide, picture_rect, scale, alpha);
       }
-      _VIEW_PushHit(arena, hits, picture_rect, slide->image_range);
+      // A placed picture's hit is the picture as drawn. One that is not
+      // placed keeps all of its room, as before there were places.
+      _VIEW_PushHit(arena, hits, picture_place->is_set ? drawn : picture_rect, slide->image_range);
+      if (hits != 0 && drawn.max.x > drawn.min.x) {
+         hits->has_box[DECK_PlaceKind_Picture] = 1;
+         hits->boxes[DECK_PlaceKind_Picture] = drawn;
+      }
    }
 
    if (slide->item_count != 0) {
+      if (hits != 0) {
+         hits->has_box[DECK_PlaceKind_Text] = 1;
+         hits->boxes[DECK_PlaceKind_Text] = body_rect;
+      }
       // Full size if it fits above the bottom margin, else the largest of a
       // few smaller sizes that does - or the smallest, if none do.
       F32 shrink = 1.0f;
@@ -655,5 +705,6 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
       _VIEW_Body(arena, fonts, &colors, slide, body_rect, scale, shrink, alpha, 1, hits);
    }
 
+#undef _VIEW_PlacedRect
    Core_D_PopClip();
 }

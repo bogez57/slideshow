@@ -45,6 +45,26 @@ typedef struct PRES_Hit {
 
 typedef struct COPY_Job COPY_Job;
 
+// A press on the preview's picture or body, and what has come of it.
+typedef enum EDIT_PlaceDragState {
+   EDIT_PlaceDragState_None,
+   EDIT_PlaceDragState_Pressed, // the button is down on it, and the mouse has not gone far: a click, so far
+   EDIT_PlaceDragState_Dragging,
+} EDIT_PlaceDragState;
+
+typedef struct EDIT_PlaceDrag EDIT_PlaceDrag;
+struct EDIT_PlaceDrag {
+   EDIT_PlaceDragState state;
+   DECK_PlaceKind      kind;
+   U32                 corner;      // 0: all of it is moved. 1 to 4: that corner is - top left, top right, bottom left, bottom right
+   U64                 slide_idx;
+   U64                 edit_count;  // the editor's when the button went down: a change to the text ends it
+   Vec2F32             press_mouse;
+   Rng2F32             start;       // where it was then, in parts of the page
+   Rng2F32             now;         // where the mouse has it
+   DECK_Place          before;      // the slide's place of that kind as the text has it, to go back to
+};
+
 typedef struct App_State App_State;
 struct App_State {
    WM_Window    window;
@@ -165,6 +185,19 @@ struct App_State {
    VIEW_Hit* preview_hits;
    U64       preview_hit_count;
    U64       preview_hits_edit_count;
+
+   // Edit screen: where the preview's slide had its picture and its body
+   // last frame (VIEW_HitList's boxes), and its page: what the mouse moves
+   // and resizes. Good for the same text as preview_hits.
+   B32     preview_has_box[DECK_PlaceKind_COUNT];
+   Rng2F32 preview_boxes[DECK_PlaceKind_COUNT];
+   Rng2F32 preview_page;
+
+   // Edit screen: the picture or the body being moved or resized with the
+   // mouse (frame_edit.c). While it is, the slide is given the place the
+   // mouse makes without its being in the text: the @place line is written
+   // when the button comes up.
+   EDIT_PlaceDrag place_drag;
 
    // The open screen (frame_open.c): over whichever screen is up, the decks
    // opened lately and what is in a folder, to pick a deck from.

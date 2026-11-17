@@ -100,8 +100,16 @@ internal void COPY_CancelAll(App_State* app_state);
 // A slide's video: frame_video.c.
 internal void FR_VideoDrawStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 mouse);
 internal B32  FR_VideoClickStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 pos);
+// Whether pos is on the strip FR_VideoDrawStrip draws for a video at video_rect.
+internal B32  FR_VideoStripContains(App_State* app_state, Rng2F32 video_rect, F32 ui, Vec2F32 pos);
 internal B32  FR_VideoKeys(App_State* app_state, VID_Video* video);
 internal void FR_VideoUpdate(App_State* app_state);
+
+// The edit screen's picture and body, moved and resized with the mouse:
+// frame_place.c. PLACE_Input before EDIT_Input's own clicks, PLACE_Draw over
+// the preview's slide: 1 if the mouse is on something that can be moved.
+internal void PLACE_Input(App_State* app_state, F32 ui);
+internal B32  PLACE_Draw(App_State* app_state, F32 ui, Vec2F32 mouse);
 
 internal void PRES_Toggle(App_State* app_state);
 

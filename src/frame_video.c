@@ -165,6 +165,12 @@ FR_VideoClickStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F
    return result;
 }
 
+internal B32
+FR_VideoStripContains(App_State* app_state, Rng2F32 video_rect, F32 ui, Vec2F32 pos) {
+   _FR_VideoStrip strip = _FR_VideoStripFromRect(app_state, video_rect, ui);
+   return Contains2F32(strip.strip, pos);
+}
+
 // The video's keys, while presenting. Returns whether one was pressed.
 internal B32
 FR_VideoKeys(App_State* app_state, VID_Video* video) {

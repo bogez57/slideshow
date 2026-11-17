@@ -64,6 +64,16 @@ Two # make a heading, which belongs to the slide it is on.
 - With text, the picture has the right half
 - A slide has one picture: the first
 
+# Moved with the mouse
+
+@place text 0.060 0.300 0.440 0.560
+![](circles.png)
+@place picture 0.560 0.330 0.380 0.500
+
+- Drag the picture or the words in the preview to move them
+- Drag a corner to resize them
+- A line of @place is written for it: right-click to take it away
+
 # Layouts
 
 @layout picture-left

@@ -215,6 +215,52 @@ DECK_LayoutName(DECK_Layout layout) {
    return names[(layout < DECK_Layout_COUNT) ? layout : 0];
 }
 
+internal String8
+DECK_PlaceName(DECK_PlaceKind kind) {
+   String8 names[DECK_PlaceKind_COUNT] = {Str8Lit("picture"), Str8Lit("text")};
+   return names[(kind < DECK_PlaceKind_COUNT) ? kind : 0];
+}
+
+// The number at the start of *string - 0.25, .5, 1 - which is then moved past
+// it and the spaces before it. 0 if there is none there.
+internal B32
+_DECK_TakeNumber(String8* string, F32* number_out) {
+   U64 i = 0;
+   while (i < string->size && (string->str[i] == ' ' || string->str[i] == '\t' || string->str[i] == ',')) i += 1;
+   B32 is_negative = (i < string->size && string->str[i] == '-');
+   if (is_negative) {
+      i += 1;
+   }
+   F64 value = 0;
+   F64 unit = 1.0;
+   B32 after_point = 0;
+   U64 digit_count = 0;
+   for (; i < string->size; i += 1) {
+      U8 c = string->str[i];
+      if (c >= '0' && c <= '9') {
+         digit_count += 1;
+         if (after_point) {
+            unit *= 0.1;
+            value += unit * (F64)(c - '0');
+         } else {
+            value = value * 10.0 + (F64)(c - '0');
+         }
+      } else if (c == '.' && !after_point) {
+         after_point = 1;
+      } else {
+         break;
+      }
+   }
+   // A number ends at a space or the end, not in a letter.
+   B32 ends_well = (i == string->size || string->str[i] == ' ' || string->str[i] == '\t' || string->str[i] == ',');
+   B32 result = (digit_count != 0 && ends_well);
+   if (result) {
+      *number_out = (F32)(is_negative ? -value : value);
+      *string = Str8Skip(*string, i);
+   }
+   return result;
+}
+
 internal DECK_Deck*
 DECK_OpenText(String8 text_to_copy, String8 file) {
    Arena*     arena = ArenaAlloc();
@@ -257,6 +303,8 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
    B32 waiting_video_loop = 0;
    B32 waiting_video_mute = 0;
    B32 waiting_video_manual = 0;
+   // And for @place lines.
+   DECK_Place waiting_places[DECK_PlaceKind_COUNT] = {0};
 
    U64 pos = 0;
    while (pos < text.size) {
@@ -294,9 +342,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          continue;
       }
 
-      //- bgz: @theme, @layout, @video and @note: about the deck or the slide, not on it
+      //- bgz: @theme, @layout, @video, @place and @note: about the deck or the slide, not on it
       //
-      // Only those four: any other line that starts with an @ is a paragraph.
+      // Only those five: any other line that starts with an @ is a paragraph.
       // A name that is not one of the names gives the first, as no line would.
       if (line.str[0] == '@') {
          U64 word_end = 0;
@@ -347,6 +395,45 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
                waiting_video_loop |= loop;
                waiting_video_mute |= mute;
                waiting_video_manual |= manual;
+            }
+            continue;
+         }
+         if (Str8Match(word, Str8Lit("@place"), StringMatchFlag_CaseInsensitive)) {
+            // What is placed, then four numbers. A line that is not all of
+            // that places nothing. "video" is the picture too.
+            U64 kind_end = 0;
+            while (kind_end < name.size && name.str[kind_end] != ' ' && name.str[kind_end] != '\t') kind_end += 1;
+            String8 kind_name = Str8Prefix(name, kind_end);
+            String8 numbers = Str8Skip(name, kind_end);
+
+            DECK_PlaceKind kind = DECK_PlaceKind_COUNT;
+            for (U64 i = 0; i < DECK_PlaceKind_COUNT; i += 1) {
+               if (Str8Match(kind_name, DECK_PlaceName((DECK_PlaceKind)i), StringMatchFlag_CaseInsensitive)) {
+                  kind = (DECK_PlaceKind)i;
+               }
+            }
+            if (Str8Match(kind_name, Str8Lit("video"), StringMatchFlag_CaseInsensitive)) {
+               kind = DECK_PlaceKind_Picture;
+            }
+
+            F32 x = 0, y = 0, w = 0, h = 0;
+            if (kind != DECK_PlaceKind_COUNT && _DECK_TakeNumber(&numbers, &x) && _DECK_TakeNumber(&numbers, &y) &&
+                _DECK_TakeNumber(&numbers, &w) && _DECK_TakeNumber(&numbers, &h)) {
+               // Kept to sizes that can be seen, and near enough to the page
+               // to be found again.
+               w = Clamp(DECK_PLACE_MIN, w, 2.0f);
+               h = Clamp(DECK_PLACE_MIN, h, 2.0f);
+               x = Clamp(-1.0f, x, 1.0f);
+               y = Clamp(-1.0f, y, 1.0f);
+
+               // The first such line of a slide is the one that counts.
+               DECK_Place* place = (slide != 0) ? &slide->places[kind] : &waiting_places[kind];
+               if (!place->is_set) {
+                  place->is_set = 1;
+                  place->rect = R2F32P(x, y, x + w, y + h);
+                  place->has_line = 1;
+                  place->line = line_range;
+               }
             }
             continue;
          }
@@ -409,7 +496,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          slide->video_loop |= waiting_video_loop;
          slide->video_mute |= waiting_video_mute;
          slide->video_manual |= waiting_video_manual;
+         MemoryCopyArray(slide->places, waiting_places);
       }
+      MemoryZeroArray(waiting_places);
       has_waiting_layout = 0;
       waiting_video_loop = 0;
       waiting_video_mute = 0;
