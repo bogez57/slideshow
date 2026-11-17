@@ -6,3 +6,26 @@
 
 # Profile captures
 *.spall
+
+# Videos: they get huge, and a deck's videos are the deck's, not the
+# program's. The one exception is the example deck's 35 KB test clip.
+*.mp4
+*.m4v
+*.mov
+*.mkv
+*.webm
+*.avi
+*.wmv
+*.flv
+*.mpg
+*.mpeg
+*.ts
+*.m2ts
+*.mts
+*.3gp
+*.ogv
+*.vob
+!/data/example/clip.mp4
+
+# A video on its way into a deck's folder (src/frame_copy.c)
+*.copying
