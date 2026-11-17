@@ -301,7 +301,7 @@ PLACE_Input(App_State* app_state, F32 ui) {
          // a video's strip of controls: a press there is the strip's.
          DECK_PlaceKind kind = _PLACE_KindAt(app_state, event->pos);
          Rng2F32        video_rect = {0};
-         VID_Video*     video = _EDIT_PreviewVideo(app_state, &video_rect);
+         VID_Video*     video = _EDIT_PreviewVideo(app_state, app_state->preview_page, &video_rect);
          B32            on_strip = (video != 0 && FR_VideoStripContains(app_state, video_rect, ui, event->pos));
          if (kind != DECK_PlaceKind_COUNT && !on_strip) {
             _PLACE_Begin(app_state, kind, 0, event->pos, EDIT_PlaceDragState_Pressed);

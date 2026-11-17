@@ -534,15 +534,22 @@ _EDIT_ToggleFormat(App_State* app_state) {
 
 // Where the slide's video is drawn in the preview, if the slide showing has
 // one that is open: the place the preview last drew its picture. 0 if not,
-// or if the text has changed since the preview was drawn.
+// or if the text has changed since the preview was drawn. A picture behind
+// the words has no place of its own to click (view.c): it is all of page,
+// as the presentation has it.
 internal VID_Video*
-_EDIT_PreviewVideo(App_State* app_state, Rng2F32* rect_out) {
+_EDIT_PreviewVideo(App_State* app_state, Rng2F32 page, Rng2F32* rect_out) {
    VID_Video* result = 0;
    DECK_Deck* deck = app_state->deck;
    VID_Video* video = DECK_VideoFromSlide(deck, app_state->slide_idx);
 
    if (video != 0 && app_state->editor != 0 && app_state->editor->edit_count == app_state->preview_hits_edit_count) {
-      Rng1U64 range = deck->slides[app_state->slide_idx].image_range;
+      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+      if (slide->layout == DECK_Layout_PictureBehind && DECK_SlideHasText(slide)) {
+         *rect_out = page;
+         return video;
+      }
+      Rng1U64 range = slide->image_range;
       for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
          VIEW_Hit* hit = &app_state->preview_hits[i];
          if (hit->text_range.min == range.min && hit->text_range.max == range.max) {
@@ -658,7 +665,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    // click on it is not a click on the picture.
    {
       Rng2F32    video_rect = {0};
-      VID_Video* video = _EDIT_PreviewVideo(app_state, &video_rect);
+      VID_Video* video = _EDIT_PreviewVideo(app_state, layout.page, &video_rect);
       if (video != 0) {
          for (WM_Event* event = events->first; event != 0; event = event->next) {
             if (event->kind == WM_EventKind_Press && event->key == WM_Key_LeftMouseButton &&
@@ -1079,7 +1086,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          // The slide's video: its strip of controls, over the bottom of it.
          {
             Rng2F32    video_rect = {0};
-            VID_Video* video = _EDIT_PreviewVideo(app_state, &video_rect);
+            VID_Video* video = _EDIT_PreviewVideo(app_state, layout.page, &video_rect);
             if (video != 0) {
                FR_VideoDrawStrip(app_state, video, video_rect, ui, mouse);
             }
