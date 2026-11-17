@@ -252,10 +252,11 @@ PLACE_Input(App_State* app_state, F32 ui) {
       }
 
       if (drag->state == EDIT_PlaceDragState_Pressed) {
-         F32 far = _PLACE_DRAG_START * ui;
+         // Not "far": windows.h makes that word nothing.
+         F32 reach = _PLACE_DRAG_START * ui;
          F32 gone_x = mouse.x - drag->press_mouse.x;
          F32 gone_y = mouse.y - drag->press_mouse.y;
-         if (gone_x > far || gone_x < -far || gone_y > far || gone_y < -far) {
+         if (gone_x > reach || gone_x < -reach || gone_y > reach || gone_y < -reach) {
             drag->state = EDIT_PlaceDragState_Dragging;
          }
       }
