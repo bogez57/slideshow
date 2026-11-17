@@ -37,7 +37,7 @@
 // The slide in the preview can be clicked: on its title, a line of its body
 // or its picture, and the cursor goes to that line of the text, with the
 // words selected, to be typed over. What the mouse is over is lit, and what
-// the cursor is in has a mark beside it.
+// the cursor is in has a thin blue box around it.
 //
 // The row of small slides under the preview is the whole deck: clicking one
 // moves the cursor to that slide's first line, and the + at its end starts a
@@ -1070,7 +1070,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
             kept->text_range = hit->text_range;
 
             // Lit under the mouse - a wash of the theme's body colour, which
-            // shows on a light theme as on a dark one. And a mark beside the
+            // shows on a light theme as on a dark one. And a box around the
             // piece the cursor is in: where typing goes.
             if (Contains2F32(rect, mouse) && !app_state->show_open) {
                Vec4F32 lit = VIEW_ColorsFromTheme(deck->theme).body;
@@ -1078,9 +1078,14 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                Core_D_Rect(rect, R2F32P(0, 0, 1, 1), lit);
             }
             if (editor->cursor >= hit->text_range.min && editor->cursor <= hit->text_range.max) {
-               F32 mark_w = Max(2.0f, (F32)(S32)(3.0f * ui));
-               Core_D_Rect(R2F32P(rect.min.x - mark_w, rect.min.y, rect.min.x, rect.max.y), R2F32P(0, 0, 1, 1),
-                           VIEW_ColorsFromTheme(deck->theme).accent);
+               // A thin box around it, in a blue that is the same on every
+               // theme: it is the editor's mark, not part of the slide.
+               F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
+               Vec4F32 blue = V4F32(0.26f, 0.60f, 1.0f, 1.0f);
+               Core_D_Rect(R2F32P(rect.min.x, rect.min.y, rect.max.x, rect.min.y + thick), R2F32P(0, 0, 1, 1), blue);
+               Core_D_Rect(R2F32P(rect.min.x, rect.max.y - thick, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
+               Core_D_Rect(R2F32P(rect.min.x, rect.min.y, rect.min.x + thick, rect.max.y), R2F32P(0, 0, 1, 1), blue);
+               Core_D_Rect(R2F32P(rect.max.x - thick, rect.min.y, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
             }
          }
          // The slide's video: its strip of controls, over the bottom of it.
