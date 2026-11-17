@@ -71,6 +71,7 @@
 #include "view/view.c"
 #include "editor/editor.c"
 #include "frame_video.c"
+#include "frame_copy.c"
 #include "frame_edit.c"
 #include "frame_open.c"
 #include "frame_presenter.c"
@@ -250,6 +251,7 @@ _EntryPoint(CmdLine* cmdline) {
    if (app_state.presenter_open) {
       PRES_Toggle(&app_state);
    }
+   COPY_CancelAll(&app_state);
    if (app_state.deck_watch != 0) {
       FileWatchClose(app_state.deck_watch);
    }

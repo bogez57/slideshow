@@ -459,10 +459,11 @@ _EDIT_PutPicture(App_State* app_state, String8 name) {
    ScratchEnd(scratch);
 }
 
-// An image file dropped on the window: it becomes the slide's picture. A
-// file from somewhere else is copied into the deck's folder first, so the
-// deck and its pictures stay together - unless a file of that name is there
-// already, and then that one is used.
+// An image or video file dropped on the window: it becomes the slide's
+// picture. A file from somewhere else is copied into the deck's folder, so
+// the deck and its pictures stay together - unless a file of that name is
+// there already, and then that one is used. An image is copied first. A
+// video, which can be very large, is copied while it already shows.
 internal void
 _EDIT_DropPicture(App_State* app_state, String8 path) {
    Temp    scratch = ScratchBegin(0, 0);
@@ -470,6 +471,18 @@ _EDIT_DropPicture(App_State* app_state, String8 path) {
    String8 in_folder = PushStr8F(scratch.arena, "%S\\%S", app_state->deck->folder, name);
 
    B32 is_there = FilePathExists(in_folder);
+   if (!is_there && VID_NameIsVideo(name)) {
+      // A video is not waited for: it is copied in the background and
+      // plays from where it is meanwhile (frame_copy.c).
+      if (!COPY_IsCopyingTo(app_state, in_folder)) {
+         COPY_Start(app_state, path, in_folder);
+         app_state->quit_warned_copy = 0;
+         FR_Notice(app_state, Str8Lit("Copying the video into the deck's folder. It plays from where it is meanwhile."));
+      }
+      _EDIT_PutPicture(app_state, name);
+      ScratchEnd(scratch);
+      return;
+   }
    if (!is_there) {
       is_there = CopyFilePath(in_folder, path);
       if (is_there) {

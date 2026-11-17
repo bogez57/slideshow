@@ -43,6 +43,10 @@ FR_RequestQuit(App_State* app_state) {
    if (has_unsaved && !app_state->quit_warned) {
       app_state->quit_warned = 1;
       FR_Notice(app_state, Str8Lit("Unsaved changes. Ctrl+S saves. Close again to quit without saving."));
+   } else if (COPY_IsBusy(app_state) && !app_state->quit_warned_copy) {
+      // Its slide names the file as it will be in the deck's folder.
+      app_state->quit_warned_copy = 1;
+      FR_Notice(app_state, Str8Lit("Still copying a video into the deck's folder. Close again to quit: its slide will have no video."));
    } else {
       app_state->quit = 1;
    }
@@ -1134,6 +1138,7 @@ FrameWork(App_State* app_state) {
    }
 
    // After the input, which may have changed the slide or the screen.
+   COPY_Update(app_state);
    FR_VideoUpdate(app_state);
 
    // The UI tree, built after the screens' own input, against the screen

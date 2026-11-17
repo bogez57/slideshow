@@ -541,13 +541,82 @@ DECK_OpenPath(String8 path, U64* first_slide_out) {
    return deck;
 }
 
+////////////////////////////////
+//~ bgz: paths that stand for others (DECK_SetPathAlias)
+//
+// A few at most, at any time: a list, looked through. One that is cleared
+// leaves its place, with an empty path, for the next.
+
+typedef struct _DECK_Alias _DECK_Alias;
+struct _DECK_Alias {
+   _DECK_Alias* next;
+   U8           path[1024];
+   U64          path_size; // 0: not in use
+   U8           stands_for[1024];
+   U64          stands_for_size;
+};
+
+global Arena*       _deck_alias_arena = 0;
+global _DECK_Alias* _deck_first_alias = 0;
+
+internal void
+DECK_ClearPathAlias(String8 path) {
+   for (_DECK_Alias* alias = _deck_first_alias; alias != 0; alias = alias->next) {
+      if (alias->path_size != 0 && Str8Match(Str8(alias->path, alias->path_size), path, StringMatchFlag_CaseInsensitive)) {
+         alias->path_size = 0;
+      }
+   }
+}
+
+internal void
+DECK_SetPathAlias(String8 path, String8 stands_for) {
+   DECK_ClearPathAlias(path);
+   if (path.size == 0 || path.size > sizeof(((_DECK_Alias*)0)->path) ||
+       stands_for.size > sizeof(((_DECK_Alias*)0)->stands_for)) {
+      return; // too long to keep: the path is only itself
+   }
+
+   _DECK_Alias* alias = 0;
+   for (_DECK_Alias* a = _deck_first_alias; a != 0; a = a->next) {
+      if (a->path_size == 0) {
+         alias = a;
+         break;
+      }
+   }
+   if (alias == 0) {
+      if (_deck_alias_arena == 0) {
+         _deck_alias_arena = ArenaAlloc();
+      }
+      alias = PushArray(_deck_alias_arena, _DECK_Alias, 1);
+      alias->next = _deck_first_alias;
+      _deck_first_alias = alias;
+   }
+   MemoryCopy(alias->path, path.str, path.size);
+   alias->path_size = path.size;
+   MemoryCopy(alias->stands_for, stands_for.str, stands_for.size);
+   alias->stands_for_size = stands_for.size;
+}
+
+// The file to read for a picture at path: path itself, or what it stands for.
+internal String8
+_DECK_FileFromPath(String8 path) {
+   String8 result = path;
+   for (_DECK_Alias* alias = _deck_first_alias; alias != 0; alias = alias->next) {
+      if (alias->path_size != 0 && Str8Match(Str8(alias->path, alias->path_size), path, StringMatchFlag_CaseInsensitive)) {
+         result = Str8(alias->stands_for, alias->stands_for_size);
+         break;
+      }
+   }
+   return result;
+}
+
 // The slide's picture, loaded if it is not and can be: an image decoded, a
 // video opened, paused at its start.
 internal void
 _DECK_LoadSlideImage(DECK_Slide* slide) {
    if (!IMG_IsLoaded(&slide->image) && !slide->load_failed && slide->image_path.size != 0) {
       if (VID_NameIsVideo(slide->image_path)) {
-         slide->video = VID_Open(slide->image_path);
+         slide->video = VID_Open(_DECK_FileFromPath(slide->image_path));
          if (slide->video != 0) {
             slide->image.texture = VID_Texture(slide->video);
             slide->image.size = VID_Size(slide->video);
@@ -568,6 +637,16 @@ _DECK_ReleaseSlideImage(DECK_Slide* slide) {
       MemoryZeroStruct(&slide->image);
    } else {
       IMG_Release(&slide->image);
+   }
+}
+
+internal void
+DECK_ReopenImage(DECK_Deck* deck, U64 slide_idx) {
+   if (slide_idx < deck->slide_count) {
+      DECK_Slide* slide = &deck->slides[slide_idx];
+      _DECK_ReleaseSlideImage(slide);
+      slide->load_failed = 0;
+      _DECK_LoadSlideImage(slide);
    }
 }
 

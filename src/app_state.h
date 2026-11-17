@@ -43,6 +43,8 @@ typedef struct PRES_Hit {
 
 #define PRES_MAX_HITS 96
 
+typedef struct COPY_Job COPY_Job;
+
 typedef struct App_State App_State;
 struct App_State {
    WM_Window    window;
@@ -74,6 +76,10 @@ struct App_State {
    // presenting - its strip of controls shows for a moment after.
    U64 video_auto_slide;
    U64 video_key_us;
+
+   // Files on their way into the deck's folder (frame_copy.c).
+   COPY_Job* first_copy;
+   B32       quit_warned_copy; // told once that closing now loses one
 
    // The presenter's window (frame_presenter.c): a second window, for the
    // screen only whoever presents sees, with the slide, the one after it,

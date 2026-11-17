@@ -204,6 +204,19 @@ internal B32 DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx);
 // Once a frame: every open video's VID_Update.
 internal void DECK_UpdateVideos(DECK_Deck* deck);
 
+// Lets go of a slide's picture and loads it again: for a file that has
+// changed, or whose path now leads somewhere else (below).
+internal void DECK_ReopenImage(DECK_Deck* deck, U64 slide_idx);
+
+// From now on, a slide whose picture is at path is shown the file at
+// stands_for instead - until DECK_ClearPathAlias(path). For a file that is
+// on its way to path and not there yet (frame_copy.c). For every deck: a
+// deck read again from its text keeps showing the same file. Slides that
+// have the picture loaded already are not changed: DECK_ReopenImage does
+// that.
+internal void DECK_SetPathAlias(String8 path, String8 stands_for);
+internal void DECK_ClearPathAlias(String8 path);
+
 // The image of a slide only if it is loaded already, else 0. Loads nothing
 // and releases nothing.
 internal IMG_Image* DECK_LoadedImageFromSlide(DECK_Deck* deck, U64 slide_idx);

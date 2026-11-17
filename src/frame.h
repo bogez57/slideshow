@@ -90,6 +90,13 @@ internal void OPEN_Build(App_State* app_state, Vec2F32 window_dim);
 
 // Opens the window if it is closed and closes it if it is open. Between
 // frames only (main.c).
+// Files copied into the deck's folder in the background: frame_copy.c.
+internal B32  COPY_IsCopyingTo(App_State* app_state, String8 dst);
+internal void COPY_Start(App_State* app_state, String8 src, String8 dst);
+internal B32  COPY_IsBusy(App_State* app_state);
+internal void COPY_Update(App_State* app_state);
+internal void COPY_CancelAll(App_State* app_state);
+
 // A slide's video: frame_video.c.
 internal void FR_VideoDrawStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 mouse);
 internal B32  FR_VideoClickStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 pos);
