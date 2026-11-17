@@ -688,21 +688,32 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    }
 
    if (slide->item_count != 0) {
-      if (hits != 0) {
-         hits->has_box[DECK_PlaceKind_Text] = 1;
-         hits->boxes[DECK_PlaceKind_Text] = body_rect;
-      }
       // Full size if it fits above the bottom margin, else the largest of a
       // few smaller sizes that does - or the smallest, if none do.
       F32 shrink = 1.0f;
+      F32 end_y = body_rect.max.y;
       for (;;) {
-         F32 end_y = _VIEW_Body(arena, fonts, &colors, slide, body_rect, scale, shrink, alpha, 0, 0);
+         end_y = _VIEW_Body(arena, fonts, &colors, slide, body_rect, scale, shrink, alpha, 0, 0);
          if (end_y <= body_rect.max.y || shrink <= _VIEW_MIN_BODY_SHRINK) {
             break;
          }
          shrink = Max(shrink * 0.88f, _VIEW_MIN_BODY_SHRINK);
       }
       _VIEW_Body(arena, fonts, &colors, slide, body_rect, scale, shrink, alpha, 1, hits);
+
+      // The box to move it by. Placed, it is the place. Not placed, it is
+      // as tall as the words, not all the room down to the bottom margin:
+      // that box would be mostly empty, and would already touch the page's
+      // bottom, so it could hardly be dragged down at all. A little over,
+      // so that the words still fit at the same size once it is placed.
+      if (hits != 0) {
+         Rng2F32 box = body_rect;
+         if (!text_place->is_set) {
+            box.max.y = Clamp(body_rect.min.y + 1.0f, end_y + 8.0f * scale, body_rect.max.y);
+         }
+         hits->has_box[DECK_PlaceKind_Text] = 1;
+         hits->boxes[DECK_PlaceKind_Text] = box;
+      }
    }
 
 #undef _VIEW_PlacedRect

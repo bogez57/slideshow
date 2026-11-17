@@ -31,6 +31,11 @@
 #define _PLACE_HANDLE     10.0f
 #define _PLACE_DRAG_START 4.0f
 
+// The least the body's box is made by a corner, as parts of the page - or
+// what it was already, if a hand-written line made it less.
+#define _PLACE_TEXT_MIN_W 0.2f
+#define _PLACE_TEXT_MIN_H 0.12f
+
 // The handle at a corner of box: 1 top left, 2 top right, 3 bottom left, 4
 // bottom right.
 internal Rng2F32
@@ -164,11 +169,18 @@ _PLACE_RectFromMouse(EDIT_PlaceDrag* drag, Rng2F32 page, Vec2F32 mouse) {
       F32 anchor_x = is_left ? start.max.x : start.min.x;
       F32 anchor_y = is_top ? start.max.y : start.min.y;
 
+      // The least it can be: the body's box more than a picture's. Its words
+      // wrap at its width and get smaller only so far, so a box much
+      // narrower than this has a word a line, running down off the page.
+      B32 is_text = (drag->kind == DECK_PlaceKind_Text);
+      F32 min_w = is_text ? Min(_PLACE_TEXT_MIN_W, w0) : DECK_PLACE_MIN;
+      F32 min_h = is_text ? Min(_PLACE_TEXT_MIN_H, h0) : DECK_PLACE_MIN;
+
       // The most there is room for on the page, from that corner.
-      F32 max_w = Max(is_left ? anchor_x : 1.0f - anchor_x, DECK_PLACE_MIN);
-      F32 max_h = Max(is_top ? anchor_y : 1.0f - anchor_y, DECK_PLACE_MIN);
-      F32 w = Clamp(DECK_PLACE_MIN, w0 + (is_left ? -dx : dx), max_w);
-      F32 h = Clamp(DECK_PLACE_MIN, h0 + (is_top ? -dy : dy), max_h);
+      F32 max_w = Max(is_left ? anchor_x : 1.0f - anchor_x, min_w);
+      F32 max_h = Max(is_top ? anchor_y : 1.0f - anchor_y, min_h);
+      F32 w = Clamp(min_w, w0 + (is_left ? -dx : dx), max_w);
+      F32 h = Clamp(min_h, h0 + (is_top ? -dy : dy), max_h);
 
       if (drag->kind == DECK_PlaceKind_Picture && w0 > 0 && h0 > 0) {
          // A picture keeps its shape: as large as the further of the two
