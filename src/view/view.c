@@ -530,28 +530,97 @@ _VIEW_PlacedRect(Rng2F32 page, DECK_Place* place) {
                  page.min.x + place->rect.max.x * page_dim.x, page.min.y + place->rect.max.y * page_dim.y);
 }
 
-// The room the idx-th of count pictures has, of the room they share: all
-// of it for one, else a cell of a grid - side by side in a room wider than
-// it is tall, one above the other in a taller one, and in two rows or two
-// columns past three.
-internal Rng2F32
-_VIEW_PictureCell(Rng2F32 room, U64 idx, U64 count, F32 gap) {
-   if (count <= 1) {
-      return room;
+// The shape a picture is laid out by: its width over its height. One that is
+// not loaded - not yet, or not found - is taken to be 4:3, the shape of the
+// box that says it is missing.
+internal F32
+_VIEW_AspectOf(DECK_Picture* picture) {
+   F32 result = 4.0f / 3.0f;
+   if (IMG_IsLoaded(&picture->image) && picture->image.size.x > 0 && picture->image.size.y > 0) {
+      result = (F32)picture->image.size.x / (F32)picture->image.size.y;
    }
+   return result;
+}
+
+// Where each of count pictures goes in the room they share, as a grid: rects
+// into out, each the picture's own shape, as large as its cell allows.
+//
+// The number of columns is the one that gives the pictures the most room
+// between them, from their shapes: wide pictures beside a body go one above
+// the other, in a wide room side by side, and in rows and columns past a
+// few. Then each row is only as tall as its tallest picture, and the rows are
+// put together with gap between them - not spread over cells as tall as the
+// room, which leaves wide pictures far apart - in the middle of the room, or
+// from its top with from_top: beside a body, level with its first line, as
+// one picture is. A row with fewer pictures than the others has them in the
+// middle.
+internal void
+_VIEW_PictureGrid(Rng2F32 room, F32* aspects, U64 count, F32 gap, B32 from_top, Rng2F32* out) {
    Vec2F32 dim = Dim2F32(room);
-   B32     is_wide = (dim.x >= dim.y);
-   U64     along = (count <= 3) ? count : (count + 1) / 2; // cells in the long direction
-   U64     across = (count <= 3) ? 1 : 2;
-   U64     cols = is_wide ? along : across;
-   U64     rows = is_wide ? across : along;
-   F32     cell_w = (dim.x - gap * (F32)(cols - 1)) / (F32)cols;
-   F32     cell_h = (dim.y - gap * (F32)(rows - 1)) / (F32)rows;
-   U64     col = idx % cols;
-   U64     row = idx / cols;
-   F32     x = room.min.x + (cell_w + gap) * (F32)col;
-   F32     y = room.min.y + (cell_h + gap) * (F32)row;
-   return R2F32P(x, y, x + Max(cell_w, 1.0f), y + Max(cell_h, 1.0f));
+   if (count == 0 || dim.x <= 0 || dim.y <= 0) {
+      for (U64 i = 0; i < count; i += 1) {
+         out[i] = R2F32P(room.min.x, room.min.y, room.min.x, room.min.y);
+      }
+      return;
+   }
+
+   //- bgz: how many columns
+   U64 cols = 1;
+   F32 best_area = -1.0f;
+   for (U64 try_cols = 1; try_cols <= count; try_cols += 1) {
+      U64 try_rows = (count + try_cols - 1) / try_cols;
+      F32 cell_w = (dim.x - gap * (F32)(try_cols - 1)) / (F32)try_cols;
+      F32 cell_h = (dim.y - gap * (F32)(try_rows - 1)) / (F32)try_rows;
+      if (cell_w <= 0 || cell_h <= 0) {
+         continue;
+      }
+      F32 area = 0;
+      for (U64 i = 0; i < count; i += 1) {
+         F32 w = Min(cell_w, cell_h * aspects[i]);
+         area += w * (w / aspects[i]);
+      }
+      // A little more is not worth a grid that is less square: the first
+      // that gives the most, by more than a hair, is kept.
+      if (area > best_area * 1.01f) {
+         best_area = area;
+         cols = try_cols;
+      }
+   }
+   U64 rows = (count + cols - 1) / cols;
+   F32 cell_w = Max((dim.x - gap * (F32)(cols - 1)) / (F32)cols, 1.0f);
+   F32 cell_h = Max((dim.y - gap * (F32)(rows - 1)) / (F32)rows, 1.0f);
+
+   //- bgz: each picture's size in its cell, and each row's height
+   F32 row_heights[DECK_MAX_PICTURES] = {0};
+   F32 total_h = gap * (F32)(rows - 1);
+   for (U64 row = 0; row < rows; row += 1) {
+      for (U64 i = row * cols; i < Min((row + 1) * cols, count); i += 1) {
+         F32 w = Min(cell_w, cell_h * aspects[i]);
+         out[i] = R2F32P(0, 0, w, w / aspects[i]);
+         row_heights[row] = Max(row_heights[row], w / aspects[i]);
+      }
+      total_h += row_heights[row];
+   }
+
+   //- bgz: put together
+   F32 y = from_top ? room.min.y : room.min.y + (dim.y - total_h) * 0.5f;
+   for (U64 row = 0; row < rows; row += 1) {
+      U64 first = row * cols;
+      U64 end = Min(first + cols, count);
+      F32 row_w = gap * (F32)(end - first - 1);
+      for (U64 i = first; i < end; i += 1) {
+         row_w += out[i].max.x;
+      }
+      F32 x = room.min.x + (dim.x - row_w) * 0.5f;
+      for (U64 i = first; i < end; i += 1) {
+         F32 w = out[i].max.x;
+         F32 h = out[i].max.y;
+         F32 top = y + (row_heights[row] - h) * 0.5f;
+         out[i] = R2F32P(x, top, x + w, top + h);
+         x += w + gap;
+      }
+      y += row_heights[row] + gap;
+   }
 }
 
 // The slide's title, in rect: from its top, no wider than it. With measure
@@ -621,13 +690,20 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    //- bgz: which pictures go where
    //
    // With the picture-behind layout the slide's first picture is behind
-   // the words. A picture with an @place line is where that says. The rest
-   // share the room the layout has for pictures (below).
+   // the words. The rest have the room the layout keeps for pictures
+   // (below). A picture with an @place line is where that says, and the
+   // others share the room between them, as a grid - a picture moved out
+   // of the grid does not leave a hole in it. The room itself is there for
+   // every picture, placed or not: the title and the body do not move when
+   // a picture does, and a drag that has only just started does not shift
+   // the words under the mouse.
    U64 behind_idx = (slide->picture_count != 0 && slide->layout == DECK_Layout_PictureBehind && has_text) ? 0 : max_U64;
-   U64 shared_count = 0;
+   U64 beside_count = 0; // every picture not behind
+   U64 shared_count = 0; // of those, the ones not placed
    for (U64 i = 0; i < slide->picture_count; i += 1) {
-      if (i != behind_idx && !slide->pictures[i].place.is_set) {
-         shared_count += 1;
+      if (i != behind_idx) {
+         beside_count += 1;
+         shared_count += !slide->pictures[i].place.is_set;
       }
    }
 
@@ -652,12 +728,12 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
 
    //- bgz: where the title is
    //
-   // Alone on the slide - no body, and no picture but one behind it or
-   // placed somewhere - it is large, in the middle. Else it is at the top.
-   // An @place line puts it where that says, wrapped at that width; the
-   // body stays where the title's own place would have left it.
+   // Alone on the slide - no body, and no picture but one behind it - it is
+   // large, in the middle. Else it is at the top. An @place line puts it
+   // where that says, wrapped at that width; the body stays where the
+   // title's own place would have left it.
    B32     has_title = (slide->title.size != 0);
-   B32     title_is_big = (has_title && slide->item_count == 0 && shared_count == 0);
+   B32     title_is_big = (has_title && slide->item_count == 0 && beside_count == 0);
    Rng2F32 title_rect = content;
    F32     y = content.min.y;
    if (has_title) {
@@ -684,9 +760,9 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    Rng2F32 body_rect = R2F32P(content.min.x, y, content.max.x, content.max.y);
    Rng2F32 picture_rect = body_rect;
    if (!has_text) {
-      picture_rect = (shared_count == 1) ? rect : R2F32P(page.min.x + gutter, page.min.y + gutter, page.max.x - gutter,
+      picture_rect = (beside_count == 1) ? rect : R2F32P(page.min.x + gutter, page.min.y + gutter, page.max.x - gutter,
                                                          page.max.y - gutter);
-   } else if (shared_count != 0 && slide->item_count != 0) {
+   } else if (beside_count != 0 && slide->item_count != 0) {
       F32 middle = (content.min.x + content.max.x) * 0.5f;
       if (slide->layout == DECK_Layout_PictureLeft) {
          picture_rect.max.x = middle - gutter * 0.5f;
@@ -703,22 +779,40 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    }
 
    //- bgz: the pictures, under the words
-   for (U64 i = 0, shared_idx = 0; i < slide->picture_count; i += 1) {
+   //
+   // The ones not placed share the room as a grid (above). One alone has all
+   // of it.
+   Rng2F32 cells[DECK_MAX_PICTURES] = {0};
+   if (shared_count > 1) {
+      F32 aspects[DECK_MAX_PICTURES] = {0};
+      for (U64 i = 0, cell_idx = 0; i < slide->picture_count && cell_idx < DECK_MAX_PICTURES; i += 1) {
+         if (i != behind_idx && !slide->pictures[i].place.is_set) {
+            aspects[cell_idx] = _VIEW_AspectOf(&slide->pictures[i]);
+            cell_idx += 1;
+         }
+      }
+      _VIEW_PictureGrid(picture_rect, aspects, Min(shared_count, DECK_MAX_PICTURES), gutter * 0.5f, slide->item_count != 0,
+                        cells);
+   }
+   for (U64 i = 0, cell_idx = 0; i < slide->picture_count; i += 1) {
       if (i == behind_idx) {
          continue;
       }
       DECK_Picture* picture = &slide->pictures[i];
       B32           is_placed = picture->place.is_set;
       B32           is_loaded = IMG_IsLoaded(&picture->image);
-      Rng2F32       room = is_placed ? _VIEW_PlacedRect(page, &picture->place)
-                                     : _VIEW_PictureCell(picture_rect, shared_idx, shared_count, gutter * 0.5f);
-      if (!is_placed) {
-         shared_idx += 1;
+      Rng2F32       room = picture_rect;
+      if (is_placed) {
+         room = _VIEW_PlacedRect(page, &picture->place);
+      } else if (shared_count > 1) {
+         room = cells[Min(cell_idx, DECK_MAX_PICTURES - 1)];
+         cell_idx += 1;
       }
 
       // The one picture beside a body starts level with the body's first
       // line, not in the middle of its half's height: its room is cut down
-      // to the picture's own height, from the top.
+      // to the picture's own height, from the top. (The grid does that for
+      // several.)
       if (!is_placed && shared_count == 1 && slide->item_count != 0 && is_loaded && picture->image.size.x > 0 &&
           picture->image.size.y > 0) {
          Vec2F32 room_dim = Dim2F32(room);
@@ -732,13 +826,14 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
          drawn = _VIEW_FitRect(&picture->image, room);
       } else if (picture->load_failed) {
          // In the page, for the one picture that would fill the window.
-         if (!has_text && !is_placed && shared_count == 1) {
+         if (!has_text && !is_placed && beside_count == 1) {
             drawn = page;
          }
          _VIEW_DrawMissingPicture(fonts, &colors, picture->path, drawn, scale, alpha);
       }
       // A placed picture's hit is the picture as drawn. One that is not
-      // placed keeps all of its room, as before there were places.
+      // placed keeps all of its room, as before there were places - which,
+      // in a grid, is the picture as drawn too.
       _VIEW_PushHit(arena, hits, is_placed ? drawn : room, picture->range);
       _VIEW_PushBox(hits, DECK_PlaceKind_Picture, i, drawn);
    }

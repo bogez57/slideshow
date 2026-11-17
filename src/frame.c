@@ -623,7 +623,9 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
    if (video != 0 && app_state->video_auto_slide == app_state->slide_idx + 1) {
       U64 strip_us = (U64)(FR_VIDEO_STRIP_SECONDS * 1000000.0f);
       B32 key_was_recent = (app_state->video_key_us != 0 && NowTimeUS() - app_state->video_key_us < strip_us);
-      if (!VID_IsPlaying(video) || key_was_recent) {
+      // Paused: all of the slide's videos, not only the first, which may be
+      // a short one that has ended while the others play on.
+      if (!FR_VideoSlideIsPlaying(deck, app_state->slide_idx) || key_was_recent) {
          FR_VideoDrawStrip(app_state, video, VIEW_PageRectFromRect(window_rect), FR_UIScale(window_dim),
                            Core_WM_MouseFromWindow(app_state->window));
       }

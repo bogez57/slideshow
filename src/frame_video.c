@@ -4,8 +4,11 @@
 // A slide whose picture is a video file (src\video) shows it playing:
 //
 //  - Presenting, a slide's video starts from its beginning when the slide
-//    comes up, and stops when the slide goes.
-//  - Editing, it waits at wherever it is, until it is played by hand.
+//    comes up, and stops when the slide goes. A slide with several has
+//    them start, pause and step together: the keys below are for all of
+//    them, and so is the presenter's button.
+//  - Editing, it waits at wherever it is, until it is played by hand -
+//    each by its own strip.
 //
 // A slide's @video line changes that (deck.h): loop has it start over at
 // its end, mute keeps it silent, manual has it wait for K when the slide
@@ -171,13 +174,32 @@ FR_VideoStripContains(App_State* app_state, Rng2F32 video_rect, F32 ui, Vec2F32 
    return Contains2F32(strip.strip, pos);
 }
 
-// A slide with several videos plays and pauses them together: all as the
-// first was not.
+// Whether any of videos is playing.
+internal B32
+_FR_AnyPlaying(VID_Video** videos, U64 count) {
+   B32 result = 0;
+   for (U64 i = 0; i < count; i += 1) {
+      result |= VID_IsPlaying(videos[i]);
+   }
+   return result;
+}
+
+internal B32
+FR_VideoSlideIsPlaying(DECK_Deck* deck, U64 slide_idx) {
+   VID_Video* videos[DECK_MAX_PICTURES] = {0};
+   U64        count = DECK_VideosFromSlide(deck, slide_idx, videos);
+   return _FR_AnyPlaying(videos, count);
+}
+
+// A slide with several videos plays and pauses them together: paused if any
+// is playing, else all played. Not by the first alone: a shorter one that
+// has reached its end while the others go on would have K start it over,
+// and pause nothing.
 internal void
 FR_VideoToggleSlide(DECK_Deck* deck, U64 slide_idx) {
    VID_Video* videos[DECK_MAX_PICTURES] = {0};
    U64        count = DECK_VideosFromSlide(deck, slide_idx, videos);
-   B32        play = (count != 0 && !VID_IsPlaying(videos[0]));
+   B32        play = !_FR_AnyPlaying(videos, count);
    for (U64 i = 0; i < count; i += 1) {
       VID_SetPlaying(videos[i], play);
    }
@@ -204,16 +226,22 @@ FR_VideoKeys(App_State* app_state) {
       AUD_SetMuted(!AUD_IsMuted());
       result = 1;
    }
-   // A key held down repeats: each is a step.
+   // A key held down repeats: each is a step. Playing, every one of them
+   // plays on from where the step puts it: one that L took to its end and
+   // J brings back goes on with the others, not paused there while they
+   // play.
+   B32 was_playing = _FR_AnyPlaying(videos, count);
    while (Core_WM_KeyPress(events, window, 0, WM_Key_J)) {
       for (U64 i = 0; i < count; i += 1) {
          VID_Seek(videos[i], VID_Position(videos[i]) - FR_VIDEO_STEP_SECONDS);
+         VID_SetPlaying(videos[i], was_playing);
       }
       result = 1;
    }
    while (Core_WM_KeyPress(events, window, 0, WM_Key_L)) {
       for (U64 i = 0; i < count; i += 1) {
          VID_Seek(videos[i], VID_Position(videos[i]) + FR_VIDEO_STEP_SECONDS);
+         VID_SetPlaying(videos[i], was_playing);
       }
       result = 1;
    }

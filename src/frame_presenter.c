@@ -379,14 +379,15 @@ PRES_Draw(App_State* app_state) {
          }
          y += button_h + gap * 1.5f;
 
-         // The slide's video, if it has one: played and paused from here too.
+         // The slide's videos, if it has any: played and paused from here
+         // too, all together, as K does.
          {
             VID_Video* video = DECK_VideoFromSlide(deck, slide_idx);
             if (video != 0) {
                if (y + button_h <= right.max.y) {
                   _PRES_Button(app_state, R2F32P(right.min.x, y, right.max.x, y + button_h),
-                               VID_IsPlaying(video) ? Str8Lit("Pause video") : Str8Lit("Play video"), button_px, mouse, 1,
-                               PRES_HitKind_Video, 0);
+                               FR_VideoSlideIsPlaying(deck, slide_idx) ? Str8Lit("Pause video") : Str8Lit("Play video"),
+                               button_px, mouse, 1, PRES_HitKind_Video, 0);
                }
                y += button_h + gap * 1.5f;
             }

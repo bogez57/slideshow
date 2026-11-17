@@ -309,6 +309,10 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
    // which can be a few lines on in a slide that has started already.
    DECK_Place waiting_places[DECK_PlaceKind_COUNT] = {0};
    DECK_Place waiting_picture_place = {0};
+   // Whether the last picture line was one past DECK_MAX_PICTURES, passed
+   // over: an @place line under it is passed over with it, and not given to
+   // the picture before.
+   B32 last_picture_passed_over = 0;
 
    U64 pos = 0;
    while (pos < text.size) {
@@ -342,6 +346,7 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          slide = 0;
          gap_before = 0;
          MemoryZeroStruct(&waiting_picture_place);
+         last_picture_passed_over = 0;
          has_rule_pos = 1;
          rule_pos = line_start;
          continue;
@@ -439,7 +444,7 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
                   place = (slide != 0 && slide->picture_count != 0) ? &slide->pictures[slide->picture_count - 1].place
                                                                     : &waiting_picture_place;
                }
-               if (!place->is_set) {
+               if (!(kind == DECK_PlaceKind_Picture && last_picture_passed_over) && !place->is_set) {
                   place->is_set = 1;
                   place->rect = R2F32P(x, y, x + w, y + h);
                   place->has_line = 1;
@@ -502,6 +507,7 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
             // What waited for a picture waited on the slide before.
             MemoryZeroStruct(&waiting_picture_place);
          }
+         last_picture_passed_over = 0;
 
          if (has_waiting_layout) {
             slide->layout = waiting_layout;
@@ -536,6 +542,8 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          if (slide->pictures == 0) {
             slide->pictures = PushArray(arena, DECK_Picture, DECK_MAX_PICTURES);
          }
+         last_picture_passed_over = (slide->picture_count >= DECK_MAX_PICTURES);
+         slide->pictures_passed_over += last_picture_passed_over;
          if (slide->picture_count < DECK_MAX_PICTURES) {
             DECK_Picture* picture = &slide->pictures[slide->picture_count];
             slide->picture_count += 1;

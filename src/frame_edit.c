@@ -56,8 +56,8 @@
 //                     corner of it to resize it. Right-click puts it back
 //                     (frame_place.c)
 //    add a picture    drop an image or a video on the window: one more on the
-//                     slide. With the cursor on a picture's line - click the
-//                     picture - that one is changed for it
+//                     slide. With a picture selected - click it - that one
+//                     is changed for it
 //    add a slide      click the + at the end of the row of small slides
 //    move a slide     Alt+Left earlier, Alt+Right later
 //    bold, code       Ctrl+B and Ctrl+E: ** or ` around what is selected
@@ -419,10 +419,16 @@ _EDIT_ScanPictures(App_State* app_state) {
 
 // Puts name on the slide the cursor is on, as a picture: one more, under
 // the pictures the slide has - or on a new line at the cursor, if it has
-// none. With the cursor on a picture's line, that picture is changed for
-// this one instead.
-internal void
-_EDIT_PutPicture(App_State* app_state, String8 name) {
+// none. With a picture's line selected - a click on the picture selects
+// it - that picture is changed for this one instead.
+//
+// A slide that has DECK_MAX_PICTURES already, and none selected, gets
+// nothing but a notice, and 0 is returned. With only_ask, nothing else is
+// done either way: whether there is room is all that is found out - for a
+// file not to be copied into the deck's folder for a slide that cannot
+// have it.
+internal B32
+_EDIT_PutPicture(App_State* app_state, String8 name, B32 only_ask) {
    ED_Editor* editor = app_state->editor;
    DECK_Deck* deck = app_state->deck;
    String8    text = ED_Text(editor);
@@ -461,8 +467,15 @@ _EDIT_PutPicture(App_State* app_state, String8 name) {
       while (first < line_end && text.str[first] == ' ') first += 1;
       if (first + 1 < line_end && text.str[first] == '!' && text.str[first + 1] == '[') {
          picture_count += 1;
-         if (editor->cursor >= line_start && editor->cursor <= line_end) {
-            ED_ReplaceRange(editor, line_start, line_end, line);
+         // Selected, as a click on the picture leaves it: not only the
+         // cursor on the line, which is where a picture just put leaves
+         // it - the next would take its place, not go under it.
+         B32 is_selected = (editor->mark != editor->cursor && editor->cursor >= line_start && editor->cursor <= line_end &&
+                            editor->mark >= line_start && editor->mark <= line_end);
+         if (is_selected) {
+            if (!only_ask) {
+               ED_ReplaceRange(editor, line_start, line_end, line);
+            }
             found = 1;
          }
          has_last = 1;
@@ -472,8 +485,11 @@ _EDIT_PutPicture(App_State* app_state, String8 name) {
          last_end = line_end;
       }
    }
-   if (!found && picture_count >= DECK_MAX_PICTURES) {
+   B32 result = (found || picture_count < DECK_MAX_PICTURES);
+   if (!result) {
       FR_Notice(app_state, Str8Lit("The slide has as many pictures as a slide can. Click one to change it for this one"));
+   } else if (only_ask) {
+      // Nothing written.
    } else if (!found && has_last) {
       String8 added = PushStr8F(scratch.arena, "\n%S", line);
       ED_ReplaceRange(editor, last_end, last_end, added);
@@ -483,9 +499,12 @@ _EDIT_PutPicture(App_State* app_state, String8 name) {
    } else if (!found) {
       ED_InsertLine(editor, line, line.size, line.size);
    }
-   editor->last_input_us = NowTimeUS();
+   if (!only_ask) {
+      editor->last_input_us = NowTimeUS();
+   }
 
    ScratchEnd(scratch);
+   return result;
 }
 
 // An image or video file dropped on the window: it becomes the slide's
@@ -499,6 +518,12 @@ _EDIT_DropPicture(App_State* app_state, String8 path) {
    String8 name = Str8SkipLastSlash(path);
    String8 in_folder = PushStr8F(scratch.arena, "%S\\%S", app_state->deck->folder, name);
 
+   // Not copied at all for a slide with no room for it: the notice says so.
+   if (!_EDIT_PutPicture(app_state, name, 1)) {
+      ScratchEnd(scratch);
+      return;
+   }
+
    B32 is_there = FilePathExists(in_folder);
    if (!is_there && VID_NameIsVideo(name)) {
       // A video is not waited for: it is copied in the background and
@@ -508,7 +533,7 @@ _EDIT_DropPicture(App_State* app_state, String8 path) {
          app_state->quit_warned_copy = 0;
          FR_Notice(app_state, Str8Lit("Copying the video into the deck's folder. It plays from where it is meanwhile."));
       }
-      _EDIT_PutPicture(app_state, name);
+      _EDIT_PutPicture(app_state, name, 0);
       ScratchEnd(scratch);
       return;
    }
@@ -521,7 +546,7 @@ _EDIT_DropPicture(App_State* app_state, String8 path) {
       }
    }
    if (is_there) {
-      _EDIT_PutPicture(app_state, name);
+      _EDIT_PutPicture(app_state, name, 0);
       app_state->pictures_scanned_us = 0; // the list, if open, is out of date
    }
 
@@ -540,6 +565,23 @@ _EDIT_ClickIn(App_State* app_state, Rng2F32 rect) {
           Contains2F32(rect, event->pos)) {
          Core_WM_EatEvent(&app_state->events, event);
          result = 1;
+         break;
+      }
+   }
+   return result;
+}
+
+// Which of the preview's pieces (app_state->preview_hits) a point is on, or -1.
+// Where pieces are over each other, the one drawn last: the slide's pictures
+// are drawn first, in the order of their lines, then the title, then the
+// body - so words on a picture are the words, and of pictures over each
+// other the one on top is the one seen.
+internal S64
+_EDIT_PreviewHitAt(App_State* app_state, Vec2F32 pos) {
+   S64 result = -1;
+   for (U64 i = app_state->preview_hit_count; i > 0; i -= 1) {
+      if (Contains2F32(app_state->preview_hits[i - 1].rect, pos)) {
+         result = (S64)(i - 1);
          break;
       }
    }
@@ -736,9 +778,14 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    }
 
    if (editor->edit_count == app_state->preview_hits_edit_count) {
-      for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
-         VIEW_Hit* hit = &app_state->preview_hits[i];
-         if (hit->text_range.max <= editor->size && _EDIT_ClickIn(app_state, hit->rect)) {
+      for (WM_Event* event = events->first; event != 0; event = event->next) {
+         if (event->kind != WM_EventKind_Press || event->key != WM_Key_LeftMouseButton) {
+            continue;
+         }
+         S64 hit_idx = _EDIT_PreviewHitAt(app_state, event->pos);
+         if (hit_idx >= 0 && app_state->preview_hits[hit_idx].text_range.max <= editor->size) {
+            VIEW_Hit* hit = &app_state->preview_hits[hit_idx];
+            Core_WM_EatEvent(events, event);
             ED_SetCursor(editor, hit->text_range.max);
             editor->mark = hit->text_range.min;
             app_state->preview_focus_hidden = 0;
@@ -1023,7 +1070,7 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
       _EDIT_ToggleFormat(app_state);
    }
    if (picture_picked >= 0 && (U64)picture_picked < app_state->pictures.count) {
-      _EDIT_PutPicture(app_state, app_state->pictures.v[picture_picked]);
+      _EDIT_PutPicture(app_state, app_state->pictures.v[picture_picked], 0);
       app_state->show_pictures = 0;
    }
    if (format_picked >= 0) {
@@ -1129,14 +1176,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
             kept->rect = rect;
             kept->text_range = hit->text_range;
 
-            // Lit under the mouse - a wash of the theme's body colour, which
-            // shows on a light theme as on a dark one. And a box around the
-            // piece the cursor is in: where typing goes.
-            if (Contains2F32(rect, mouse) && !app_state->show_open) {
-               Vec4F32 lit = VIEW_ColorsFromTheme(deck->theme).body;
-               lit.w = 0.12f;
-               Core_D_Rect(rect, R2F32P(0, 0, 1, 1), lit);
-            }
+            // A box around the piece the cursor is in: where typing goes.
             // Not after Esc, until the cursor goes somewhere or a piece is
             // clicked.
             if (app_state->preview_focus_hidden && editor->cursor != app_state->preview_focus_hidden_cursor) {
@@ -1154,6 +1194,15 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                Core_D_Rect(R2F32P(rect.max.x - thick, rect.min.y, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
             }
          }
+         // Lit under the mouse - a wash of the theme's body colour, which
+         // shows on a light theme as on a dark one: the one piece a click
+         // there would go to.
+         S64 hot_idx = _EDIT_PreviewHitAt(app_state, mouse);
+         if (hot_idx >= 0 && !app_state->show_open) {
+            Vec4F32 lit = VIEW_ColorsFromTheme(deck->theme).body;
+            lit.w = 0.12f;
+            Core_D_Rect(app_state->preview_hits[hot_idx].rect, R2F32P(0, 0, 1, 1), lit);
+         }
          // The slide's videos: each its strip of controls, over the bottom of it.
          for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES; picture_idx += 1) {
             Rng2F32    video_rect = {0};
@@ -1166,6 +1215,12 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          // corners, and what can be done with it said under the slide.
          if (PLACE_Draw(app_state, ui, mouse)) {
             caption = Str8Lit("Drag to move it      Drag a corner to resize it      Right-click puts it back");
+         } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
+            // A picture line typed past the most a slide can have: not on
+            // the slide, which should not go unsaid.
+            caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Only the first %d pictures are shown",
+                                (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count,
+                                DECK_MAX_PICTURES);
          } else {
             caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Alt+Left / Alt+Right moves it",
                                 (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count);

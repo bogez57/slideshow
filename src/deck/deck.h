@@ -163,8 +163,11 @@ struct DECK_Picture {
 typedef struct DECK_Slide DECK_Slide;
 struct DECK_Slide {
    // The slide's pictures, in the order of their lines. On the deck's arena.
+   // Lines past DECK_MAX_PICTURES are counted in pictures_passed_over, so
+   // the edit screen can say they are not shown.
    DECK_Picture* pictures;
    U64           picture_count;
+   U64           pictures_passed_over;
 
    // Where in the deck's text the slide begins: the start of its first line.
    // 0 in a folder of images.
