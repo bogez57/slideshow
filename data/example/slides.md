@@ -42,6 +42,7 @@ Two # make a heading, which belongs to the slide it is on.
 
 - A video in the picture line plays when the slide is presented
 - K pauses it, J and L step back and on 5 seconds
+- M turns sound off and on
 - Drop a video on the window to add one
 
 # A picture beside the text
