@@ -64,6 +64,12 @@ struct EDIT_PlaceDrag {
    Vec2F32             press_mouse;
    Rng2F32             start;       // where it was then, in parts of the page
    Rng2F32             now;         // where the mouse has it
+   // With Shift down: what it has been lined up with, across and down, as
+   // parts of the page - lines drawn over the slide while it is.
+   B32                 has_guide_x;
+   B32                 has_guide_y;
+   F32                 guide_x;
+   F32                 guide_y;
    DECK_Place          before;      // the slide's place of that kind as the text has it, to go back to
 };
 

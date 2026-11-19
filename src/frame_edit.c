@@ -1214,7 +1214,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          // The box the mouse is over - a picture's, the title's, the body's - with its
          // corners, and what can be done with it said under the slide.
          if (PLACE_Draw(app_state, ui, mouse)) {
-            caption = Str8Lit("Drag to move it      Drag a corner to resize it      Right-click puts it back");
+            caption = Str8Lit("Drag to move it      Shift lines it up      A corner resizes it      Right-click puts it back");
          } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
             // A picture line typed past the most a slide can have: not on
             // the slide, which should not go unsaid.

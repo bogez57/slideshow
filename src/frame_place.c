@@ -10,6 +10,10 @@
 //    resize it        drag a corner. A picture keeps its shape. The body's
 //                     box takes any shape: its words wrap at the width, and
 //                     are made smaller if they do not fit the height
+//    line it up       hold Shift while dragging: an edge or the middle of
+//                     it jumps to the page's edges, margins and middle, and
+//                     to the edges and middles of the slide's other boxes,
+//                     when it comes near one. A line shows what it is on
 //    put it back      right-click it: where the layout would have it
 //    give up a drag   Esc
 //
@@ -31,6 +35,10 @@
 // down before it is a drag and not a click. In UI units.
 #define _PLACE_HANDLE     10.0f
 #define _PLACE_DRAG_START 4.0f
+
+// With Shift down: how near an edge comes to a line before it jumps to it.
+// In UI units.
+#define _PLACE_SNAP 7.0f
 
 // The least the body's box is made by a corner, as parts of the page - or
 // what it was already, if a hand-written line made it less.
@@ -254,6 +262,143 @@ _PLACE_RectFromMouse(EDIT_PlaceDrag* drag, Rng2F32 page, Vec2F32 mouse) {
    return result;
 }
 
+// The line nearest value among lines, if one is within reach: how far value
+// is from it (to add), and the line. 0 if none is.
+internal B32
+_PLACE_NearestLine(F32 value, F32* lines, U64 line_count, F32 reach, F32* shift_out, F32* line_out) {
+   B32 result = 0;
+   F32 best = reach;
+   for (U64 i = 0; i < line_count; i += 1) {
+      F32 gap = lines[i] - value;
+      F32 gap_size = (gap < 0) ? -gap : gap;
+      if (gap_size <= best) {
+         best = gap_size;
+         *shift_out = gap;
+         *line_out = lines[i];
+         result = 1;
+      }
+   }
+   return result;
+}
+
+// With Shift down: rect, where the mouse has the thing dragged, lined up
+// with what it is near - the page's edges, margins and middle, and the edges
+// and middles of the slide's other boxes. Across and down each on their
+// own. A move tries its two edges and its middle; a corner only the edges
+// it is moving, and a picture, which keeps its shape, one of the two.
+// What it was lined up with goes into the drag, to be drawn.
+internal Rng2F32
+_PLACE_LinedUp(App_State* app_state, EDIT_PlaceDrag* drag, Rng2F32 rect, F32 ui) {
+   Rng2F32 page = app_state->preview_page;
+   Vec2F32 page_dim = Dim2F32(page);
+   drag->has_guide_x = 0;
+   drag->has_guide_y = 0;
+   if (page_dim.x <= 0 || page_dim.y <= 0) {
+      return rect;
+   }
+
+   //- bgz: the lines there are, as parts of the page
+   F32 xs[3 * (DECK_MAX_PICTURES + 2) + 5];
+   F32 ys[3 * (DECK_MAX_PICTURES + 2) + 5];
+   U64 x_count = 0;
+   U64 y_count = 0;
+   xs[x_count++] = 0.0f;
+   xs[x_count++] = 0.5f;
+   xs[x_count++] = 1.0f;
+   xs[x_count++] = _VIEW_MARGIN_X / VIEW_PAGE_W;
+   xs[x_count++] = 1.0f - _VIEW_MARGIN_X / VIEW_PAGE_W;
+   ys[y_count++] = 0.0f;
+   ys[y_count++] = 0.5f;
+   ys[y_count++] = 1.0f;
+   ys[y_count++] = _VIEW_MARGIN_TOP / VIEW_PAGE_H;
+   ys[y_count++] = 1.0f - _VIEW_MARGIN_BOTTOM / VIEW_PAGE_H;
+   for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+      VIEW_Box* box = &app_state->preview_boxes[i];
+      B32       is_dragged = (box->kind == drag->kind && (box->kind != DECK_PlaceKind_Picture || box->picture_idx == drag->picture_idx));
+      if (is_dragged) {
+         continue;
+      }
+      F32 left = (box->rect.min.x - page.min.x) / page_dim.x;
+      F32 right = (box->rect.max.x - page.min.x) / page_dim.x;
+      F32 top = (box->rect.min.y - page.min.y) / page_dim.y;
+      F32 bottom = (box->rect.max.y - page.min.y) / page_dim.y;
+      xs[x_count++] = left;
+      xs[x_count++] = (left + right) * 0.5f;
+      xs[x_count++] = right;
+      ys[y_count++] = top;
+      ys[y_count++] = (top + bottom) * 0.5f;
+      ys[y_count++] = bottom;
+   }
+
+   F32 reach_x = _PLACE_SNAP * ui / page_dim.x;
+   F32 reach_y = _PLACE_SNAP * ui / page_dim.y;
+   F32 w = rect.max.x - rect.min.x;
+   F32 h = rect.max.y - rect.min.y;
+   Rng2F32 result = rect;
+
+   if (drag->corner == 0) {
+      //- bgz: a move: the nearest of what its edges and its middle are near
+      F32 own_x[3] = {rect.min.x, (rect.min.x + rect.max.x) * 0.5f, rect.max.x};
+      F32 own_y[3] = {rect.min.y, (rect.min.y + rect.max.y) * 0.5f, rect.max.y};
+      F32 best_x = reach_x;
+      F32 best_y = reach_y;
+      for (U64 i = 0; i < 3; i += 1) {
+         F32 shift = 0;
+         F32 line = 0;
+         if (_PLACE_NearestLine(own_x[i], xs, x_count, best_x, &shift, &line)) {
+            best_x = (shift < 0) ? -shift : shift;
+            result.min.x = rect.min.x + shift;
+            result.max.x = rect.max.x + shift;
+            drag->has_guide_x = 1;
+            drag->guide_x = line;
+         }
+         if (_PLACE_NearestLine(own_y[i], ys, y_count, best_y, &shift, &line)) {
+            best_y = (shift < 0) ? -shift : shift;
+            result.min.y = rect.min.y + shift;
+            result.max.y = rect.max.y + shift;
+            drag->has_guide_y = 1;
+            drag->guide_y = line;
+         }
+      }
+   } else {
+      //- bgz: a corner: the edges it moves
+      B32 is_left = (drag->corner == 1 || drag->corner == 3);
+      B32 is_top = (drag->corner == 1 || drag->corner == 2);
+      B32 keeps_shape = (drag->kind == DECK_PlaceKind_Picture && w > 0 && h > 0);
+      F32 shift = 0;
+      F32 line = 0;
+      B32 did_x = 0;
+      if (_PLACE_NearestLine(is_left ? rect.min.x : rect.max.x, xs, x_count, reach_x, &shift, &line)) {
+         F32 new_w = w + (is_left ? -shift : shift);
+         if (new_w >= DECK_PLACE_MIN) {
+            did_x = 1;
+            drag->has_guide_x = 1;
+            drag->guide_x = line;
+            if (is_left) result.min.x = line; else result.max.x = line;
+            if (keeps_shape) {
+               // The other way follows, from the corner that stays.
+               F32 new_h = h * new_w / w;
+               if (is_top) result.min.y = rect.max.y - new_h; else result.max.y = rect.min.y + new_h;
+            }
+         }
+      }
+      if (!(keeps_shape && did_x) && _PLACE_NearestLine(is_top ? rect.min.y : rect.max.y, ys, y_count, reach_y, &shift, &line)) {
+         F32 new_h = h + (is_top ? -shift : shift);
+         if (new_h >= DECK_PLACE_MIN) {
+            drag->has_guide_y = 1;
+            drag->guide_y = line;
+            if (is_top) result.min.y = line; else result.max.y = line;
+            if (keeps_shape) {
+               F32 new_w = w * new_h / h;
+               if (is_left) result.min.x = rect.max.x - new_w; else result.max.x = rect.min.x + new_w;
+            }
+         }
+      }
+   }
+
+   return result;
+}
+
 internal void
 _PLACE_Begin(App_State* app_state, VIEW_Box* from, U32 corner, Vec2F32 pos, EDIT_PlaceDragState state) {
    EDIT_PlaceDrag* drag = &app_state->place_drag;
@@ -332,6 +477,12 @@ PLACE_Input(App_State* app_state, F32 ui) {
       }
       if (drag->state == EDIT_PlaceDragState_Dragging) {
          drag->now = _PLACE_RectFromMouse(drag, app_state->preview_page, mouse);
+         // Shift lines it up with what it is near.
+         drag->has_guide_x = 0;
+         drag->has_guide_y = 0;
+         if (Core_WM_KeyIsDown(WM_Key_Shift)) {
+            drag->now = _PLACE_LinedUp(app_state, drag, drag->now, ui);
+         }
          place->is_set = 1;
          place->rect = drag->now;
       }
@@ -447,6 +598,25 @@ PLACE_Draw(App_State* app_state, F32 ui, Vec2F32 mouse) {
                      R2F32P(0, 0, 1, 1), is_hot ? accent : V4F32(1, 1, 1, 1));
       }
       result = 1;
+   }
+
+   // What a drag with Shift down is lined up with: a line the whole way
+   // across the page, or down it.
+   if (is_dragging) {
+      Rng2F32 page = app_state->preview_page;
+      Vec2F32 page_dim = Dim2F32(page);
+      Vec4F32 guide_color = V4F32(1.0f, 0.25f, 0.65f, 0.9f); // not a colour any theme has
+      F32     guide_thick = Max(1.0f, (F32)(S32)ui);
+      if (drag->has_guide_x) {
+         F32 x = (F32)(S32)(page.min.x + drag->guide_x * page_dim.x - guide_thick * 0.5f);
+         x = Clamp(page.min.x, x, page.max.x - guide_thick);
+         Core_D_Rect(R2F32P(x, page.min.y, x + guide_thick, page.max.y), R2F32P(0, 0, 1, 1), guide_color);
+      }
+      if (drag->has_guide_y) {
+         F32 y = (F32)(S32)(page.min.y + drag->guide_y * page_dim.y - guide_thick * 0.5f);
+         y = Clamp(page.min.y, y, page.max.y - guide_thick);
+         Core_D_Rect(R2F32P(page.min.x, y, page.max.x, y + guide_thick), R2F32P(0, 0, 1, 1), guide_color);
+      }
    }
 
    return result;
