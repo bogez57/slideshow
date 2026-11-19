@@ -52,8 +52,13 @@
 //                       above
 //    @place text 0.05 0.3 0.5 0.6
 //                       the same for the slide's body: every line under the
-//                       title. The words wrap at its width, and are made
+//                       title - or the block of it the line is in (@box). The words wrap at its width, and are made
 //                       smaller if they do not fit its height
+//    @box               the lines of the body under it, on this slide, are
+//                       another block of words: one that @place text, under
+//                       it, puts somewhere of its own. Up to DECK_MAX_BOXES
+//                       to a slide. Blocks that are not placed are one under
+//                       another, where the body is
 //    @place title 0.05 0.05 0.6 0.2
 //                       the same for the title, which wraps at the width.
 //                       The edit screen writes all three, from the mouse
@@ -74,6 +79,10 @@
 
 // How many pictures a slide can have: lines past these are passed over.
 #define DECK_MAX_PICTURES 8
+
+// How many blocks of words a slide's body can be in: an @box line past
+// these starts nothing, and its lines go on in the last.
+#define DECK_MAX_BOXES 8
 
 // The colours of a whole deck. The names, as written after @theme, are in
 // deck.c (DECK_ThemeName), in this order.
@@ -136,6 +145,15 @@ struct DECK_Item {
    Rng1U64       text_range; // where its words are in the deck's text. Empty, at the line's end, for no words
 };
 
+// One block of a slide's body: its items are item_count of the slide's,
+// from first_item on.
+typedef struct DECK_Box DECK_Box;
+struct DECK_Box {
+   DECK_Item* first_item;
+   U64        item_count;
+   DECK_Place place; // from its @place text line
+};
+
 // One of a slide's pictures.
 typedef struct DECK_Picture DECK_Picture;
 struct DECK_Picture {
@@ -184,8 +202,15 @@ struct DECK_Slide {
    Rng1U64     layout_line;
 
    // From the slide's @place lines, by DECK_PlaceKind. The pictures' are
-   // their own (DECK_Picture's place): the one here is not used.
+   // their own (DECK_Picture's place) and so are the body's blocks'
+   // (DECK_Box's): the ones here for those are not used.
    DECK_Place places[DECK_PlaceKind_COUNT];
+
+   // The body's blocks: all of it is the first, until an @box line. A
+   // block with no items is one being written. 0 of them in a folder of
+   // images.
+   DECK_Box boxes[DECK_MAX_BOXES];
+   U64      box_count;
 
    // From the slide's @video line: how its video plays (frame_video.c).
    B32 video_loop;   // starts over when it reaches its end

@@ -352,9 +352,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          continue;
       }
 
-      //- bgz: @theme, @layout, @video, @place and @note: about the deck or the slide, not on it
+      //- bgz: @theme, @layout, @video, @place, @box and @note: about the deck or the slide, not on it
       //
-      // Only those five: any other line that starts with an @ is a paragraph.
+      // Only those six: any other line that starts with an @ is a paragraph.
       // A name that is not one of the names gives the first, as no line would.
       if (line.str[0] == '@') {
          U64 word_end = 0;
@@ -408,6 +408,15 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
             }
             continue;
          }
+         if (Str8Match(word, Str8Lit("@box"), StringMatchFlag_CaseInsensitive)) {
+            // Another block of the body, if the one before has anything in
+            // it: a slide's first lines are a block already.
+            if (slide != 0 && slide->boxes[slide->box_count - 1].item_count != 0 && slide->box_count < DECK_MAX_BOXES) {
+               slide->box_count += 1;
+            }
+            gap_before = 0;
+            continue;
+         }
          if (Str8Match(word, Str8Lit("@place"), StringMatchFlag_CaseInsensitive)) {
             // What is placed, then four numbers. A line that is not all of
             // that places nothing. "video" is the picture too.
@@ -440,6 +449,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
                // one that counts. A picture's is for the picture last
                // written above it.
                DECK_Place* place = (slide != 0) ? &slide->places[kind] : &waiting_places[kind];
+               if (kind == DECK_PlaceKind_Text && slide != 0) {
+                  place = &slide->boxes[slide->box_count - 1].place;
+               }
                if (kind == DECK_PlaceKind_Picture) {
                   place = (slide != 0 && slide->picture_count != 0) ? &slide->pictures[slide->picture_count - 1].place
                                                                     : &waiting_picture_place;
@@ -518,6 +530,8 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          slide->video_mute |= waiting_video_mute;
          slide->video_manual |= waiting_video_manual;
          MemoryCopyArray(slide->places, waiting_places);
+         slide->box_count = 1;
+         slide->boxes[0].place = waiting_places[DECK_PlaceKind_Text];
       }
       MemoryZeroArray(waiting_places);
       has_waiting_layout = 0;
@@ -565,6 +579,12 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          DECK_Item* item = PushArray(arena, DECK_Item, 1);
          SLLQueuePush(slide->first_item, slide->last_item, item);
          slide->item_count += 1;
+         DECK_Box* box = &slide->boxes[slide->box_count - 1];
+         if (box->item_count == 0) {
+            box->first_item = item;
+            gap_before = 0; // a block's first line has nothing above it
+         }
+         box->item_count += 1;
          item->gap_before = gap_before;
 
          if (is_heading) {

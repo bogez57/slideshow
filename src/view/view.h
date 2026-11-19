@@ -18,7 +18,8 @@
 // pictures go - beside the words on either side, or the first behind them -
 // or puts every line in the middle. Several pictures share the room the
 // layout has for them, as a grid. An @place line puts one picture, the
-// title or the body where it says instead.
+// title or a block of the body where it says instead. The body's blocks
+// (@box) that are not placed are one under another, where the body is.
 
 #ifndef VIEW_H
 #define VIEW_H
@@ -60,10 +61,11 @@ struct VIEW_Hit {
 // Where something an @place line can move was put. In pixels. A picture's
 // is the picture as drawn, the body's as tall as its words, the title's as
 // wide as its words.
+#define VIEW_MAX_BOXES (DECK_MAX_PICTURES + DECK_MAX_BOXES + 1)
 typedef struct VIEW_Box VIEW_Box;
 struct VIEW_Box {
    DECK_PlaceKind kind;
-   U64            picture_idx; // which of the slide's pictures, for a picture's
+   U64            idx; // which of the slide's pictures, for a picture's; which block of its body, for the body's
    Rng2F32        rect;
 };
 
@@ -75,7 +77,7 @@ struct VIEW_HitList {
 
    // Where the slide's title, its body and each of its pictures were put:
    // what an @place line would move. None for a picture behind the words.
-   VIEW_Box boxes[DECK_MAX_PICTURES + 2];
+   VIEW_Box boxes[VIEW_MAX_BOXES];
    U64      box_count;
    Rng2F32  page; // the page the slide was drawn on
 };

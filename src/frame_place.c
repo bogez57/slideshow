@@ -74,6 +74,9 @@ _PLACE_PlaceOf(DECK_Slide* slide, DECK_PlaceKind kind, U64 picture_idx) {
    if (kind == DECK_PlaceKind_Picture && picture_idx < slide->picture_count) {
       result = &slide->pictures[picture_idx].place;
    }
+   if (kind == DECK_PlaceKind_Text && picture_idx < slide->box_count) {
+      result = &slide->boxes[picture_idx].place;
+   }
    return result;
 }
 
@@ -94,7 +97,7 @@ _PLACE_BoxAt(App_State* app_state, Vec2F32 pos) {
             title = box;
          } else if (box->kind == DECK_PlaceKind_Text) {
             text = box;
-         } else if (box->picture_idx < slide->picture_count) {
+         } else if (box->idx < slide->picture_count) {
             picture = box;
          }
       }
@@ -164,8 +167,8 @@ _PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 
          on = slide->pictures[picture_idx].range.min;
       } else if (kind == DECK_PlaceKind_Title) {
          on = slide->title_range.min;
-      } else if (kind == DECK_PlaceKind_Text && slide->first_item != 0) {
-         on = slide->first_item->text_range.min;
+      } else if (kind == DECK_PlaceKind_Text && picture_idx < slide->box_count && slide->boxes[picture_idx].first_item != 0) {
+         on = slide->boxes[picture_idx].first_item->text_range.min;
       }
       on = Min(on, text.size);
       U64 line_start = on;
@@ -353,7 +356,7 @@ _PLACE_LinedUp(App_State* app_state, EDIT_PlaceDrag* drag, Rng2F32 rect, F32 ui)
    }
 
    //- bgz: the other boxes, and the lines there are, as parts of the page
-   Rng2F32     boxes[DECK_MAX_PICTURES + 2];
+   Rng2F32     boxes[VIEW_MAX_BOXES];
    _PLACE_Line xs[3 * ArrayCount(boxes) + 5];
    _PLACE_Line ys[3 * ArrayCount(boxes) + 5];
    U64         x_count = 0;
@@ -367,7 +370,7 @@ _PLACE_LinedUp(App_State* app_state, EDIT_PlaceDrag* drag, Rng2F32 rect, F32 ui)
    U64 box_count = 0;
    for (U64 i = 0; i < app_state->preview_box_count && box_count < ArrayCount(boxes); i += 1) {
       VIEW_Box* box = &app_state->preview_boxes[i];
-      B32       is_dragged = (box->kind == drag->kind && (box->kind != DECK_PlaceKind_Picture || box->picture_idx == drag->picture_idx));
+      B32       is_dragged = (box->kind == drag->kind && box->idx == drag->idx);
       if (is_dragged) {
          continue;
       }
@@ -509,12 +512,12 @@ _PLACE_Begin(App_State* app_state, VIEW_Box* from, U32 corner, Vec2F32 pos, EDIT
    Vec2F32         page_dim = Dim2F32(page);
    Rng2F32         box = from->rect;
    DECK_PlaceKind  kind = from->kind;
-   U64             picture_idx = from->picture_idx;
+   U64             picture_idx = from->idx;
 
    MemoryZeroStruct(drag);
    drag->state = state;
    drag->kind = kind;
-   drag->picture_idx = picture_idx;
+   drag->idx = picture_idx;
    drag->corner = corner;
    drag->slide_idx = app_state->slide_idx;
    drag->edit_count = app_state->editor->edit_count;
@@ -542,7 +545,7 @@ PLACE_Input(App_State* app_state, F32 ui) {
          // The text has changed under it, or the slide: given up. A deck
          // made again from the text has the place the text says already.
          if (editor != 0 && editor->edit_count == drag->edit_count && drag->slide_idx < deck->slide_count) {
-            *_PLACE_PlaceOf(&deck->slides[drag->slide_idx], drag->kind, drag->picture_idx) = drag->before;
+            *_PLACE_PlaceOf(&deck->slides[drag->slide_idx], drag->kind, drag->idx) = drag->before;
          }
          drag->state = EDIT_PlaceDragState_None;
          return;
@@ -551,7 +554,7 @@ PLACE_Input(App_State* app_state, F32 ui) {
       DECK_Slide* slide = &deck->slides[drag->slide_idx];
       Vec2F32     mouse = Core_WM_MouseFromWindow(app_state->window);
 
-      DECK_Place* place = _PLACE_PlaceOf(slide, drag->kind, drag->picture_idx);
+      DECK_Place* place = _PLACE_PlaceOf(slide, drag->kind, drag->idx);
 
       if (drag->state == EDIT_PlaceDragState_Dragging && Core_WM_KeyPress(events, app_state->window, 0, WM_Key_Esc)) {
          *place = drag->before;
@@ -562,7 +565,7 @@ PLACE_Input(App_State* app_state, F32 ui) {
       if (!Core_WM_KeyIsDown(WM_Key_LeftMouseButton)) {
          if (drag->state == EDIT_PlaceDragState_Dragging) {
             *place = drag->before;
-            _PLACE_WriteLine(editor, slide, drag->kind, drag->picture_idx, &drag->before, drag->now);
+            _PLACE_WriteLine(editor, slide, drag->kind, drag->idx, &drag->before, drag->now);
             editor->last_input_us = NowTimeUS();
          }
          drag->state = EDIT_PlaceDragState_None;
@@ -635,7 +638,7 @@ PLACE_Input(App_State* app_state, F32 ui) {
       if (event->key == WM_Key_RightMouseButton) {
          VIEW_Box* on = _PLACE_BoxAt(app_state, event->pos);
          if (on != 0) {
-            DECK_Place* place = _PLACE_PlaceOf(&deck->slides[app_state->slide_idx], on->kind, on->picture_idx);
+            DECK_Place* place = _PLACE_PlaceOf(&deck->slides[app_state->slide_idx], on->kind, on->idx);
             if (place->has_line) {
                _PLACE_RemoveLine(editor, place);
                editor->last_input_us = NowTimeUS();
@@ -664,7 +667,7 @@ PLACE_Draw(App_State* app_state, F32 ui, Vec2F32 mouse) {
    if (is_dragging) {
       for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
          VIEW_Box* candidate = &app_state->preview_boxes[i];
-         if (candidate->kind == drag->kind && (drag->kind != DECK_PlaceKind_Picture || candidate->picture_idx == drag->picture_idx)) {
+         if (candidate->kind == drag->kind && candidate->idx == drag->idx) {
             over = candidate;
          }
       }

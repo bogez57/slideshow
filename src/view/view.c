@@ -415,11 +415,12 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
    return y;
 }
 
-// The slide's items, from rect's top left down, no wider than rect. shrink is
-// the part of full size to draw them at. Returns the y under the last.
+// The items of one block of the slide's body, from rect's top left down, no
+// wider than rect. shrink is the part of full size to draw them at. Returns
+// the y under the last.
 internal F32
-_VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, Rng2F32 rect, F32 scale, F32 shrink,
-           F32 alpha, B32 do_draw, VIEW_HitList* hits) {
+_VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, DECK_Box* box, Rng2F32 rect, F32 scale,
+           F32 shrink, F32 alpha, B32 do_draw, VIEW_HitList* hits) {
    B32 centered = (slide->layout == DECK_Layout_Center);
    F32 unit = scale * shrink;
    F32 y = rect.min.y;
@@ -427,10 +428,11 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
    F32 body_px = _VIEW_BODY_PX * unit;
    F32 body_line_height = TXT_LineHeight(fonts->regular, body_px);
 
-   for (DECK_Item* item = slide->first_item; item != 0; item = item->next) {
+   DECK_Item* item = box->first_item;
+   for (U64 item_idx = 0; item_idx < box->item_count && item != 0; item_idx += 1, item = item->next) {
       // Room between items: a little always, more where the file had an empty
       // line - and above a heading, which belongs to what is under it.
-      if (item != slide->first_item) {
+      if (item != box->first_item) {
          y += body_line_height * 0.30f;
          if (item->gap_before || item->kind == DECK_ItemKind_Heading) {
             y += body_line_height * 0.45f;
@@ -517,7 +519,7 @@ _VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 picture_idx, Rng2F32 
       VIEW_Box* box = &hits->boxes[hits->box_count];
       hits->box_count += 1;
       box->kind = kind;
-      box->picture_idx = picture_idx;
+      box->idx = picture_idx;
       box->rect = rect;
    }
 }
@@ -684,7 +686,6 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    VIEW_Colors colors = VIEW_ColorsFromTheme(theme);
    B32         has_text = DECK_SlideHasText(slide);
    B32         centered = (slide->layout == DECK_Layout_Center);
-   DECK_Place* text_place = &slide->places[DECK_PlaceKind_Text];
    DECK_Place* title_place = &slide->places[DECK_PlaceKind_Title];
 
    //- bgz: which pictures go where
@@ -772,11 +773,6 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
          picture_rect.min.x = middle + gutter * 0.5f;
       }
    }
-   // An @place line puts the body where it says. The pictures stay where
-   // the layout has them: moving the one does not move the other.
-   if (text_place->is_set) {
-      body_rect = _VIEW_PlacedRect(page, text_place);
-   }
 
    //- bgz: the pictures, under the words
    //
@@ -843,31 +839,69 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
       _VIEW_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 0, hits);
    }
 
-   //- bgz: the body
+   //- bgz: the body, a block at a time
+   //
+   // A block with an @place line is where that says. The rest are one under
+   // another in the body's room, as one body would be: the pictures stay
+   // where the layout has them, and moving a block does not move them.
    if (slide->item_count != 0) {
-      // Full size if it fits above the bottom margin, else the largest of a
-      // few smaller sizes that does - or the smallest, if none do.
-      F32 shrink = 1.0f;
-      F32 end_y = body_rect.max.y;
+      F32 block_gap = 20.0f * scale; // between two blocks that share the room
+
+      // The blocks that share the room: full size if they fit above the
+      // bottom margin, else the largest of a few smaller sizes that does -
+      // or the smallest, if none do.
+      F32 shared_shrink = 1.0f;
       for (;;) {
-         end_y = _VIEW_Body(arena, fonts, &colors, slide, body_rect, scale, shrink, alpha, 0, 0);
-         if (end_y <= body_rect.max.y || shrink <= _VIEW_MIN_BODY_SHRINK) {
+         F32 y_at = body_rect.min.y;
+         F32 end_y = y_at;
+         for (U64 i = 0; i < slide->box_count; i += 1) {
+            DECK_Box* block = &slide->boxes[i];
+            if (block->item_count != 0 && !block->place.is_set) {
+               Rng2F32 block_rect = R2F32P(body_rect.min.x, y_at, body_rect.max.x, body_rect.max.y);
+               end_y = _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shared_shrink, alpha, 0, 0);
+               y_at = end_y + block_gap * shared_shrink;
+            }
+         }
+         if (end_y <= body_rect.max.y || shared_shrink <= _VIEW_MIN_BODY_SHRINK) {
             break;
          }
-         shrink = Max(shrink * 0.88f, _VIEW_MIN_BODY_SHRINK);
+         shared_shrink = Max(shared_shrink * 0.88f, _VIEW_MIN_BODY_SHRINK);
       }
-      _VIEW_Body(arena, fonts, &colors, slide, body_rect, scale, shrink, alpha, 1, hits);
 
-      // The box to move it by. Placed, it is the place. Not placed, it is
-      // as tall as the words, not all the room down to the bottom margin:
-      // that box would be mostly empty, and would already touch the page's
-      // bottom, so it could hardly be dragged down at all. A little over,
-      // so that the words still fit at the same size once it is placed.
-      Rng2F32 box = body_rect;
-      if (!text_place->is_set) {
-         box.max.y = Clamp(body_rect.min.y + 1.0f, end_y + 8.0f * scale, body_rect.max.y);
+      F32 y_at = body_rect.min.y;
+      for (U64 i = 0; i < slide->box_count; i += 1) {
+         DECK_Box* block = &slide->boxes[i];
+         if (block->item_count == 0) {
+            continue;
+         }
+         if (block->place.is_set) {
+            // In its place, at the largest size that fits it.
+            Rng2F32 block_rect = _VIEW_PlacedRect(page, &block->place);
+            F32     shrink = 1.0f;
+            for (;;) {
+               F32 end_y = _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shrink, alpha, 0, 0);
+               if (end_y <= block_rect.max.y || shrink <= _VIEW_MIN_BODY_SHRINK) {
+                  break;
+               }
+               shrink = Max(shrink * 0.88f, _VIEW_MIN_BODY_SHRINK);
+            }
+            _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shrink, alpha, 1, hits);
+            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, block_rect);
+         } else {
+            Rng2F32 block_rect = R2F32P(body_rect.min.x, y_at, body_rect.max.x, body_rect.max.y);
+            F32     end_y = _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shared_shrink, alpha, 1, hits);
+            y_at = end_y + block_gap * shared_shrink;
+
+            // The box to move it by: as tall as the words, not all the room
+            // down to the bottom margin - that box would be mostly empty,
+            // and would already touch the page's bottom, so it could hardly
+            // be dragged down at all. A little over, so that the words
+            // still fit at the same size once it is placed.
+            Rng2F32 box = block_rect;
+            box.max.y = Clamp(block_rect.min.y + 1.0f, end_y + 8.0f * scale, Max(body_rect.max.y, block_rect.min.y + 1.0f));
+            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, box);
+         }
       }
-      _VIEW_PushBox(hits, DECK_PlaceKind_Text, 0, box);
    }
 
    Core_D_PopClip();

@@ -84,6 +84,17 @@ Two # make a heading, which belongs to the slide it is on.
 - Drag a corner to resize them
 - A line of @place is written for it: right-click to take it away
 
+# Blocks of words
+
+- The lines of a slide are one block
+- A line of @box starts another
+
+@box
+@place text 0.560 0.300 0.380 0.300
+## On its own
+- Each block is dragged and sized by itself
+- Shift lines it up with the others
+
 # Layouts
 
 @layout picture-left

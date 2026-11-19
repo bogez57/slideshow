@@ -57,7 +57,7 @@ typedef struct EDIT_PlaceDrag EDIT_PlaceDrag;
 struct EDIT_PlaceDrag {
    EDIT_PlaceDragState state;
    DECK_PlaceKind      kind;
-   U64                 picture_idx; // which of the slide's pictures, for a picture
+   U64                 idx;         // which of the slide's pictures, or of its body's blocks
    U32                 corner;      // 0: all of it is moved. 1 to 4: that corner is - top left, top right, bottom left, bottom right
    U64                 slide_idx;
    U64                 edit_count;  // the editor's when the button went down: a change to the text ends it
@@ -210,7 +210,7 @@ struct App_State {
    // Edit screen: where the preview's slide had its pictures, its title and
    // its body last frame (VIEW_HitList's boxes), and its page: what the mouse moves
    // and resizes. Good for the same text as preview_hits.
-   VIEW_Box preview_boxes[DECK_MAX_PICTURES + 2];
+   VIEW_Box preview_boxes[VIEW_MAX_BOXES];
    U64      preview_box_count;
    Rng2F32  preview_page;
 
