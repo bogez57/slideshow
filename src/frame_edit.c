@@ -954,9 +954,10 @@ _EDIT_BuildBarText(F32 pad, String8 left_tag, String8 left, FNT_Tag left_font, S
 }
 
 // A word to click, in a row of the Format panel: as tall as the row leaves
-// it, with a little room around it. 1 when it is clicked.
+// it, with a little room around it, and a white edge when it is what there
+// is now, as a colour's square has. 1 when it is clicked.
 internal B32
-_EDIT_BuildRowButton(String8 name, F32 row_h, F32 ui, B32 interactive, char* fmt, ...) {
+_EDIT_BuildRowButton(String8 name, B32 is_now, F32 row_h, F32 ui, B32 interactive, char* fmt, ...) {
    Temp    scratch = ScratchBegin(0, 0);
    va_list args;
    va_start(args, fmt);
@@ -970,6 +971,9 @@ _EDIT_BuildRowButton(String8 name, F32 row_h, F32 ui, B32 interactive, char* fmt
    UI_SetNextChildLayoutAxis(Axis2_Y);
    UI_Box* cell = UI_BuildBoxFromStringf(0, "%S cell", key);
    UI_Parent(cell) {
+      // No width: the cell is as wide as what is in it, and a spacer is
+      // otherwise as wide as the default.
+      UI_SetNextPrefWidth(UI_Px(0, 1));
       UI_Spacer(UI_Px(inset, 1));
       UI_SetNextPrefWidth(UI_TextDim(14.0f * ui, 1));
       UI_SetNextPrefHeight(UI_Px(row_h - inset * 2.0f, 1));
@@ -979,9 +983,15 @@ _EDIT_BuildRowButton(String8 name, F32 row_h, F32 ui, B32 interactive, char* fmt
       UI_SetNextCornerRadius01(3.0f * ui);
       UI_SetNextCornerRadius10(3.0f * ui);
       UI_SetNextCornerRadius11(3.0f * ui);
+      // Keyed by key, but showing only the name: the screen is built with
+      // UI_BoxFlag_DisableIDString (frame.c), so a "###" in what is shown
+      // would be shown too.
       UI_Box* button = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_DrawText |
+                                                  (is_now ? UI_BoxFlag_DrawBorder : 0) |
                                                   (interactive ? UI_BoxFlag_Clickable : 0),
-                                              "%S%S", name, key);
+                                              "%S", key);
+      UI_BoxEquipDisplayString(button, name);
+      button->border_color = V4F32(1, 1, 1, 1);
       if (interactive) {
          UI_Signal signal = UI_SignalFromBox(button);
          if (UI_Hovering(signal)) {
@@ -996,10 +1006,11 @@ _EDIT_BuildRowButton(String8 name, F32 row_h, F32 ui, B32 interactive, char* fmt
    return result;
 }
 
-// A square of a colour to click, in a row of the Format panel, with a white
-// edge when it is the colour there is now. 1 when it is clicked.
+// A square of a colour to click, side wide and gap before the next, in a
+// row of the Format panel, with a white edge when it is the colour there is
+// now. 1 when it is clicked.
 internal B32
-_EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 row_h, F32 ui, B32 interactive, char* fmt, ...) {
+_EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 side, F32 gap, F32 row_h, F32 ui, B32 interactive, char* fmt, ...) {
    Temp    scratch = ScratchBegin(0, 0);
    va_list args;
    va_start(args, fmt);
@@ -1007,7 +1018,6 @@ _EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 row_h, F32 ui, B32 interactive,
    va_end(args);
 
    B32 result = 0;
-   F32 side = Max((F32)(S32)(row_h * 0.62f), 4.0f);
    F32 inset = (F32)(S32)((row_h - side) * 0.5f);
    UI_SetNextPrefWidth(UI_Px(side, 1));
    UI_SetNextPrefHeight(UI_Px(row_h, 1));
@@ -1035,7 +1045,7 @@ _EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 row_h, F32 ui, B32 interactive,
          result = !!UI_Clicked(signal);
       }
    }
-   UI_Spacer(UI_Px(6.0f * ui, 1));
+   UI_Spacer(UI_Px(gap, 1));
 
    ScratchEnd(scratch);
    return result;
@@ -1204,21 +1214,35 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
                      if (format_row->action == _EDIT_FormatAction_Size) {
                         String8 names[] = {Str8Lit("smaller"), Str8Lit("larger"), Str8Lit("usual")};
                         S32     directions[] = {-1, +1, 0};
+                        B32     is_usual = LOOK_SizeIsUsual(app_state);
+                        UI_Spacer(UI_Px(6.0f * ui, 1));
                         for (U64 k = 0; k < ArrayCount(names); k += 1) {
-                           if (_EDIT_BuildRowButton(names[k], row_h, ui, interactive, "###edit size %llu", (unsigned long long)k)) {
+                           if (_EDIT_BuildRowButton(names[k], is_usual && directions[k] == 0, row_h, ui, interactive,
+                                                    "###edit size %llu", (unsigned long long)k)) {
                               size_picked = 1;
                               size_direction = directions[k];
                            }
                         }
                         UI_Spacer(UI_Px(pad - 6.0f * ui, 1));
                      } else if (format_row->action == _EDIT_FormatAction_Color) {
+                        // The squares as large as the row leaves room for,
+                        // so that all of them and the theme's fit in a narrow
+                        // window too: the row's width less what is before
+                        // them, the theme's word and the room at the end.
+                        F32 theme_w = TXT_Width(fonts->regular, layout.ui_px, Str8Lit("theme's")) + 14.0f * ui + 6.0f * ui;
+                        F32 room = left_w - pad - syntax_w - 18.0f * ui - 6.0f * ui - theme_w - pad;
+                        F32 each = room / (F32)DECK_NAMED_COLOR_COUNT; // a square and the gap after it
+                        F32 gap = Clamp(2.0f * ui, (F32)(S32)(each * 0.25f), 6.0f * ui);
+                        F32 side = (F32)(S32)Clamp(6.0f * ui, each - gap, row_h * 0.62f);
+                        UI_Spacer(UI_Px(6.0f * ui, 1));
                         for (U64 k = 0; k < DECK_NAMED_COLOR_COUNT; k += 1) {
-                           if (_EDIT_BuildSwatch(DECK_NamedColorFromIdx(k).color, LOOK_ColorIsNow(app_state, k), row_h, ui,
-                                                 interactive, "###edit color %llu", (unsigned long long)k)) {
+                           if (_EDIT_BuildSwatch(DECK_NamedColorFromIdx(k).color, LOOK_ColorIsNow(app_state, k), side, gap, row_h,
+                                                 ui, interactive, "###edit color %llu", (unsigned long long)k)) {
                               color_picked = (S64)k;
                            }
                         }
-                        if (_EDIT_BuildRowButton(Str8Lit("theme's"), row_h, ui, interactive, "###edit color theme")) {
+                        if (_EDIT_BuildRowButton(Str8Lit("theme's"), LOOK_ColorIsNow(app_state, DECK_NAMED_COLOR_COUNT), row_h,
+                                                 ui, interactive, "###edit color theme")) {
                            color_picked = DECK_NAMED_COLOR_COUNT;
                         }
                         UI_Spacer(UI_Px(pad - 6.0f * ui, 1));

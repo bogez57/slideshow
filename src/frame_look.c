@@ -208,7 +208,9 @@ LOOK_Describe(Arena* arena, App_State* app_state, B32 is_color) {
    if (app_state->editor != 0 && app_state->parsed_edit_count == app_state->editor->edit_count &&
        _LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
       DECK_Look* look = _LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx);
-      char*      whose = (kind == DECK_PlaceKind_Title) ? "the title's words" : "this block's words";
+      // Whose words first, and short: what there is to click takes most of
+      // the row, and the rest of this is cut off where it does not fit.
+      char*      whose = (kind == DECK_PlaceKind_Title) ? "title" : "this block";
       if (is_color && look->has_color) {
          // As the line has it: what is after the kind's name.
          String8 text = ED_Text(app_state->editor);
@@ -217,11 +219,11 @@ LOOK_Describe(Arena* arena, App_State* app_state, B32 is_color) {
          while (value_start > 0 && line.str[value_start - 1] != ' ' && line.str[value_start - 1] != '\t') value_start -= 1;
          result = PushStr8F(arena, "%s: %S", whose, Str8Skip(line, value_start));
       } else if (is_color) {
-         result = PushStr8F(arena, "%s: the theme's colour", whose);
+         result = PushStr8F(arena, "%s: the theme's", whose);
       } else if (look->has_size) {
-         result = PushStr8F(arena, "%s: %.2f times the usual size", whose, look->size);
+         result = PushStr8F(arena, "%s: %.2f times", whose, look->size);
       } else {
-         result = PushStr8F(arena, "%s: the usual size. Ctrl+] larger, Ctrl+[ smaller", whose);
+         result = PushStr8F(arena, "%s: usual. Ctrl+] larger, Ctrl+[ smaller", whose);
       }
    }
    return result;
@@ -242,6 +244,19 @@ LOOK_ColorIsNow(App_State* app_state, U64 named_idx) {
          Vec4F32 color = DECK_NamedColorFromIdx(named_idx).color;
          result = (color.x == look->color.x && color.y == look->color.y && color.z == look->color.z);
       }
+   }
+   return result;
+}
+
+internal B32
+LOOK_SizeIsUsual(App_State* app_state) {
+   U64            slide_idx = 0;
+   DECK_PlaceKind kind = DECK_PlaceKind_Title;
+   U64            idx = 0;
+   B32            result = 0;
+   if (app_state->editor != 0 && app_state->parsed_edit_count == app_state->editor->edit_count &&
+       _LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
+      result = !_LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx)->has_size;
    }
    return result;
 }

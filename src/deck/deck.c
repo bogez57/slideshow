@@ -233,7 +233,8 @@ DECK_NamedColorFromIdx(U64 idx) {
        {Str8LitComp("gray"), {{0.55f, 0.57f, 0.60f, 1.0f}}},
        {Str8LitComp("red"), {{0.90f, 0.26f, 0.24f, 1.0f}}},
        {Str8LitComp("orange"), {{0.96f, 0.56f, 0.16f, 1.0f}}},
-       {Str8LitComp("yellow"), {{0.98f, 0.82f, 0.22f, 1.0f}}},
+       // Nearer gold than a bright yellow, which on light and paper is hardly seen.
+       {Str8LitComp("yellow"), {{0.84f, 0.65f, 0.07f, 1.0f}}},
        {Str8LitComp("green"), {{0.30f, 0.74f, 0.40f, 1.0f}}},
        {Str8LitComp("blue"), {{0.25f, 0.56f, 0.96f, 1.0f}}},
        {Str8LitComp("purple"), {{0.62f, 0.42f, 0.90f, 1.0f}}},
