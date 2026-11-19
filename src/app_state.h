@@ -70,7 +70,14 @@ struct EDIT_PlaceDrag {
    B32                 has_guide_y;
    F32                 guide_x;
    F32                 guide_y;
-   DECK_Place          before;      // the slide's place of that kind as the text has it, to go back to
+   // The other box each line is an edge or the middle of, outlined with it:
+   // the body's box is larger than its words, and a line through empty space
+   // says nothing until its box shows. None for the page's own lines.
+   B32                 has_guide_box_x;
+   B32                 has_guide_box_y;
+   Rng2F32             guide_box_x;
+   Rng2F32             guide_box_y;
+   DECK_Place          before;     // the slide's place of that kind as the text has it, to go back to
 };
 
 typedef struct App_State App_State;
