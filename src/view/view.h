@@ -59,13 +59,14 @@ struct VIEW_Hit {
 };
 
 // Where something an @place line can move was put. In pixels. A picture's
-// is the picture as drawn, the body's as tall as its words, the title's as
-// wide as its words.
+// is the picture as drawn, a block of the body's as tall as its words, the
+// title's as wide as its words. As many as a slide can have: each picture,
+// each block and the title.
 #define VIEW_MAX_BOXES (DECK_MAX_PICTURES + DECK_MAX_BOXES + 1)
 typedef struct VIEW_Box VIEW_Box;
 struct VIEW_Box {
    DECK_PlaceKind kind;
-   U64            idx; // which of the slide's pictures, for a picture's; which block of its body, for the body's
+   U64            idx; // which of the slide's pictures, or blocks of its body (DECK_Box). 0 for the title
    Rng2F32        rect;
 };
 
@@ -75,8 +76,9 @@ struct VIEW_HitList {
    VIEW_Hit* last;
    U64       count;
 
-   // Where the slide's title, its body and each of its pictures were put:
-   // what an @place line would move. None for a picture behind the words.
+   // Where the slide's title, each block of its body and each of its
+   // pictures were put: what an @place line would move. None for a picture
+   // behind the words.
    VIEW_Box boxes[VIEW_MAX_BOXES];
    U64      box_count;
    Rng2F32  page; // the page the slide was drawn on
@@ -95,7 +97,8 @@ struct VIEW_HitList {
 //
 // theme is the deck's, for the colours. The slide's own layout
 // (slide->layout) says where its picture and words go, and its @place lines
-// (slide->places) put either somewhere else.
+// (slide->places, and the pictures' and blocks' own) put any of them
+// somewhere else.
 internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, Rng2F32 rect, F32 alpha,
                              VIEW_HitList* hits);
 

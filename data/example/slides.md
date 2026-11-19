@@ -90,7 +90,7 @@ Two # make a heading, which belongs to the slide it is on.
 - A line of @box starts another
 
 @box
-@place text 0.560 0.300 0.380 0.300
+@place text 0.560 0.244 0.380 0.300
 ## On its own
 - Each block is dragged and sized by itself
 - Shift lines it up with the others

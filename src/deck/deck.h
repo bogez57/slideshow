@@ -52,8 +52,9 @@
 //                       above
 //    @place text 0.05 0.3 0.5 0.6
 //                       the same for the slide's body: every line under the
-//                       title - or the block of it the line is in (@box). The words wrap at its width, and are made
-//                       smaller if they do not fit its height
+//                       title - or, on a slide with @box lines, the block
+//                       of it the line is in. The words wrap at its width,
+//                       and are made smaller if they do not fit its height
 //    @box               the lines of the body under it, on this slide, are
 //                       another block of words: one that @place text, under
 //                       it, puts somewhere of its own. Up to DECK_MAX_BOXES

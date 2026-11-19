@@ -1,14 +1,14 @@
 ////////////////////////////////
-//~ bgz: the edit screen: a slide's picture and its body, moved and resized with the mouse
+//~ bgz: the edit screen: a slide's pictures, title and words, moved and resized with the mouse
 //
 // In the preview, each of the slide's pictures - or videos - its title and
-// its body (every line under the title) have a box: where VIEW_DrawSlide
-// put them. With the
-// mouse over one, its outline and a handle at each corner show.
+// each block of its body (every line under the title, in blocks that @box
+// lines start) have a box: where VIEW_DrawSlide put them. With the mouse
+// over one, its outline and a handle at each corner show.
 //
 //    move it          press inside the box and drag
-//    resize it        drag a corner. A picture keeps its shape. The body's
-//                     box takes any shape: its words wrap at the width, and
+//    resize it        drag a corner. A picture keeps its shape. A block of
+//                     words takes any shape: its words wrap at the width, and
 //                     are made smaller if they do not fit the height
 //    line it up       hold Shift while dragging: an edge or the middle of
 //                     it jumps to the page's edges, margins and middle, and
@@ -67,29 +67,65 @@ _PLACE_BoxesAreGood(App_State* app_state) {
            Dim2F32(app_state->preview_page).x > 0 && Dim2F32(app_state->preview_page).y > 0);
 }
 
-// The slide's place of a kind: a picture's is the picture's own.
+// The slide's place of a kind: a picture's is the picture's own, and a
+// block's of the body the block's own. idx says which (VIEW_Box's).
 internal DECK_Place*
-_PLACE_PlaceOf(DECK_Slide* slide, DECK_PlaceKind kind, U64 picture_idx) {
+_PLACE_PlaceOf(DECK_Slide* slide, DECK_PlaceKind kind, U64 idx) {
    DECK_Place* result = &slide->places[kind];
-   if (kind == DECK_PlaceKind_Picture && picture_idx < slide->picture_count) {
-      result = &slide->pictures[picture_idx].place;
+   if (kind == DECK_PlaceKind_Picture && idx < slide->picture_count) {
+      result = &slide->pictures[idx].place;
    }
-   if (kind == DECK_PlaceKind_Text && picture_idx < slide->box_count) {
-      result = &slide->boxes[picture_idx].place;
+   if (kind == DECK_PlaceKind_Text && idx < slide->box_count) {
+      result = &slide->boxes[idx].place;
+   }
+   return result;
+}
+
+// Which block of the slide's body (DECK_Box) has the line whose words are at
+// range: max_U64 for none - the title, or a picture.
+internal U64
+_PLACE_BlockOfRange(DECK_Slide* slide, Rng1U64 range) {
+   U64 result = max_U64;
+   for (U64 block_idx = 0; block_idx < slide->box_count && result == max_U64; block_idx += 1) {
+      DECK_Box*  block = &slide->boxes[block_idx];
+      DECK_Item* item = block->first_item;
+      for (U64 i = 0; i < block->item_count && item != 0; i += 1, item = item->next) {
+         if (item->text_range.min == range.min && item->text_range.max == range.max) {
+            result = block_idx;
+            break;
+         }
+      }
    }
    return result;
 }
 
 // Which box a point is on: 0 for none. Where boxes are over each other, a
-// point on a line of the body's words is on the body, one on the title's
-// words on the title, and any other on the picture drawn last - the one on
-// top - then the title, then the body.
+// point on a line of the body's words is on the block that line is in, one
+// on the title's words on the title, and any other on the picture drawn
+// last - the one on top - then the title, then the block drawn last.
+//
+// The words are the ones a click there would go to (_EDIT_PreviewHitAt): of
+// two blocks over each other, those of the one drawn later. Not merely
+// whichever block's box is last under the point - that box can be mostly
+// empty, over the words of another.
 internal VIEW_Box*
 _PLACE_BoxAt(App_State* app_state, Vec2F32 pos) {
    DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
-   VIEW_Box*   title = 0;
-   VIEW_Box*   text = 0;
-   VIEW_Box*   picture = 0;
+
+   // What words the point is on, if any: the title's, or which block's.
+   B32 on_title_words = 0;
+   U64 words_block = max_U64;
+   S64 hit_idx = _EDIT_PreviewHitAt(app_state, pos);
+   if (hit_idx >= 0) {
+      Rng1U64 range = app_state->preview_hits[hit_idx].text_range;
+      on_title_words = (range.min == slide->title_range.min && range.max == slide->title_range.max);
+      words_block = _PLACE_BlockOfRange(slide, range);
+   }
+
+   VIEW_Box* title = 0;
+   VIEW_Box* text = 0;
+   VIEW_Box* words_text = 0;
+   VIEW_Box* picture = 0;
    for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
       VIEW_Box* box = &app_state->preview_boxes[i];
       if (Contains2F32(box->rect, pos)) {
@@ -97,32 +133,18 @@ _PLACE_BoxAt(App_State* app_state, Vec2F32 pos) {
             title = box;
          } else if (box->kind == DECK_PlaceKind_Text) {
             text = box;
+            if (box->idx == words_block) {
+               words_text = box;
+            }
          } else if (box->idx < slide->picture_count) {
             picture = box;
          }
       }
    }
 
-   // What words the point is on, if any.
-   B32 on_title_words = 0;
-   B32 on_body_words = 0;
-   for (U64 i = 0; i < app_state->preview_hit_count; i += 1) {
-      VIEW_Hit* hit = &app_state->preview_hits[i];
-      if (!Contains2F32(hit->rect, pos)) {
-         continue;
-      }
-      B32 is_picture = 0;
-      for (U64 k = 0; k < slide->picture_count; k += 1) {
-         is_picture |= (hit->text_range.min == slide->pictures[k].range.min && hit->text_range.max == slide->pictures[k].range.max);
-      }
-      B32 is_title = (hit->text_range.min == slide->title_range.min && hit->text_range.max == slide->title_range.max);
-      on_title_words |= (is_title && !is_picture);
-      on_body_words |= (!is_title && !is_picture);
-   }
-
    VIEW_Box* result = 0;
-   if (text != 0 && on_body_words) {
-      result = text;
+   if (words_text != 0) {
+      result = words_text;
    } else if (title != 0 && on_title_words) {
       result = title;
    } else if (picture != 0) {
@@ -147,11 +169,11 @@ _PLACE_IsOnVideoStrip(App_State* app_state, F32 ui, Vec2F32 pos) {
    return result;
 }
 
-// Writes the slide's @place line for kind - for the picture_idx-th picture,
-// if a picture's: over the one it has (before), or as a new line under the
-// picture's line, under the title's, or above the body's first.
+// Writes the slide's @place line for kind - for the idx-th picture, or block
+// of the body: over the one it has (before), or as a new line under the
+// picture's line, under the title's, or above the block's first.
 internal void
-_PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 picture_idx, DECK_Place* before, Rng2F32 rect) {
+_PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 idx, DECK_Place* before, Rng2F32 rect) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 text = ED_Text(editor);
    String8 line = PushStr8F(scratch.arena, "@place %S %.3f %.3f %.3f %.3f", DECK_PlaceName(kind), rect.min.x, rect.min.y,
@@ -161,14 +183,15 @@ _PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 
       _EDIT_ReplaceKeepingCursor(editor, before->line.min, before->line.max, line);
    } else {
       // The line of the text the thing is on: the picture's, the title's,
-      // or the first of the body's.
+      // or the first of the block's - which, for any block but the first,
+      // is under its @box line, so the @place line goes between the two.
       U64 on = slide->text_pos;
-      if (kind == DECK_PlaceKind_Picture && picture_idx < slide->picture_count) {
-         on = slide->pictures[picture_idx].range.min;
+      if (kind == DECK_PlaceKind_Picture && idx < slide->picture_count) {
+         on = slide->pictures[idx].range.min;
       } else if (kind == DECK_PlaceKind_Title) {
          on = slide->title_range.min;
-      } else if (kind == DECK_PlaceKind_Text && picture_idx < slide->box_count && slide->boxes[picture_idx].first_item != 0) {
-         on = slide->boxes[picture_idx].first_item->text_range.min;
+      } else if (kind == DECK_PlaceKind_Text && idx < slide->box_count && slide->boxes[idx].first_item != 0) {
+         on = slide->boxes[idx].first_item->text_range.min;
       }
       on = Min(on, text.size);
       U64 line_start = on;
@@ -176,8 +199,8 @@ _PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 
       U64 line_end = on;
       while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
 
-      // The body's goes above its first line, where it does not come between
-      // two lines of the body - unless that line is what starts the slide:
+      // A block's goes above its first line, where it does not come between
+      // two lines of the block - unless that line is what starts the slide:
       // above it would be the slide before. A picture's goes under the
       // picture's line: it is for the picture last written above it. The
       // title's goes under the title's, which is what starts the slide.
@@ -512,12 +535,12 @@ _PLACE_Begin(App_State* app_state, VIEW_Box* from, U32 corner, Vec2F32 pos, EDIT
    Vec2F32         page_dim = Dim2F32(page);
    Rng2F32         box = from->rect;
    DECK_PlaceKind  kind = from->kind;
-   U64             picture_idx = from->idx;
+   U64             idx = from->idx;
 
    MemoryZeroStruct(drag);
    drag->state = state;
    drag->kind = kind;
-   drag->idx = picture_idx;
+   drag->idx = idx;
    drag->corner = corner;
    drag->slide_idx = app_state->slide_idx;
    drag->edit_count = app_state->editor->edit_count;
@@ -525,7 +548,7 @@ _PLACE_Begin(App_State* app_state, VIEW_Box* from, U32 corner, Vec2F32 pos, EDIT
    drag->start = R2F32P((box.min.x - page.min.x) / page_dim.x, (box.min.y - page.min.y) / page_dim.y,
                         (box.max.x - page.min.x) / page_dim.x, (box.max.y - page.min.y) / page_dim.y);
    drag->now = drag->start;
-   drag->before = *_PLACE_PlaceOf(&app_state->deck->slides[app_state->slide_idx], kind, picture_idx);
+   drag->before = *_PLACE_PlaceOf(&app_state->deck->slides[app_state->slide_idx], kind, idx);
 }
 
 // Before the edit screen's own keys and clicks (EDIT_Input), and before
