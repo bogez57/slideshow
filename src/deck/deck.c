@@ -223,6 +223,71 @@ DECK_PlaceName(DECK_PlaceKind kind) {
    return names[(kind < DECK_PlaceKind_COUNT) ? kind : 0];
 }
 
+internal DECK_NamedColor
+DECK_NamedColorFromIdx(U64 idx) {
+   // Each one readable on a dark theme and on a light one, but for white
+   // and black, which are for one of the two.
+   DECK_NamedColor colors[DECK_NAMED_COLOR_COUNT] = {
+       {Str8LitComp("white"), {{1.00f, 1.00f, 1.00f, 1.0f}}},
+       {Str8LitComp("black"), {{0.07f, 0.07f, 0.08f, 1.0f}}},
+       {Str8LitComp("gray"), {{0.55f, 0.57f, 0.60f, 1.0f}}},
+       {Str8LitComp("red"), {{0.90f, 0.26f, 0.24f, 1.0f}}},
+       {Str8LitComp("orange"), {{0.96f, 0.56f, 0.16f, 1.0f}}},
+       {Str8LitComp("yellow"), {{0.98f, 0.82f, 0.22f, 1.0f}}},
+       {Str8LitComp("green"), {{0.30f, 0.74f, 0.40f, 1.0f}}},
+       {Str8LitComp("blue"), {{0.25f, 0.56f, 0.96f, 1.0f}}},
+       {Str8LitComp("purple"), {{0.62f, 0.42f, 0.90f, 1.0f}}},
+       {Str8LitComp("pink"), {{0.94f, 0.44f, 0.68f, 1.0f}}},
+   };
+   return colors[(idx < DECK_NAMED_COLOR_COUNT) ? idx : 0];
+}
+
+internal B32
+DECK_ColorFromString(String8 string, Vec4F32* color_out) {
+   B32 result = 0;
+   if (string.size != 0 && string.str[0] == '#' && (string.size == 4 || string.size == 7)) {
+      // #rgb is #rrggbb with each digit twice.
+      U32 digits[6] = {0};
+      B32 all_hex = 1;
+      U64 digit_count = string.size - 1;
+      for (U64 i = 0; i < digit_count; i += 1) {
+         U8 c = string.str[i + 1];
+         if (c >= '0' && c <= '9') {
+            digits[i] = (U32)(c - '0');
+         } else if (c >= 'a' && c <= 'f') {
+            digits[i] = (U32)(c - 'a') + 10;
+         } else if (c >= 'A' && c <= 'F') {
+            digits[i] = (U32)(c - 'A') + 10;
+         } else {
+            all_hex = 0;
+         }
+      }
+      if (all_hex) {
+         F32 parts[3] = {0};
+         for (U64 i = 0; i < 3; i += 1) {
+            U32 value = (digit_count == 3) ? digits[i] * 17 : digits[i * 2] * 16 + digits[i * 2 + 1];
+            parts[i] = (F32)value / 255.0f;
+         }
+         *color_out = V4F32(parts[0], parts[1], parts[2], 1.0f);
+         result = 1;
+      }
+   } else {
+      for (U64 i = 0; i < DECK_NAMED_COLOR_COUNT && !result; i += 1) {
+         DECK_NamedColor named = DECK_NamedColorFromIdx(i);
+         if (Str8Match(string, named.name, StringMatchFlag_CaseInsensitive)) {
+            *color_out = named.color;
+            result = 1;
+         }
+      }
+      // As it is also spelled.
+      if (!result && Str8Match(string, Str8Lit("grey"), StringMatchFlag_CaseInsensitive)) {
+         *color_out = DECK_NamedColorFromIdx(2).color;
+         result = 1;
+      }
+   }
+   return result;
+}
+
 // The number at the start of *string - 0.25, .5, 1 - which is then moved past
 // it and the spaces before it. 0 if there is none there.
 internal B32
@@ -309,6 +374,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
    // which can be a few lines on in a slide that has started already.
    DECK_Place waiting_places[DECK_PlaceKind_COUNT] = {0};
    DECK_Place waiting_picture_place = {0};
+   // And for @size and @color lines: the title's, and the first block's.
+   DECK_Look waiting_title_look = {0};
+   DECK_Look waiting_text_look = {0};
    // Whether the last picture line was one past DECK_MAX_PICTURES, passed
    // over: an @place line under it is passed over with it, and not given to
    // the picture before.
@@ -352,9 +420,9 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          continue;
       }
 
-      //- bgz: @theme, @layout, @video, @place, @box and @note: about the deck or the slide, not on it
+      //- bgz: @theme, @layout, @video, @place, @box, @size, @color and @note: about the deck or the slide, not on it
       //
-      // Only those six: any other line that starts with an @ is a paragraph.
+      // Only those eight: any other line that starts with an @ is a paragraph.
       // A name that is not one of the names gives the first, as no line would.
       if (line.str[0] == '@') {
          U64 word_end = 0;
@@ -413,6 +481,7 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
             // it: a slide's first lines are a block already.
             if (slide != 0 && slide->boxes[slide->box_count - 1].item_count != 0 && slide->box_count < DECK_MAX_BOXES) {
                slide->box_count += 1;
+               slide->boxes[slide->box_count - 1].text_pos = line_start;
             }
             gap_before = 0;
             continue;
@@ -462,6 +531,43 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
                   place->has_line = 1;
                   place->line = line_range;
                }
+            }
+            continue;
+         }
+         B32 is_size = Str8Match(word, Str8Lit("@size"), StringMatchFlag_CaseInsensitive);
+         B32 is_color = (Str8Match(word, Str8Lit("@color"), StringMatchFlag_CaseInsensitive) ||
+                         Str8Match(word, Str8Lit("@colour"), StringMatchFlag_CaseInsensitive));
+         if (is_size || is_color) {
+            // Whose words - title, or text - then the size or the colour.
+            // Without the first it is the text's. The first such line of a
+            // title, or of a block, is the one that counts; one that does
+            // not say a size or a colour changes nothing.
+            U64 kind_end = 0;
+            while (kind_end < name.size && name.str[kind_end] != ' ' && name.str[kind_end] != '\t') kind_end += 1;
+            String8 kind_name = Str8Prefix(name, kind_end);
+            String8 value = name;
+            B32     is_title_look = Str8Match(kind_name, Str8Lit("title"), StringMatchFlag_CaseInsensitive);
+            if (is_title_look || Str8Match(kind_name, Str8Lit("text"), StringMatchFlag_CaseInsensitive)) {
+               value = _DECK_Trim(Str8Skip(name, kind_end));
+            }
+
+            DECK_Look* look = is_title_look ? &waiting_title_look : &waiting_text_look;
+            if (slide != 0) {
+               look = is_title_look ? &slide->title_look : &slide->boxes[slide->box_count - 1].look;
+            }
+
+            F32     size = 0;
+            Vec4F32 color = {0};
+            String8 size_rest = value;
+            if (is_size && !look->has_size && _DECK_TakeNumber(&size_rest, &size) && _DECK_Trim(size_rest).size == 0) {
+               look->has_size = 1;
+               look->size = Clamp(DECK_SIZE_MIN, size, DECK_SIZE_MAX);
+               look->size_line = line_range;
+            }
+            if (is_color && !look->has_color && DECK_ColorFromString(value, &color)) {
+               look->has_color = 1;
+               look->color = color;
+               look->color_line = line_range;
             }
             continue;
          }
@@ -532,8 +638,13 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
          MemoryCopyArray(slide->places, waiting_places);
          slide->box_count = 1;
          slide->boxes[0].place = waiting_places[DECK_PlaceKind_Text];
+         slide->boxes[0].look = waiting_text_look;
+         slide->boxes[0].text_pos = slide->text_pos;
+         slide->title_look = waiting_title_look;
       }
       MemoryZeroArray(waiting_places);
+      MemoryZeroStruct(&waiting_title_look);
+      MemoryZeroStruct(&waiting_text_look);
       has_waiting_layout = 0;
       waiting_video_loop = 0;
       waiting_video_mute = 0;

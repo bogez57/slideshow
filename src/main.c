@@ -78,6 +78,7 @@
 #include "frame_copy.c"
 #include "frame_edit.c"
 #include "frame_place.c"
+#include "frame_look.c"
 #include "frame_open.c"
 #include "frame_presenter.c"
 #include "frame.c"

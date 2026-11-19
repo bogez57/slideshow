@@ -95,6 +95,19 @@ Two # make a heading, which belongs to the slide it is on.
 - Each block is dragged and sized by itself
 - Shift lines it up with the others
 
+# Sizes and colours
+@size title 1.2
+@color title orange
+
+- Ctrl+] makes the words the cursor is in larger, and Ctrl+[ smaller
+- The Format panel has the colours to click
+
+@box
+@size text 0.8
+@color text green
+- A block of words has a size and a colour of its own
+- A line of @size or @color is written for it
+
 # Layouts
 
 @layout picture-left

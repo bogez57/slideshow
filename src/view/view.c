@@ -416,14 +416,29 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
 }
 
 // The items of one block of the slide's body, from rect's top left down, no
-// wider than rect. shrink is the part of full size to draw them at. Returns
-// the y under the last.
+// wider than rect. shrink is the part of full size to draw them at - unless
+// the block has a size of its own (@size), which it is then drawn at.
+// Returns the y under the last.
 internal F32
 _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, DECK_Box* box, Rng2F32 rect, F32 scale,
            F32 shrink, F32 alpha, B32 do_draw, VIEW_HitList* hits) {
    B32 centered = (slide->layout == DECK_Layout_Center);
-   F32 unit = scale * shrink;
+   // Words given a size (@size) are drawn at it: they are not made smaller
+   // to fit.
+   F32 unit = scale * (box->look.has_size ? box->look.size : shrink);
    F32 y = rect.min.y;
+
+   // A colour of the block's own (@color) is the colour of all its words,
+   // headings too - and of what is drawn from the words' colour, a code
+   // box. The bullets' dots keep the theme's.
+   VIEW_Colors own_colors = *colors;
+   Vec4F32     heading_color = colors->accent;
+   Vec4F32     dot_color = colors->accent;
+   if (box->look.has_color) {
+      own_colors.body = box->look.color;
+      heading_color = box->look.color;
+   }
+   colors = &own_colors;
 
    F32 body_px = _VIEW_BODY_PX * unit;
    F32 body_line_height = TXT_LineHeight(fonts->regular, body_px);
@@ -450,7 +465,7 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
       switch (item->kind) {
       case DECK_ItemKind_Heading: {
          y = _VIEW_Lines(arena, fonts->bold, _VIEW_HEADING_PX * unit, item->text, rect.min.x, y, Dim2F32(rect).x,
-                         _VIEW_Faded(colors->accent, alpha), do_draw, centered, widest_out);
+                         _VIEW_Faded(heading_color, alpha), do_draw, centered, widest_out);
       } break;
 
       case DECK_ItemKind_Bullet: {
@@ -474,7 +489,7 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
             F32 dot_y = (F32)(S32)(y + TXT_LineHeight(fonts->regular, px) * 0.54f - dot * 0.5f);
 
             R_Rect2DInst* inst = Core_D_Rect(R2F32P(dot_x, dot_y, dot_x + dot, dot_y + dot), R2F32P(0, 0, 1, 1),
-                                             _VIEW_Faded(colors->accent, alpha));
+                                             _VIEW_Faded(dot_color, alpha));
             for (U64 i = 0; i < ArrayCount(inst->corner_radii); i += 1) {
                inst->corner_radii[i] = dot * 0.5f;
             }
@@ -524,13 +539,14 @@ _VIEW_BlockGap(TXT_Fonts* fonts, F32 unit) {
 }
 
 internal void
-_VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect) {
+_VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F32 text_size) {
    if (hits != 0 && hits->box_count < ArrayCount(hits->boxes) && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
       VIEW_Box* box = &hits->boxes[hits->box_count];
       hits->box_count += 1;
       box->kind = kind;
       box->idx = idx;
       box->rect = rect;
+      box->text_size = text_size;
    }
 }
 
@@ -641,11 +657,16 @@ _VIEW_PictureGrid(Rng2F32 room, F32* aspects, U64 count, F32 gap, B32 from_top, 
 internal F32
 _VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, Rng2F32 rect, F32 scale, B32 is_big,
             B32 centered, F32 alpha, B32 measure, VIEW_HitList* hits) {
-   F32 px = (is_big ? _VIEW_BIG_TITLE_PX : _VIEW_TITLE_PX) * scale;
-   F32 width = Dim2F32(rect).x;
+   // Its words at a size and in a colour of their own, where the slide says
+   // (@size title, @color title). The bar under it stays as it is.
+   DECK_Look* look = &slide->title_look;
+   F32        size = look->has_size ? look->size : 1.0f;
+   Vec4F32    color = look->has_color ? look->color : colors->title;
+   F32        px = (is_big ? _VIEW_BIG_TITLE_PX : _VIEW_TITLE_PX) * scale * size;
+   F32        width = Dim2F32(rect).x;
    F32 line_height = TXT_LineHeight(fonts->bold, px);
    F32 widest = 0;
-   F32 y = _VIEW_Lines(arena, fonts->bold, px, slide->title, rect.min.x, rect.min.y, width, _VIEW_Faded(colors->title, alpha),
+   F32 y = _VIEW_Lines(arena, fonts->bold, px, slide->title, rect.min.x, rect.min.y, width, _VIEW_Faded(color, alpha),
                        !measure, centered, &widest);
    y = Max(y, rect.min.y + line_height); // a title with no words yet still has its line
 
@@ -667,7 +688,7 @@ _VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* sli
          box.min.x = Max(title_x - (centered ? slack : 0), rect.min.x);
          box.max.x = Min(title_x + widest + slack, rect.max.x);
       }
-      _VIEW_PushBox(hits, DECK_PlaceKind_Title, 0, box);
+      _VIEW_PushBox(hits, DECK_PlaceKind_Title, 0, box, size);
 
       // The bar under it is under its start - or its middle, when centered.
       F32 bar_x = centered ? rect.min.x + (width - bar_w) * 0.5f : rect.min.x;
@@ -841,7 +862,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
       // placed keeps all of its room, as before there were places - which,
       // in a grid, is the picture as drawn too.
       _VIEW_PushHit(arena, hits, is_placed ? drawn : room, picture->range);
-      _VIEW_PushBox(hits, DECK_PlaceKind_Picture, i, drawn);
+      _VIEW_PushBox(hits, DECK_PlaceKind_Picture, i, drawn, 0);
    }
 
    //- bgz: the title
@@ -894,7 +915,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
                shrink = Max(shrink * 0.88f, _VIEW_MIN_BODY_SHRINK);
             }
             _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shrink, alpha, 1, hits);
-            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, block_rect);
+            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, block_rect, block->look.has_size ? block->look.size : shrink);
          } else {
             Rng2F32 block_rect = R2F32P(body_rect.min.x, y_at, body_rect.max.x, body_rect.max.y);
             F32     end_y = _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shared_shrink, alpha, 1, hits);
@@ -907,7 +928,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
             // still fit at the same size once it is placed.
             Rng2F32 box = block_rect;
             box.max.y = Clamp(block_rect.min.y + 1.0f, end_y + 8.0f * scale, Max(body_rect.max.y, block_rect.min.y + 1.0f));
-            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, box);
+            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, box, block->look.has_size ? block->look.size : shared_shrink);
          }
       }
    }

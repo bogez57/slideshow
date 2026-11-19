@@ -115,6 +115,19 @@ internal void FR_VideoUpdate(App_State* app_state);
 internal void PLACE_Input(App_State* app_state, F32 ui);
 internal B32  PLACE_Draw(App_State* app_state, F32 ui, Vec2F32 mouse);
 
+// The edit screen's words, given a size and a colour: frame_look.c. All of
+// them are about the piece the cursor is in - the title, or a block of the
+// body. LOOK_Input is the keys. direction: over 0 larger, under 0 smaller, 0
+// the usual size again. named_idx: one of deck.h's colours with names, or
+// DECK_NAMED_COLOR_COUNT for the theme's again. LOOK_Describe is what the
+// piece has now, in words, for the Format panel, and LOOK_ColorIsNow
+// whether its colour is that one.
+internal void    LOOK_Input(App_State* app_state);
+internal void    LOOK_StepSize(App_State* app_state, S32 direction);
+internal void    LOOK_SetColor(App_State* app_state, U64 named_idx);
+internal String8 LOOK_Describe(Arena* arena, App_State* app_state, B32 is_color);
+internal B32     LOOK_ColorIsNow(App_State* app_state, U64 named_idx);
+
 internal void PRES_Toggle(App_State* app_state);
 
 // Takes the window's events off this frame's: its close, and its keys, which

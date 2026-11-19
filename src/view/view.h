@@ -20,6 +20,8 @@
 // layout has for them, as a grid. An @place line puts one picture, the
 // title or a block of the body where it says instead. The body's blocks
 // (@box) that are not placed are one under another, where the body is.
+// @size and @color lines (DECK_Look) give the title's words, or a block's,
+// a size and a colour of their own.
 
 #ifndef VIEW_H
 #define VIEW_H
@@ -68,6 +70,10 @@ struct VIEW_Box {
    DECK_PlaceKind kind;
    U64            idx; // which of the slide's pictures, or blocks of its body (DECK_Box). 0 for the title
    Rng2F32        rect;
+   // The part of their usual size its words were drawn at: an @size line's,
+   // or what a body too long for its room was made smaller by. 0 for a
+   // picture.
+   F32 text_size;
 };
 
 typedef struct VIEW_HitList VIEW_HitList;

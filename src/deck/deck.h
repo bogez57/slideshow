@@ -63,6 +63,19 @@
 //    @place title 0.05 0.05 0.6 0.2
 //                       the same for the title, which wraps at the width.
 //                       The edit screen writes all three, from the mouse
+//    @size title 1.5    how large the title's words are, as so many times
+//                       their usual size (0.5 is half)
+//    @size text 0.8     the same for the body's words - on a slide with
+//                       @box lines, those of the block the line is in.
+//                       Words given a size are not made smaller to fit
+//    @color title red   the colour of the title's words: one of the names
+//                       in deck.c (DECK_NamedColorFromIdx) - white, black,
+//                       gray, red, orange, yellow, green, blue, purple,
+//                       pink - or #rrggbb, as a web page has it. In place
+//                       of the theme's
+//    @color text #ffcc00
+//                       the same for the body's words, or the block's. The
+//                       edit screen writes these four too (frame_look.c)
 //    @note Say this     a note for whoever presents, on the slide it is in: not
 //                       drawn on the slide, shown beside it on request
 //    anything else      a paragraph. Each line is its own
@@ -129,6 +142,33 @@ struct DECK_Place {
 // The smallest a placed thing can be, as a part of the page.
 #define DECK_PLACE_MIN 0.04f
 
+// How the words of a title, or of a block of the body, look where the
+// deck's text says so: from @size and @color lines. Without them, the size
+// is view.c's and the colour the theme's.
+typedef struct DECK_Look DECK_Look;
+struct DECK_Look {
+   B32     has_size;
+   F32     size; // times the usual size
+   B32     has_color;
+   Vec4F32 color;
+   // Where in the deck's text each line is (without its ending), when there
+   // is one: for the edit screen to write over.
+   Rng1U64 size_line;
+   Rng1U64 color_line;
+};
+
+// The smallest and the largest an @size line can make words.
+#define DECK_SIZE_MIN 0.25f
+#define DECK_SIZE_MAX 4.0f
+
+// A colour an @color line can ask for by name.
+typedef struct DECK_NamedColor DECK_NamedColor;
+struct DECK_NamedColor {
+   String8 name;
+   Vec4F32 color;
+};
+#define DECK_NAMED_COLOR_COUNT 10
+
 typedef enum DECK_ItemKind {
    DECK_ItemKind_Text,
    DECK_ItemKind_Bullet,
@@ -153,6 +193,10 @@ struct DECK_Box {
    DECK_Item* first_item;
    U64        item_count;
    DECK_Place place; // from its @place text line
+   DECK_Look  look;  // from its @size text and @color text lines
+   // Where in the deck's text the block begins: the start of its @box line
+   // - or, for a slide's first block, where the slide begins.
+   U64 text_pos;
 };
 
 // One of a slide's pictures.
@@ -206,6 +250,10 @@ struct DECK_Slide {
    // their own (DECK_Picture's place) and so are the body's blocks'
    // (DECK_Box's): the ones here for those are not used.
    DECK_Place places[DECK_PlaceKind_COUNT];
+
+   // From the slide's @size title and @color title lines. The body's
+   // blocks have their own (DECK_Box's look).
+   DECK_Look title_look;
 
    // The body's blocks: all of it is the first, until an @box line. A
    // block with no items is one being written. 0 of them in a folder of
@@ -263,6 +311,12 @@ internal String8 DECK_ThemeName(DECK_Theme theme);
 internal String8 DECK_LayoutName(DECK_Layout layout);
 // As written after @place.
 internal String8 DECK_PlaceName(DECK_PlaceKind kind);
+
+// The colours with names, idx under DECK_NAMED_COLOR_COUNT.
+internal DECK_NamedColor DECK_NamedColorFromIdx(U64 idx);
+// The colour an @color line's word is: a name, or #rrggbb (or #rgb). 0 if
+// it is neither.
+internal B32 DECK_ColorFromString(String8 string, Vec4F32* color_out);
 
 // Never 0. A folder that is missing, or has no images in it, gives a deck
 // with no slides.

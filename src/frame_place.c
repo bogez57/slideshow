@@ -175,61 +175,17 @@ _PLACE_IsOnVideoStrip(App_State* app_state, F32 ui, Vec2F32 pos) {
 internal void
 _PLACE_WriteLine(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 idx, DECK_Place* before, Rng2F32 rect) {
    Temp    scratch = ScratchBegin(0, 0);
-   String8 text = ED_Text(editor);
    String8 line = PushStr8F(scratch.arena, "@place %S %.3f %.3f %.3f %.3f", DECK_PlaceName(kind), rect.min.x, rect.min.y,
                             rect.max.x - rect.min.x, rect.max.y - rect.min.y);
-
-   if (before->has_line && before->line.max <= text.size) {
-      _EDIT_ReplaceKeepingCursor(editor, before->line.min, before->line.max, line);
-   } else {
-      // The line of the text the thing is on: the picture's, the title's,
-      // or the first of the block's - which, for any block but the first,
-      // is under its @box line, so the @place line goes between the two.
-      U64 on = slide->text_pos;
-      if (kind == DECK_PlaceKind_Picture && idx < slide->picture_count) {
-         on = slide->pictures[idx].range.min;
-      } else if (kind == DECK_PlaceKind_Title) {
-         on = slide->title_range.min;
-      } else if (kind == DECK_PlaceKind_Text && idx < slide->box_count && slide->boxes[idx].first_item != 0) {
-         on = slide->boxes[idx].first_item->text_range.min;
-      }
-      on = Min(on, text.size);
-      U64 line_start = on;
-      while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
-      U64 line_end = on;
-      while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
-
-      // A block's goes above its first line, where it does not come between
-      // two lines of the block - unless that line is what starts the slide:
-      // above it would be the slide before. A picture's goes under the
-      // picture's line: it is for the picture last written above it. The
-      // title's goes under the title's, which is what starts the slide.
-      if (kind == DECK_PlaceKind_Text && line_start > slide->text_pos) {
-         _EDIT_ReplaceKeepingCursor(editor, line_start, line_start, PushStr8F(scratch.arena, "%S\n", line));
-      } else {
-         _EDIT_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
-      }
-   }
-
+   _EDIT_PutLineFor(editor, slide, kind, idx, before->has_line, before->line, line);
    ScratchEnd(scratch);
 }
 
 // Takes an @place line out of the text, with its line ending.
 internal void
 _PLACE_RemoveLine(ED_Editor* editor, DECK_Place* place) {
-   String8 text = ED_Text(editor);
-   if (place->has_line && place->line.max <= text.size) {
-      U64 start = place->line.min;
-      U64 end = place->line.max;
-      // All of the line: what is in front of the @ too.
-      while (start > 0 && text.str[start - 1] != '\n') start -= 1;
-      while (end < text.size && text.str[end] != '\n') end += 1;
-      if (end < text.size) {
-         end += 1;
-      } else if (start > 0) {
-         start -= 1;
-      }
-      _EDIT_ReplaceKeepingCursor(editor, start, end, Str8Lit(""));
+   if (place->has_line) {
+      _EDIT_TakeOutLine(editor, place->line);
    }
 }
 

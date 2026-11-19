@@ -61,6 +61,9 @@
 //    add a slide      click the + at the end of the row of small slides
 //    move a slide     Alt+Left earlier, Alt+Right later
 //    bold, code       Ctrl+B and Ctrl+E: ** or ` around what is selected
+//    size, colour     Ctrl+] and Ctrl+[ make the words the cursor is in
+//                     larger and smaller, and the Format panel's @size and
+//                     @color lines have the rest to click (frame_look.c)
 //    open             Ctrl+O: the open screen (frame_open.c). Or drop a folder
 //                     or a text deck on the window
 //
@@ -85,6 +88,8 @@ enum {
    _EDIT_FormatAction_Theme,    // gives the deck the next theme
    _EDIT_FormatAction_Layout,   // gives the slide the next layout
    _EDIT_FormatAction_Wrap,     // puts insert before and after the selection (ED_WrapSelection)
+   _EDIT_FormatAction_Size,     // nothing by itself: the row has smaller, larger and usual to click (frame_look.c)
+   _EDIT_FormatAction_Color,    // nothing by itself: the row has the colours to click
 };
 
 global _EDIT_FormatRow _edit_format_rows[] = {
@@ -100,7 +105,9 @@ global _EDIT_FormatRow _edit_format_rows[] = {
     {Str8LitComp("@note Say this"), Str8LitComp("a note to yourself. N shows notes while presenting"), Str8LitComp("@note Say this"), 6, 14},
     {Str8LitComp("@box"), Str8LitComp("another block of words on the slide, to drag on its own"), Str8LitComp("@box\nText"), 5, 9},
     {Str8LitComp("@video loop"), Str8LitComp("how the slide's video plays: loop, mute, manual"), Str8LitComp("@video loop"), 7, 11},
-    // What these two do is said in EDIT_Build, with what the deck and the slide have now.
+    // What these four do is said in EDIT_Build, with what the deck, the slide and the words have now.
+    {Str8LitComp("@size"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Size},
+    {Str8LitComp("@color"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Color},
     {Str8LitComp("@theme"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Theme},
     {Str8LitComp("@layout"), Str8LitComp(""), Str8LitComp(""), 0, 0, _EDIT_FormatAction_Layout},
 };
@@ -347,6 +354,70 @@ _EDIT_ReplaceKeepingCursor(ED_Editor* editor, U64 start, U64 end, String8 string
    }
    ED_ReplaceRange(editor, start, end, string);
    ED_SetCursor(editor, cursor);
+}
+
+// Writes a line that is about one piece of a slide - an @place, @size or
+// @color line, for the idx-th picture or block of the body, or the title:
+// over the one there is (old_line, with has_line), or as a new line under
+// the picture's line, under the title's, or above the block's first.
+internal void
+_EDIT_PutLineFor(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 idx, B32 has_line, Rng1U64 old_line,
+                 String8 line) {
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 text = ED_Text(editor);
+
+   if (has_line && old_line.max <= text.size) {
+      _EDIT_ReplaceKeepingCursor(editor, old_line.min, old_line.max, line);
+   } else {
+      // The line of the text the thing is on: the picture's, the title's,
+      // or the first of the block's - which, for any block but the first,
+      // is under its @box line, so the new line goes between the two.
+      U64 on = slide->text_pos;
+      if (kind == DECK_PlaceKind_Picture && idx < slide->picture_count) {
+         on = slide->pictures[idx].range.min;
+      } else if (kind == DECK_PlaceKind_Title) {
+         on = slide->title_range.min;
+      } else if (kind == DECK_PlaceKind_Text && idx < slide->box_count && slide->boxes[idx].first_item != 0) {
+         on = slide->boxes[idx].first_item->text_range.min;
+      }
+      on = Min(on, text.size);
+      U64 line_start = on;
+      while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
+      U64 line_end = on;
+      while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
+
+      // A block's goes above its first line, where it does not come between
+      // two lines of the block - unless that line is what starts the slide:
+      // above it would be the slide before. A picture's goes under the
+      // picture's line: it is for the picture last written above it. The
+      // title's goes under the title's, which is what starts the slide.
+      if (kind == DECK_PlaceKind_Text && line_start > slide->text_pos) {
+         _EDIT_ReplaceKeepingCursor(editor, line_start, line_start, PushStr8F(scratch.arena, "%S\n", line));
+      } else {
+         _EDIT_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
+      }
+   }
+
+   ScratchEnd(scratch);
+}
+
+// Takes such a line out of the text, with its line ending.
+internal void
+_EDIT_TakeOutLine(ED_Editor* editor, Rng1U64 line) {
+   String8 text = ED_Text(editor);
+   if (line.max <= text.size) {
+      U64 start = line.min;
+      U64 end = line.max;
+      // All of the line: what is in front of the @ too.
+      while (start > 0 && text.str[start - 1] != '\n') start -= 1;
+      while (end < text.size && text.str[end] != '\n') end += 1;
+      if (end < text.size) {
+         end += 1;
+      } else if (start > 0) {
+         start -= 1;
+      }
+      _EDIT_ReplaceKeepingCursor(editor, start, end, Str8Lit(""));
+   }
 }
 
 // Gives the deck the theme after the one it has: its @theme line is
@@ -728,6 +799,9 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       editor->last_input_us = NowTimeUS();
    }
 
+   // The words the cursor is in, larger and smaller (frame_look.c).
+   LOOK_Input(app_state);
+
    if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_S)) {
       if (ED_Save(editor)) {
          FR_Notice(app_state, Str8Lit("Saved"));
@@ -879,6 +953,94 @@ _EDIT_BuildBarText(F32 pad, String8 left_tag, String8 left, FNT_Tag left_font, S
    }
 }
 
+// A word to click, in a row of the Format panel: as tall as the row leaves
+// it, with a little room around it. 1 when it is clicked.
+internal B32
+_EDIT_BuildRowButton(String8 name, F32 row_h, F32 ui, B32 interactive, char* fmt, ...) {
+   Temp    scratch = ScratchBegin(0, 0);
+   va_list args;
+   va_start(args, fmt);
+   String8 key = PushStr8FV(scratch.arena, fmt, args);
+   va_end(args);
+
+   B32 result = 0;
+   F32 inset = Max((F32)(S32)(row_h * 0.14f), 1.0f);
+   UI_SetNextPrefWidth(UI_ChildrenSum(1));
+   UI_SetNextPrefHeight(UI_Px(row_h, 1));
+   UI_SetNextChildLayoutAxis(Axis2_Y);
+   UI_Box* cell = UI_BuildBoxFromStringf(0, "%S cell", key);
+   UI_Parent(cell) {
+      UI_Spacer(UI_Px(inset, 1));
+      UI_SetNextPrefWidth(UI_TextDim(14.0f * ui, 1));
+      UI_SetNextPrefHeight(UI_Px(row_h - inset * 2.0f, 1));
+      UI_SetNextTextAlignment(UI_TextAlign_Center);
+      UI_SetNextBackgroundColor(V4F32(1, 1, 1, 0.07f));
+      UI_SetNextCornerRadius00(3.0f * ui);
+      UI_SetNextCornerRadius01(3.0f * ui);
+      UI_SetNextCornerRadius10(3.0f * ui);
+      UI_SetNextCornerRadius11(3.0f * ui);
+      UI_Box* button = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_DrawText |
+                                                  (interactive ? UI_BoxFlag_Clickable : 0),
+                                              "%S%S", name, key);
+      if (interactive) {
+         UI_Signal signal = UI_SignalFromBox(button);
+         if (UI_Hovering(signal)) {
+            button->background_color = V4F32(1, 1, 1, 0.18f);
+         }
+         result = !!UI_Clicked(signal);
+      }
+   }
+   UI_Spacer(UI_Px(6.0f * ui, 1));
+
+   ScratchEnd(scratch);
+   return result;
+}
+
+// A square of a colour to click, in a row of the Format panel, with a white
+// edge when it is the colour there is now. 1 when it is clicked.
+internal B32
+_EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 row_h, F32 ui, B32 interactive, char* fmt, ...) {
+   Temp    scratch = ScratchBegin(0, 0);
+   va_list args;
+   va_start(args, fmt);
+   String8 key = PushStr8FV(scratch.arena, fmt, args);
+   va_end(args);
+
+   B32 result = 0;
+   F32 side = Max((F32)(S32)(row_h * 0.62f), 4.0f);
+   F32 inset = (F32)(S32)((row_h - side) * 0.5f);
+   UI_SetNextPrefWidth(UI_Px(side, 1));
+   UI_SetNextPrefHeight(UI_Px(row_h, 1));
+   UI_SetNextChildLayoutAxis(Axis2_Y);
+   UI_Box* cell = UI_BuildBoxFromStringf(0, "%S cell", key);
+   UI_Parent(cell) {
+      UI_Spacer(UI_Px(inset, 1));
+      UI_SetNextPrefWidth(UI_Px(side, 1));
+      UI_SetNextPrefHeight(UI_Px(side, 1));
+      UI_SetNextBackgroundColor(color);
+      UI_SetNextCornerRadius00(3.0f * ui);
+      UI_SetNextCornerRadius01(3.0f * ui);
+      UI_SetNextCornerRadius10(3.0f * ui);
+      UI_SetNextCornerRadius11(3.0f * ui);
+      UI_Box* swatch = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_DrawBorder |
+                                                  (interactive ? UI_BoxFlag_Clickable : 0),
+                                              "%S", key);
+      // An edge always, faint: white and black are near a theme's panel.
+      swatch->border_color = is_now ? V4F32(1, 1, 1, 1) : V4F32(1, 1, 1, 0.22f);
+      if (interactive) {
+         UI_Signal signal = UI_SignalFromBox(swatch);
+         if (UI_Hovering(signal)) {
+            swatch->border_color = V4F32(1, 1, 1, 0.75f);
+         }
+         result = !!UI_Clicked(signal);
+      }
+   }
+   UI_Spacer(UI_Px(6.0f * ui, 1));
+
+   ScratchEnd(scratch);
+   return result;
+}
+
 internal void
 EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
    ED_Editor*   editor = app_state->editor;
@@ -895,6 +1057,9 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
    B32 toggle_format = 0;
    S64 format_picked = -1;
    S64 picture_picked = -1;
+   B32 size_picked = 0;
+   S32 size_direction = 0; // as LOOK_StepSize's
+   S64 color_picked = -1;  // as LOOK_SetColor's named_idx
 
    UI_BoxFlags click_flags = interactive ? UI_BoxFlag_Clickable : 0;
 
@@ -1016,6 +1181,10 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
                                           ? DECK_LayoutName(deck->slides[app_state->slide_idx].layout)
                                           : DECK_LayoutName(DECK_Layout_PictureRight);
                      what = PushStr8F(app_state->frame_arena, "this slide's layout: %S. Click for the next", now);
+                  } else if (format_row->action == _EDIT_FormatAction_Size) {
+                     what = LOOK_Describe(app_state->frame_arena, app_state, 0);
+                  } else if (format_row->action == _EDIT_FormatAction_Color) {
+                     what = LOOK_Describe(app_state->frame_arena, app_state, 1);
                   }
                   UI_Box* row = UI_ListRow(row_h, 0, UI_BoxFlag_DrawBackground | click_flags, "###edit format row %lld", i);
                   UI_Parent(row) UI_PrefHeight(UI_Pct(1, 1)) {
@@ -1028,6 +1197,32 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
                      UI_SetNextPrefWidth(UI_Pct(1, 0));
                      UI_SetNextColorTag(Str8Lit("dim"));
                      UI_Label(what);
+
+                     //- bgz: the size's and the colour's rows: what there is
+                     // to click, at the row's right end. Their clicks are
+                     // taken here, before the row's own, which is under them.
+                     if (format_row->action == _EDIT_FormatAction_Size) {
+                        String8 names[] = {Str8Lit("smaller"), Str8Lit("larger"), Str8Lit("usual")};
+                        S32     directions[] = {-1, +1, 0};
+                        for (U64 k = 0; k < ArrayCount(names); k += 1) {
+                           if (_EDIT_BuildRowButton(names[k], row_h, ui, interactive, "###edit size %llu", (unsigned long long)k)) {
+                              size_picked = 1;
+                              size_direction = directions[k];
+                           }
+                        }
+                        UI_Spacer(UI_Px(pad - 6.0f * ui, 1));
+                     } else if (format_row->action == _EDIT_FormatAction_Color) {
+                        for (U64 k = 0; k < DECK_NAMED_COLOR_COUNT; k += 1) {
+                           if (_EDIT_BuildSwatch(DECK_NamedColorFromIdx(k).color, LOOK_ColorIsNow(app_state, k), row_h, ui,
+                                                 interactive, "###edit color %llu", (unsigned long long)k)) {
+                              color_picked = (S64)k;
+                           }
+                        }
+                        if (_EDIT_BuildRowButton(Str8Lit("theme's"), row_h, ui, interactive, "###edit color theme")) {
+                           color_picked = DECK_NAMED_COLOR_COUNT;
+                        }
+                        UI_Spacer(UI_Px(pad - 6.0f * ui, 1));
+                     }
                   }
                   if (interactive) {
                      UI_Signal signal = UI_SignalFromBox(row);
@@ -1089,6 +1284,8 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
             _EDIT_NextLayout(editor, app_state->deck, DECK_SlideFromTextPos(app_state->deck, editor->cursor));
          }
          editor->last_input_us = NowTimeUS();
+      } else if (row->action == _EDIT_FormatAction_Size || row->action == _EDIT_FormatAction_Color) {
+         // The row's own click does nothing: what is in it is what is clicked.
       } else if (row->action == _EDIT_FormatAction_Wrap && !_EDIT_CanWrap(app_state)) {
          // Said by the notice.
       } else if (row->action == _EDIT_FormatAction_Wrap) {
@@ -1099,6 +1296,13 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
          ED_InsertLine(editor, row->insert, row->select_start, row->select_end);
          editor->last_input_us = NowTimeUS();
       }
+   }
+   // The words the cursor is in, sized and coloured (frame_look.c).
+   if (size_picked) {
+      LOOK_StepSize(app_state, size_direction);
+   }
+   if (color_picked >= 0) {
+      LOOK_SetColor(app_state, (U64)color_picked);
    }
    if (picture_picked >= 0 || format_picked >= 0) {
       FR_SyncDeck(app_state);
