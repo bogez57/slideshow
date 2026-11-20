@@ -1394,6 +1394,16 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          VIEW_HitList hits = {0};
          CARET_BeforeDraw(app_state);
          VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], layout.page, 1.0f, &hits);
+         if (CARET_Follow(app_state, &hits)) {
+            // A block's words moved to follow the caret, or back to where
+            // they end: the slide again, over the first, as it now is - or
+            // for a frame the caret's line would be cut off, or the wheel
+            // would show room past the words.
+            Core_D_Rect(layout.page, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
+            MemoryZeroStruct(&hits);
+            CARET_BeforeDraw(app_state);
+            VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], layout.page, 1.0f, &hits);
+         }
 
          //- bgz: the slide's pieces, kept for the next frame's clicks
          if (app_state->preview_hits_arena == 0) {

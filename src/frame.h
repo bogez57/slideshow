@@ -136,11 +136,14 @@ internal B32     LOOK_SizeIsUsual(App_State* app_state);
 // delta notches down - 1 if it was over a block, whose words it has moved.
 // CARET_BeforeDraw and CARET_AfterDraw go around the preview's
 // VIEW_DrawSlide: the first puts on the slide how far down each block's
-// words it shows, the second keeps the runs, follows the caret, and draws
-// the caret and the box of the piece it is in - 1 if it drew that box.
+// words it shows, the second keeps the runs and draws the caret and the
+// box of the piece it is in - 1 if it drew that box. CARET_Follow, between
+// them, moves the words to follow the caret and keeps them to where they
+// end: 1 if it moved any, and the slide is to be drawn again.
 internal B32  CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark);
 internal B32  CARET_Wheel(App_State* app_state, Vec2F32 pos, F32 delta);
 internal void CARET_BeforeDraw(App_State* app_state);
+internal B32  CARET_Follow(App_State* app_state, VIEW_HitList* hits);
 internal B32  CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui);
 
 internal void PRES_Toggle(App_State* app_state);

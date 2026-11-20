@@ -4,9 +4,7 @@
 
 # How it works
 
-This deck is the file data\example\slides.md. Open it with:
-
-bin\slideshow.exe data\example
+This deck is data\example\slides.md: bin\slideshow.exe data\example opens it
 
 - The text is on the left, and this preview follows the cursor
 - A line starting with # and a space begins a new slide and is its title
@@ -15,7 +13,6 @@ bin\slideshow.exe data\example
   - Two more spaces in front make it an inner bullet
     - And two more, one further in
 - Anything else is a paragraph
-
 The Format panel under the text lists all of this. Click a line there to write it.
 
 # Long lines wrap
@@ -23,8 +20,7 @@ The Format panel under the text lists all of this. Click a line there to write i
 A paragraph that is too long for the page is broken at spaces into as many lines as it needs, and the lines stay inside the margins whatever size the window is, because the page is laid out again every frame.
 
 - Bullets wrap as well, and the lines after the first start under the text of the first, not under the dot
-- Click in the words in the preview and type: they wrap at the edge of their box
-- Words stay the size they are. With more than its box has room for, the box moves down them as you type
+- Click in the words in the preview and type: they wrap at the edge of their box, and stay the size they are
 
 ## A heading inside a slide
 
@@ -151,6 +147,7 @@ center puts every line in the middle of the slide
 
 # A lot on one slide
 
+@place text 0.070 0.246 0.400 0.680
 - One
 - Two
 - Three
@@ -159,6 +156,9 @@ center puts every line in the middle of the slide
 - Six
 - Seven
 - Eight
+
+@box
+@place text 0.530 0.246 0.400 0.680
 - Nine
 - Ten
 - Eleven

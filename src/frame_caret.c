@@ -86,12 +86,18 @@ _CARET_PlaceFromPos(App_State* app_state, VIEW_Run* runs, U64 run_count, U64 pos
    if (at != 0) {
       F32 x = _CARET_XInRun(text, at, pos);
       if (pos > at->text_range.max) {
-         // Past its last letter. Spaces typed at the end of a line are not
-         // drawn, and are not in any run: the caret moves on by them all the
-         // same, or it would stand still while they are typed.
+         // Past its last letter: in the spaces after it, or in the ** or `
+         // marks around bold words and code, which are not drawn. Spaces
+         // typed at the end of a line are not in any run either: the caret
+         // moves on by each space all the same, or it would stand still
+         // while they are typed - and stays put across a mark.
          U64 spaces = 0;
-         while (at->text_range.max + spaces < pos && text.str[at->text_range.max + spaces] == ' ') spaces += 1;
-         if (at->text_range.max + spaces == pos) {
+         B32 is_gap = 1;
+         for (U64 i = at->text_range.max; i < pos && is_gap; i += 1) {
+            spaces += (text.str[i] == ' ');
+            is_gap = (text.str[i] == ' ' || text.str[i] == '*' || text.str[i] == '`');
+         }
+         if (is_gap) {
             x += TXT_Width(at->font, at->px, Str8Lit(" ")) * (F32)spaces;
          }
       }
@@ -121,7 +127,10 @@ _CARET_PlaceFromPos(App_State* app_state, VIEW_Run* runs, U64 run_count, U64 pos
          for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
             VIEW_Box* box = &app_state->preview_boxes[i];
             if (box->kind == DECK_PlaceKind_Text && box->idx == idx) {
-               left = box->room.min.x;
+               // Where its first letter will be: in the middle, when the
+               // slide puts every line there.
+               B32 centered = (app_state->deck->slides[app_state->slide_idx].layout == DECK_Layout_Center);
+               left = centered ? (box->room.min.x + box->room.max.x) * 0.5f : box->room.min.x;
             }
          }
          F32 line_h = above->rect.max.y - above->rect.min.y;
@@ -243,7 +252,7 @@ CARET_Wheel(App_State* app_state, Vec2F32 pos, F32 delta) {
       if (box != 0 && box->kind == DECK_PlaceKind_Text) {
          // Some three lines of the body a notch (delta is in notches, down
          // the words when over 0). Kept to the words there are when the
-         // slide is next drawn (CARET_AfterDraw).
+         // slide is next drawn (CARET_Follow).
          DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
          F32*        scroll = _CARET_ScrollOf(app_state, slide, box->idx);
          *scroll = Max(*scroll + delta * 96.0f, 0.0f);
@@ -268,52 +277,63 @@ CARET_BeforeDraw(App_State* app_state) {
    }
 }
 
-internal B32
-CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
-   DECK_Deck*  deck = app_state->deck;
-   DECK_Slide* slide = &deck->slides[app_state->slide_idx];
-   ED_Editor*  editor = app_state->editor;
-
-   //- bgz: the scroll is the preview's, not the deck's
-   slide->body_scroll = 0;
-   for (U64 i = 0; i < slide->box_count; i += 1) {
-      slide->boxes[i].scroll = 0;
-   }
-
-   //- bgz: the runs, kept for the next frame's clicks
-   // On the arena the hits are on, which EDIT_Draw has just cleared.
-   app_state->preview_runs = PushArray(app_state->preview_hits_arena, VIEW_Run, Max(hits->run_count, 1));
-   app_state->preview_run_count = 0;
+// The runs of a hit list, as an array on arena.
+internal VIEW_Run*
+_CARET_RunsFromHits(Arena* arena, VIEW_HitList* hits, U64* count_out) {
+   VIEW_Run* result = PushArray(arena, VIEW_Run, Max(hits->run_count, 1));
+   U64       count = 0;
    for (VIEW_Run* run = hits->first_run; run != 0; run = run->next) {
-      app_state->preview_runs[app_state->preview_run_count] = *run;
-      app_state->preview_runs[app_state->preview_run_count].next = 0;
-      app_state->preview_run_count += 1;
+      result[count] = *run;
+      result[count].next = 0;
+      count += 1;
    }
+   *count_out = count;
+   return result;
+}
 
-   // The rest is of the cursor, which is in the text as it is: nothing if
-   // the slide drawn is of the text as it was.
-   if (editor->edit_count != app_state->parsed_edit_count) {
-      return 0;
-   }
-
-   F32          scale = VIEW_ScaleFromDim(Dim2F32(hits->page));
-   _CARET_Place caret = _CARET_PlaceFromPos(app_state, app_state->preview_runs, app_state->preview_run_count, editor->cursor);
-
-   // The box of the piece the cursor is in: the caret's, or with no caret
-   // - the cursor on an @ line - the piece that line is about.
-   DECK_PlaceKind kind = caret.kind;
-   U64            idx = caret.idx;
-   B32            has_piece = caret.is_found;
+// The caret among runs, and the box of the piece the cursor is in: the
+// caret's, or with no caret - the cursor on an @ line - the piece that line
+// is about. 0 for none.
+internal VIEW_Box*
+_CARET_BoxOfCursor(App_State* app_state, VIEW_HitList* hits, VIEW_Run* runs, U64 run_count, _CARET_Place* caret_out) {
+   *caret_out = _CARET_PlaceFromPos(app_state, runs, run_count, app_state->editor->cursor);
+   DECK_PlaceKind kind = caret_out->kind;
+   U64            idx = caret_out->idx;
+   B32            has_piece = caret_out->is_found;
    if (!has_piece) {
       U64 slide_idx = 0;
       has_piece = (_LOOK_Target(app_state, &slide_idx, &kind, &idx) && slide_idx == app_state->slide_idx);
    }
-   VIEW_Box* box = 0;
+   VIEW_Box* result = 0;
    for (U64 i = 0; i < hits->box_count && has_piece; i += 1) {
       if (hits->boxes[i].kind == kind && hits->boxes[i].idx == idx) {
-         box = &hits->boxes[i];
+         result = &hits->boxes[i];
       }
    }
+   return result;
+}
+
+internal B32
+CARET_Follow(App_State* app_state, VIEW_HitList* hits) {
+   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   ED_Editor*  editor = app_state->editor;
+   // Of the cursor, which is in the text as it is: nothing if the slide
+   // drawn is of the text as it was.
+   if (editor->edit_count != app_state->parsed_edit_count) {
+      return 0;
+   }
+
+   Temp         scratch = ScratchBegin(0, 0);
+   U64          run_count = 0;
+   VIEW_Run*    runs = _CARET_RunsFromHits(scratch.arena, hits, &run_count);
+   _CARET_Place caret = {0};
+   VIEW_Box*    box = _CARET_BoxOfCursor(app_state, hits, runs, run_count, &caret);
+   DECK_PlaceKind kind = caret.kind;
+   U64            idx = caret.idx;
+   F32            scale = VIEW_ScaleFromDim(Dim2F32(hits->page));
+   F32            body_scroll_was = app_state->caret_body_scroll;
+   F32            scroll_was[DECK_MAX_BOXES];
+   MemoryCopyArray(scroll_was, app_state->caret_scroll);
 
    //- bgz: the room follows the caret, when the cursor has gone somewhere
    // or the text has changed - not all the time: the wheel moves it too
@@ -371,6 +391,39 @@ CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
          }
       }
    }
+   ScratchEnd(scratch);
+
+   B32 result = (app_state->caret_body_scroll != body_scroll_was || !MemoryMatchArray(app_state->caret_scroll, scroll_was));
+   return result;
+}
+
+internal B32
+CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
+   DECK_Deck*  deck = app_state->deck;
+   DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+   ED_Editor*  editor = app_state->editor;
+
+   //- bgz: the scroll is the preview's, not the deck's
+   slide->body_scroll = 0;
+   for (U64 i = 0; i < slide->box_count; i += 1) {
+      slide->boxes[i].scroll = 0;
+   }
+
+   //- bgz: the runs, kept for the next frame's clicks
+   // On the arena the hits are on, which EDIT_Draw has just cleared.
+   app_state->preview_runs = _CARET_RunsFromHits(app_state->preview_hits_arena, hits, &app_state->preview_run_count);
+
+   if (editor->edit_count != app_state->parsed_edit_count) {
+      return 0;
+   }
+   _CARET_Place   caret = {0};
+   VIEW_Box*      box = _CARET_BoxOfCursor(app_state, hits, app_state->preview_runs, app_state->preview_run_count, &caret);
+   DECK_PlaceKind kind = caret.kind;
+   U64            idx = caret.idx;
+   if (box != 0) {
+      kind = box->kind;
+      idx = box->idx;
+   }
 
    //- bgz: the box and the caret. Not after Esc, until the cursor goes
    // somewhere or a piece is clicked.
@@ -381,10 +434,12 @@ CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
    if (box != 0 && kind != DECK_PlaceKind_Picture && !app_state->preview_focus_hidden) {
       // A thin box around the room its words have, in a blue that is the
       // same on every theme: it is the editor's mark, not part of the slide.
+      // Just outside the room, where the words wrap - and so beside, not a
+      // little way off, the outline the mouse's box has (PLACE_Draw), which
+      // is just inside it: one line, not two side by side.
       F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
-      F32     grow = 4.0f * ui;
       Vec4F32 blue = V4F32(0.26f, 0.60f, 1.0f, 1.0f);
-      Rng2F32 rect = Intersect2F32(Pad2F32(box->room, grow), hits->page);
+      Rng2F32 rect = Intersect2F32(Pad2F32(box->room, thick), hits->page);
       if (rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
          Core_D_Rect(R2F32P(rect.min.x, rect.min.y, rect.max.x, rect.min.y + thick), R2F32P(0, 0, 1, 1), blue);
          Core_D_Rect(R2F32P(rect.min.x, rect.max.y - thick, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
@@ -404,6 +459,13 @@ CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
          U64       to = Min(run->text_range.max, select_max);
          if (from < to) {
             Rng2F32 washed = R2F32P(_CARET_XInRun(text, run, from), run->rect.min.y, _CARET_XInRun(text, run, to), run->rect.max.y);
+            // On to the next word of the line, if that is selected too: the
+            // space between them, so the wash is not in pieces.
+            VIEW_Run* next = (i + 1 < app_state->preview_run_count) ? &app_state->preview_runs[i + 1] : 0;
+            if (next != 0 && to == run->text_range.max && select_max > next->text_range.min && next->rect.min.y == run->rect.min.y &&
+                next->kind == run->kind && next->idx == run->idx && next->rect.min.x > washed.max.x) {
+               washed.max.x = next->rect.min.x;
+            }
             for (U64 k = 0; k < hits->box_count; k += 1) {
                if (hits->boxes[k].kind == run->kind && hits->boxes[k].idx == run->idx) {
                   washed = Intersect2F32(washed, hits->boxes[k].room);
