@@ -759,6 +759,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
 
    //- bgz: the picture or the body under the mouse's hand (frame_place.c):
    // before the keys - Esc gives up a drag - and before the clicks below
+   CARET_BarInput(app_state); // a block's scroll bar first: it is beside the block, over whatever is there
    PLACE_Input(app_state, layout.ui);
 
    //- bgz: the screen's own keys, taken before the editor sees them
@@ -931,6 +932,9 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    if (present_pressed) {
       if (app_state->deck->slide_count != 0) {
          app_state->is_editing = 0;
+         // Presenting shows every block from its top (frame_caret.c).
+         MemoryZeroArray(app_state->caret_scroll);
+         app_state->caret_body_scroll = 0;
          app_state->preview_hit_count = 0; // not drawn while presenting, and the window can change
          app_state->preview_box_count = 0;
          app_state->place_drag.state = EDIT_PlaceDragState_None;

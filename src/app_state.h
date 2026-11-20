@@ -226,6 +226,19 @@ struct App_State {
    U64 caret_seen_cursor;
    U64 caret_seen_edit_count;
 
+   // A scroll bar of the preview's slide with the mouse's button down on
+   // it (frame_caret.c): the block whose it is, and how far under the top
+   // of the bar's thumb the mouse took hold.
+   B32 caret_bar_drag;
+   U64 caret_bar_block;
+   F32 caret_bar_grab;
+
+   // Presenting: the boxes of the slide showing, as last drawn, for the
+   // wheel over a block with more words than room (CARET_PresentWheel).
+   VIEW_Box present_boxes[VIEW_MAX_BOXES];
+   U64      present_box_count;
+   Rng2F32  present_page;
+
    // Edit screen: where the preview's slide had its pictures, its title and
    // its body last frame (VIEW_HitList's boxes), and its page: what the mouse moves
    // and resizes. Good for the same text as preview_hits.

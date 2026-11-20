@@ -262,6 +262,106 @@ CARET_Wheel(App_State* app_state, Vec2F32 pos, F32 delta) {
    return result;
 }
 
+// The most a box's block can be moved down its words, in page units: none
+// when they fit. scale is pixels to a page unit.
+internal F32
+_CARET_MaxScroll(VIEW_Box* box, F32 scale) {
+   F32 track_h = box->bar_track.max.y - box->bar_track.min.y;
+   return (scale > 0 && box->words_height > track_h) ? (box->words_height - track_h) / scale : 0.0f;
+}
+
+internal void
+CARET_BarInput(App_State* app_state) {
+   if (!_CARET_RunsAreGood(app_state)) {
+      app_state->caret_bar_drag = 0;
+      return;
+   }
+   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   Vec2F32     mouse = Core_WM_MouseFromWindow(app_state->window);
+   F32         scale = VIEW_ScaleFromDim(Dim2F32(app_state->preview_page));
+
+   //- bgz: a press on a bar takes hold of it: of its thumb where the mouse
+   // is, or, on the track beside the thumb, of the thumb's middle - which
+   // then comes to the mouse
+   for (WM_Event* event = app_state->events.first; event != 0 && !app_state->caret_bar_drag; event = event->next) {
+      if (event->kind != WM_EventKind_Press || event->key != WM_Key_LeftMouseButton) {
+         continue;
+      }
+      for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+         VIEW_Box* box = &app_state->preview_boxes[i];
+         // A little wider than it is drawn: it is thin.
+         Rng2F32 reach = box->bar_track;
+         reach.min.x -= 5.0f * scale;
+         reach.max.x += 5.0f * scale;
+         if (box->kind == DECK_PlaceKind_Text && box->words_height > 0 && Contains2F32(reach, event->pos)) {
+            app_state->caret_bar_drag = 1;
+            app_state->caret_bar_block = box->idx;
+            app_state->caret_bar_grab = (event->pos.y >= box->bar_thumb.min.y && event->pos.y <= box->bar_thumb.max.y)
+                                            ? event->pos.y - box->bar_thumb.min.y
+                                            : (box->bar_thumb.max.y - box->bar_thumb.min.y) * 0.5f;
+            Core_WM_EatEvent(&app_state->events, event);
+            break;
+         }
+      }
+   }
+
+   //- bgz: one held: the thumb's top goes with the mouse
+   if (app_state->caret_bar_drag) {
+      VIEW_Box* box = 0;
+      for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+         if (app_state->preview_boxes[i].kind == DECK_PlaceKind_Text && app_state->preview_boxes[i].idx == app_state->caret_bar_block &&
+             app_state->preview_boxes[i].words_height > 0) {
+            box = &app_state->preview_boxes[i];
+         }
+      }
+      if (box == 0 || !Core_WM_KeyIsDown(WM_Key_LeftMouseButton)) {
+         app_state->caret_bar_drag = 0;
+      } else {
+         F32 track_h = box->bar_track.max.y - box->bar_track.min.y;
+         F32 thumb_h = box->bar_thumb.max.y - box->bar_thumb.min.y;
+         F32 part = (track_h > thumb_h) ? (mouse.y - app_state->caret_bar_grab - box->bar_track.min.y) / (track_h - thumb_h) : 0.0f;
+         *_CARET_ScrollOf(app_state, slide, box->idx) = Clamp(0.0f, part, 1.0f) * _CARET_MaxScroll(box, scale);
+      }
+   }
+}
+
+internal void
+CARET_PresentAfterDraw(App_State* app_state, VIEW_HitList* hits) {
+   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   slide->body_scroll = 0;
+   for (U64 i = 0; i < slide->box_count; i += 1) {
+      slide->boxes[i].scroll = 0;
+   }
+   MemoryCopyArray(app_state->present_boxes, hits->boxes);
+   app_state->present_box_count = hits->box_count;
+   app_state->present_page = hits->page;
+}
+
+internal B32
+CARET_PresentWheel(App_State* app_state, Vec2F32 pos, F32 delta) {
+   B32 result = 0;
+   if (app_state->slide_idx >= app_state->deck->slide_count || app_state->caret_scroll_slide != app_state->slide_idx) {
+      return 0;
+   }
+   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   F32         scale = VIEW_ScaleFromDim(Dim2F32(app_state->present_page));
+   for (U64 i = 0; i < app_state->present_box_count && !result; i += 1) {
+      VIEW_Box* box = &app_state->present_boxes[i];
+      if (box->kind != DECK_PlaceKind_Text || box->idx >= slide->box_count || box->words_height <= 0) {
+         continue;
+      }
+      // Over the room the bar is of, or the bar: the track is as tall as
+      // that room, which for blocks that share one is the body's.
+      Rng2F32 over = R2F32P(box->room.min.x, box->bar_track.min.y, box->bar_track.max.x, box->bar_track.max.y);
+      if (Contains2F32(over, pos)) {
+         F32* scroll = _CARET_ScrollOf(app_state, slide, box->idx);
+         *scroll = Clamp(0.0f, *scroll + delta * 96.0f, _CARET_MaxScroll(box, scale));
+         result = 1;
+      }
+   }
+   return result;
+}
+
 internal void
 CARET_BeforeDraw(App_State* app_state) {
    DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];

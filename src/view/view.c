@@ -576,6 +576,46 @@ _VIEW_BlockGap(TXT_Fonts* fonts, F32 unit) {
    return TXT_LineHeight(fonts->regular, _VIEW_BODY_PX * unit);
 }
 
+// The scroll bar of a room with more words than fit it: beside its right
+// edge, outside it - the words wrap at the room's width, and a bar inside
+// would be over their ends. words_height is how tall all the words are and
+// scroll how far down them the room's top is, both in pixels. Drawn, and
+// put on the box hits has last been given, if there are more words than
+// room; nothing if they fit.
+internal void
+_VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 page, F32 words_height, F32 scroll, F32 scale,
+                F32 alpha) {
+   F32 room_h = room.max.y - room.min.y;
+   if (room_h > 0 && words_height > room_h + 0.5f) {
+      F32     width = Max(5.0f * scale, 2.0f);
+      F32     gap = 5.0f * scale;
+      Rng2F32 track = R2F32P(room.max.x + gap, room.min.y, room.max.x + gap + width, room.max.y);
+      // On the page: a room at the page's right edge has it inside.
+      if (track.max.x > page.max.x) {
+         track.min.x -= track.max.x - page.max.x;
+         track.max.x = page.max.x;
+      }
+      F32 thumb_h = Clamp(Min(24.0f * scale, room_h), room_h * room_h / words_height, room_h);
+      F32 part = Clamp(0.0f, scroll / (words_height - room_h), 1.0f);
+      F32 thumb_y = track.min.y + part * (room_h - thumb_h);
+      Rng2F32 thumb = R2F32P(track.min.x, thumb_y, track.max.x, thumb_y + thumb_h);
+
+      R_Rect2DInst* track_inst = Core_D_Rect(track, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.14f * alpha));
+      R_Rect2DInst* thumb_inst = Core_D_Rect(thumb, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.55f * alpha));
+      for (U64 i = 0; i < ArrayCount(thumb_inst->corner_radii); i += 1) {
+         track_inst->corner_radii[i] = width * 0.5f;
+         thumb_inst->corner_radii[i] = width * 0.5f;
+      }
+
+      if (hits != 0 && hits->box_count != 0) {
+         VIEW_Box* box = &hits->boxes[hits->box_count - 1];
+         box->bar_track = track;
+         box->bar_thumb = thumb;
+         box->words_height = words_height;
+      }
+   }
+}
+
 internal void
 _VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F32 text_size, Rng2F32 room, F32 words_max_y) {
    if (hits != 0 && hits->box_count < ArrayCount(hits->boxes) && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
@@ -952,6 +992,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
             F32 end_y = _VIEW_Body(arena, fonts, &colors, slide, block, i, block_rect, shown, scale, alpha, hits);
             Core_D_PopClip();
             _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, room, text_size, room, end_y);
+            _VIEW_ScrollBar(hits, &colors, room, page, end_y - block_rect.min.y, block->scroll * scale, scale, alpha);
          } else {
             Rng2F32 shown = Intersect2F32(body_rect, rect);
             Rng2F32 block_rect = R2F32P(body_rect.min.x, y_at, body_rect.max.x, body_rect.max.y);
@@ -974,6 +1015,11 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
                room.max.y = Max(body_rect.max.y, box.max.y);
             }
             _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, box, text_size, room, end_y);
+            if (i == last_shared) {
+               // The one bar of the blocks that share the body's room.
+               F32 scroll = slide->body_scroll * scale;
+               _VIEW_ScrollBar(hits, &colors, body_rect, page, end_y - (body_rect.min.y - scroll), scroll, scale, alpha);
+            }
          }
       }
    }

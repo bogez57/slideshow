@@ -21,7 +21,8 @@
 // title or a block of the body where it says instead. The body's blocks
 // (@box) that are not placed are one under another, where the body is.
 // Words are never made smaller to fit: a block's that do not fit its room
-// are not shown, and DECK_Box's scroll says how far down them it shows.
+// are not shown, DECK_Box's scroll says how far down them it shows, and a
+// scroll bar beside the room says there are more.
 // @size and @color lines (DECK_Look) give the title's words, or a block's,
 // a size and a colour of their own.
 
@@ -84,6 +85,15 @@ struct VIEW_Box {
    // The y under its last word, as drawn: under room's bottom when there
    // are more words than room. 0 for a picture.
    F32 words_max_y;
+   // A block with more words than its room has a scroll bar beside the
+   // room: where it runs (bar_track), the part of it that stands for what
+   // the room shows (bar_thumb), and how tall all the words are, in pixels
+   // (words_height) - more than the track. All zero when the words fit. Of
+   // the blocks that share the body's room, the last has the one bar there
+   // is for them all.
+   Rng2F32 bar_track;
+   Rng2F32 bar_thumb;
+   F32     words_height;
 };
 
 // A run of letters as drawn: one line of a wrapped title or heading, or

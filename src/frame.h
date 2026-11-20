@@ -145,6 +145,17 @@ internal B32  CARET_Wheel(App_State* app_state, Vec2F32 pos, F32 delta);
 internal void CARET_BeforeDraw(App_State* app_state);
 internal B32  CARET_Follow(App_State* app_state, VIEW_HitList* hits);
 internal B32  CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui);
+// A block's scroll bar, in the preview, taken hold of and dragged by the
+// mouse: before the edit screen's other clicks.
+internal void CARET_BarInput(App_State* app_state);
+// Presenting: a block with more words than room is moved through by the
+// wheel over it, as far as it was in the edit screen when the slide came
+// up. CARET_PresentAfterDraw, after CARET_BeforeDraw and the slide's
+// VIEW_DrawSlide, takes the scroll off the slide and keeps its boxes;
+// CARET_PresentWheel is the wheel at pos, delta notches down - 1 if it was
+// over such a block.
+internal void CARET_PresentAfterDraw(App_State* app_state, VIEW_HitList* hits);
+internal B32  CARET_PresentWheel(App_State* app_state, Vec2F32 pos, F32 delta);
 
 internal void PRES_Toggle(App_State* app_state);
 

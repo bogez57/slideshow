@@ -404,7 +404,11 @@ _FR_PresentInput(App_State* app_state) {
          FR_RequestQuit(app_state);
       }
       if (event->kind == WM_EventKind_Scroll) {
-         scroll += event->delta.y;
+         // Over a block with more words than room, the wheel moves through
+         // its words (frame_caret.c). Anywhere else, through the slides.
+         if (!CARET_PresentWheel(app_state, Core_WM_MouseFromWindow(window), event->delta.y / 120.0f)) {
+            scroll += event->delta.y;
+         }
       }
       // Of several things dropped at once, the first is opened.
       if (event->kind == WM_EventKind_FileDrop && event->strings.first != 0) {
@@ -613,8 +617,14 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
                      window_rect, 1.0f - fade_t, 0);
    }
    if (app_state->slide_idx < deck->slide_count) {
+      // With its blocks as far down their words as the wheel has them
+      // (frame_caret.c): a block with more words than room has a scroll
+      // bar, and the wheel over it moves it.
+      VIEW_HitList hits = {0};
+      CARET_BeforeDraw(app_state);
       VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx],
-                     window_rect, fade_t, 0);
+                     window_rect, fade_t, &hits);
+      CARET_PresentAfterDraw(app_state, &hits);
    }
    // The slide's video has its strip of controls along the bottom of the
    // slide for a moment after one of its keys, and while it is paused -
