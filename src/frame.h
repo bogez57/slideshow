@@ -80,11 +80,10 @@ internal UI_Box* FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt,
 
 //- bgz: the edit screen (frame_edit.c)
 //
-// Input for the keys and the hand-drawn parts: the text, the small slides.
-// EDIT_Build builds the UI parts - the Format panel, the list of pictures,
-// the status line, and the preview's slide laid out with what is over it -
-// in FrameWork's UI build. Not interactive: drawn, but taking no clicks or
-// wheel, as when the open screen is over it. EDIT_Draw draws the rest.
+// Input for the keys and the text. EDIT_Build builds the UI parts - the
+// Format panel, the list of pictures, the status line, and the whole preview
+// - in FrameWork's UI build. Not interactive: drawn, but taking no clicks or
+// wheel, as when the open screen is over it. EDIT_Draw draws the text.
 internal void EDIT_Input(App_State* app_state, Vec2F32 window_dim);
 internal void EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive);
 internal void EDIT_Draw(App_State* app_state, Vec2F32 window_dim);

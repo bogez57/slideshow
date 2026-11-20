@@ -837,10 +837,11 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
 // _FR_BeginUIBuild, _FR_DrawUITree).
 //
 // Built with it: the open screen (OPEN_Build, frame_open.c) and the edit
-// screen's Format panel, list of pictures, status line, and what is over
-// its slide - the caret, the boxes of its pieces and their corners, scroll
-// bars, videos' controls, the caption (EDIT_Build, frame_edit.c). The text
-// editor, the slides themselves and the small slides are drawn by hand.
+// screen's Format panel, list of pictures, status line, and its preview -
+// the slide (drawn by its box, with the view), what is over it (the caret,
+// the boxes of its pieces and their corners, scroll bars, videos' controls),
+// the caption, the small slides and the + (EDIT_Build, frame_edit.c). The
+// text editor, and the presentation, are drawn by hand.
 //
 // The UI's events are what the screens' own input (EDIT_Input, OPEN_Input)
 // left: a click that took is eaten there. The hand-drawn parts that take
@@ -1029,6 +1030,14 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
        {"strip muted", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.50f}}},
        {"strip track", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.25f}}},
        {"strip played", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.95f}}},
+       {"preview", UI_ColorSlot_Background, {{0.125f, 0.13f, 0.15f, 1.00f}}}, // around the slide
+       {"divider", UI_ColorSlot_Background, {{0.00f, 0.00f, 0.00f, 0.50f}}},  // where the text ends and the preview begins
+       {"thumb", UI_ColorSlot_Border, {{1.00f, 0.80f, 0.40f, 1.00f}}},        // the frame of the small slide showing
+       {"thumb hot", UI_ColorSlot_Border, {{1.00f, 1.00f, 1.00f, 0.35f}}},    // and of one under the mouse
+       {"add", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.07f}}},      // the + that adds a slide
+       {"add", UI_ColorSlot_Text, {{0.84f, 0.86f, 0.90f, 0.55f}}},
+       {"add hot", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.16f}}},
+       {"add hot", UI_ColorSlot_Text, {{0.84f, 0.86f, 0.90f, 1.00f}}},
    };
    static UI_Theme theme = {theme_patterns, ArrayCount(theme_patterns)};
 

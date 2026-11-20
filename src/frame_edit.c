@@ -29,12 +29,13 @@
 // the slide. Dropping an image file on the window does the same, copying the
 // file into the deck's folder first if it is not there.
 //
-// The Format panel, the list of pictures, the status line and everything
-// over the preview's slide are built with the UI layer (EDIT_Build, called
-// from FrameWork's UI build), and take their own clicks and wheel there: see
-// "the preview, in the UI layer" below. The text, the slide itself, the
-// small slides and the + are drawn by hand (EDIT_Draw), under the UI's
-// boxes, and the small slides' and the +'s clicks are EDIT_Input's.
+// The Format panel, the list of pictures, the status line and the whole
+// preview - the slide, everything over it, the caption, the small slides and
+// the + - are built with the UI layer (EDIT_Build, called from FrameWork's UI
+// build), and take their own clicks and wheel there: see "the preview, in
+// the UI layer" below. The slides are drawn by the boxes they are in (the
+// view, as a box's custom draw). The text is drawn by hand (EDIT_Draw), and
+// its keys and mouse are EDIT_Input's, through the editor (editor.h).
 //
 // The slide in the preview is typed into: a click on its title or on a
 // block of its words puts the cursor at the letter clicked, with a caret
@@ -633,21 +634,6 @@ _EDIT_DropPicture(App_State* app_state, String8 path) {
 ////////////////////////////////
 //~ bgz: input
 
-// A left press inside rect, eaten. 0 if there was none.
-internal B32
-_EDIT_ClickIn(App_State* app_state, Rng2F32 rect) {
-   B32 result = 0;
-   for (WM_Event* event = app_state->events.first; event != 0; event = event->next) {
-      if (event->kind == WM_EventKind_Press && event->key == WM_Key_LeftMouseButton &&
-          Contains2F32(rect, event->pos)) {
-         Core_WM_EatEvent(&app_state->events, event);
-         result = 1;
-         break;
-      }
-   }
-   return result;
-}
-
 // Which of the preview's pieces (app_state->preview_hits) a point is on, or -1.
 // Asked by a click, which is already known to be on the slide's boxes: of
 // several hits there, the one it goes to.
@@ -731,6 +717,24 @@ _EDIT_PreviewVideo(App_State* app_state, Rng2F32 page, U64 picture_idx, Rng2F32*
    }
 
    return result;
+}
+
+// A slide added after the one the cursor is on (add), or that one moved a
+// place later or earlier, and the deck made again from the text.
+internal void
+_EDIT_ChangeSlides(App_State* app_state, B32 add, B32 to_later) {
+   ED_Editor* editor = app_state->editor;
+   // The deck as the text is now: something this frame may have changed it.
+   FR_SyncDeck(app_state);
+   U64 slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
+   if (add) {
+      _EDIT_AddSlideAfter(editor, app_state->deck, slide_idx);
+   } else if (!_EDIT_MoveSlide(editor, app_state->deck, slide_idx, to_later)) {
+      FR_Notice(app_state, to_later ? Str8Lit("This is the last slide already") : Str8Lit("This is the first slide already"));
+   }
+   editor->last_input_us = NowTimeUS();
+   FR_SyncDeck(app_state);
+   app_state->slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
 }
 
 internal void
@@ -859,37 +863,12 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       }
    }
 
-   //- bgz: slides added and moved
+   //- bgz: slides moved (the + that adds one is a UI box: EDIT_Build)
    {
       B32 move_earlier = Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Left);
       B32 move_later = Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Right);
-      B32 add = _EDIT_ClickIn(app_state, layout.add_slide);
-      if (move_earlier || move_later || add) {
-         // The deck as the text is now: something above may have changed it.
-         FR_SyncDeck(app_state);
-         U64 slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
-         if (add) {
-            _EDIT_AddSlideAfter(editor, app_state->deck, slide_idx);
-         } else if (!_EDIT_MoveSlide(editor, app_state->deck, slide_idx, move_later)) {
-            FR_Notice(app_state, move_later ? Str8Lit("This is the last slide already")
-                                            : Str8Lit("This is the first slide already"));
-         }
-         editor->last_input_us = NowTimeUS();
-         FR_SyncDeck(app_state);
-         app_state->slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
-      }
-   }
-
-   //- bgz: the row of small slides: a click goes to the slide
-   {
-      DECK_Deck* deck = app_state->deck;
-      for (U64 i = 0; i < deck->slide_count; i += 1) {
-         Rng2F32 rect = _EDIT_ThumbRect(&layout, deck->slide_count, app_state->slide_idx, i);
-         if (rect.max.x > rect.min.x && _EDIT_ClickIn(app_state, rect)) {
-            ED_SetCursor(editor, Min(deck->slides[i].text_pos, editor->size));
-            editor->last_input_us = NowTimeUS();
-            break;
-         }
+      if (move_earlier || move_later) {
+         _EDIT_ChangeSlides(app_state, 0, move_later);
       }
    }
 
@@ -1058,17 +1037,96 @@ _EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 side, F32 gap, F32 row_h, F32 u
 //    3. the boxes that are clicked, which are not drawn - first built, first
 //       asked: the blocks' scroll bars, the corners' handles, the videos'
 //       strips, the words and pictures, the pieces' boxes, the rooms of the
-//       words
+//       words, the small slides and the +
 //    4. the slide laid out again, if a click changed the text, the cursor or
 //       a block's scroll
 //    5. the boxes that are drawn - first built, drawn on top: the outline
 //       of what the mouse is over, the videos' strips, the wash under the
 //       mouse, the box of the piece the cursor is in, the selection, the
-//       caret, and the caption under the slide
+//       caret, the caption under the slide, the small slides and the +,
+//       the slide itself, and the preview's background
 //
 // So nothing over the slide is a frame behind it: not the caret after
 // typing at the bottom of a full block, not the outline of a box dragged,
 // not a scroll bar dragged.
+
+//- bgz: what the boxes draw that the UI cannot: slides
+
+typedef struct _EDIT_Slide _EDIT_Slide;
+struct _EDIT_Slide {
+   App_State* app_state;
+   Rng2F32    page;
+};
+
+// The preview's slide, as it was laid out in the build: the same scroll,
+// and its scroll bars are the UI's (frame_caret.c).
+internal void
+_EDIT_DrawSlide(UI_Box* box, void* user_data) {
+   UnusedVariable(box);
+   _EDIT_Slide* slide = (_EDIT_Slide*)user_data;
+   App_State*   app_state = slide->app_state;
+   DECK_Deck*   deck = app_state->deck;
+   Core_D_Rect(slide->page, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
+   if (app_state->slide_idx < deck->slide_count) {
+      VIEW_HitList hits = {0};
+      hits.bars_by_caller = 1;
+      CARET_BeforeDraw(app_state);
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], slide->page, 1.0f, &hits);
+      CARET_AfterDrawOf(app_state, app_state->slide_idx);
+   }
+}
+
+typedef struct _EDIT_Thumb _EDIT_Thumb;
+struct _EDIT_Thumb {
+   App_State* app_state;
+   U64        slide_idx;
+   Rng2F32    rect;      // exactly: the box's is on whole pixels, and the row is not
+   B32        has_frame; // in the box's border colour, frame pixels wide
+   F32        frame;
+};
+
+// A small slide. Only a picture that is loaded already is drawn: the slide
+// showing and the ones next to it. Loading every picture of a long deck for
+// its small slides would take the memory DECK_LoadSlide saves.
+internal void
+_EDIT_DrawThumb(UI_Box* box, void* user_data) {
+   _EDIT_Thumb* thumb = (_EDIT_Thumb*)user_data;
+   App_State*   app_state = thumb->app_state;
+   DECK_Deck*   deck = app_state->deck;
+   Rng2F32      rect = thumb->rect;
+   if (thumb->slide_idx >= deck->slide_count) {
+      return;
+   }
+   if (thumb->has_frame) {
+      Core_D_Rect(Pad2F32(rect, thumb->frame), R2F32P(0, 0, 1, 1), box->border_color);
+   }
+   Core_D_Rect(rect, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
+   B32 is_showing = (thumb->slide_idx == app_state->slide_idx);
+   VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[thumb->slide_idx], rect, is_showing ? 1.0f : 0.8f, 0);
+}
+
+typedef struct _EDIT_Plus _EDIT_Plus;
+struct _EDIT_Plus {
+   Rng2F32 rect; // exactly, as the small slides'
+   F32     half; // how thick a bar is, either side of its middle
+};
+
+// The + that adds a slide: its background, and a + of two bars in the
+// middle, in the box's text colour - drawn, not written, to be in the
+// middle whatever the font.
+internal void
+_EDIT_DrawPlus(UI_Box* box, void* user_data) {
+   _EDIT_Plus* plus = (_EDIT_Plus*)user_data;
+   F32         half = plus->half;
+   Rng2F32     rect = plus->rect;
+   Vec2F32     dim = Dim2F32(rect);
+   Core_D_Rect(rect, R2F32P(0, 0, 1, 1), box->background_color);
+   F32     middle_x = (F32)(S32)(rect.min.x + dim.x * 0.5f);
+   F32     middle_y = (F32)(S32)(rect.min.y + dim.y * 0.5f);
+   F32     arm = (F32)(S32)(Min(dim.x, dim.y) * 0.22f);
+   Core_D_Rect(R2F32P(middle_x - arm, middle_y - half, middle_x + arm, middle_y + half), R2F32P(0, 0, 1, 1), box->text_color);
+   Core_D_Rect(R2F32P(middle_x - half, middle_y - arm, middle_x + half, middle_y + arm), R2F32P(0, 0, 1, 1), box->text_color);
+}
 
 // The preview's slide laid out at page, and its pieces kept. The caret's
 // scroll follows the caret (CARET_Follow), and the slide is laid out again
@@ -1173,6 +1231,33 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
    changed |= PLACE_BuildHits(app_state, ui, interactive, &hover);
    changed |= CARET_BuildRooms(app_state, interactive);
 
+   //- bgz: the row of small slides - a press goes to the slide - and the +
+   // that adds one after the slide showing
+   S64 thumb_hot = -1;
+   B32 add_hot = 0;
+   if (interactive) {
+      for (U64 i = 0; i < deck->slide_count; i += 1) {
+         Rng2F32 rect = _EDIT_ThumbRect(layout, deck->slide_count, app_state->slide_idx, i);
+         if (rect.max.x > rect.min.x) {
+            UI_Signal signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, rect, "###edit thumb %llu", (unsigned long long)i));
+            if (UI_Hovering(signal)) {
+               thumb_hot = (S64)i;
+            }
+            if (signal.f & UI_SignalFlag_LeftPressed) {
+               ED_SetCursor(editor, Min(deck->slides[i].text_pos, editor->size));
+               editor->last_input_us = NowTimeUS();
+            }
+         }
+      }
+      if (layout->add_slide.max.x > layout->add_slide.min.x) {
+         UI_Signal signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, layout->add_slide, "###edit add slide"));
+         add_hot = UI_Hovering(signal);
+         if (signal.f & UI_SignalFlag_LeftPressed) {
+            _EDIT_ChangeSlides(app_state, 1, 0);
+         }
+      }
+   }
+
    //- bgz: 4: laid out again, for what they did
    changed |= (editor->cursor != cursor_was || editor->mark != mark_was || editor->edit_count != edit_count_was);
    if (changed) {
@@ -1246,6 +1331,75 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
       UI_Box* box = FR_BuildRectBox(UI_BoxFlag_DrawText, layout->caption, "###edit caption");
       UI_BoxEquipDisplayString(box, caption);
    }
+
+   //- bgz: the row of small slides, the one showing with a frame around it,
+   // and one under the mouse with a fainter one
+   UI_ColorTag(Str8Lit("thumb")) for (U64 i = 0; i < deck->slide_count; i += 1) {
+      Rng2F32 rect = _EDIT_ThumbRect(layout, deck->slide_count, app_state->slide_idx, i);
+      if (rect.max.x > rect.min.x) {
+         _EDIT_Thumb* thumb = PushArray(UI_BuildArena(), _EDIT_Thumb, 1);
+         thumb->app_state = app_state;
+         thumb->slide_idx = i;
+         thumb->rect = rect;
+         thumb->frame = (F32)(S32)(2.0f * ui);
+         thumb->has_frame = (i == app_state->slide_idx || (S64)i == thumb_hot);
+         UI_Box* box = FR_BuildRectBox(0, rect, "###edit thumb look %llu", (unsigned long long)i);
+         box->border_color = (i == app_state->slide_idx) ? UI_ColorFromSlot(UI_ColorSlot_Border) : UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Border);
+         UI_BoxEquipCustomDraw(box, _EDIT_DrawThumb, thumb);
+      }
+   }
+
+   //- bgz: the + that adds a slide
+   if (layout->add_slide.max.x > layout->add_slide.min.x) {
+      _EDIT_Plus* plus = PushArray(UI_BuildArena(), _EDIT_Plus, 1);
+      plus->rect = layout->add_slide;
+      plus->half = Max(1.0f, (F32)(S32)(1.5f * ui));
+      UI_Box* box = FR_BuildRectBox(0, layout->add_slide, "###edit add slide look");
+      box->background_color = UI_ThemeColor(add_hot ? Str8Lit("add hot") : Str8Lit("add"), UI_ColorSlot_Background);
+      box->text_color = UI_ThemeColor(add_hot ? Str8Lit("add hot") : Str8Lit("add"), UI_ColorSlot_Text);
+      UI_BoxEquipCustomDraw(box, _EDIT_DrawPlus, plus);
+   }
+
+   //- bgz: the slide, under all that is over it
+   if (Dim2F32(layout->page).x > 0) {
+      if (deck->slide_count == 0) {
+         // No slides yet: how to make the first.
+         String8 lines[] = {
+             Str8Lit("No slides yet"),
+             Str8Lit("Type  # Title  to start one, or click a line under Format"),
+         };
+         F32     scale = VIEW_ScaleFromDim(Dim2F32(layout->page));
+         F32     sizes[] = {44.0f * scale, 24.0f * scale};
+         Vec2F32 page_dim = Dim2F32(layout->page);
+         F32     y = layout->page.min.y + page_dim.y * 0.5f - TXT_LineHeight(app_state->fonts.bold, sizes[0]);
+         for (U64 i = 0; i < ArrayCount(lines); i += 1) {
+            FNT_Tag font = (i == 0) ? app_state->fonts.bold : app_state->fonts.regular;
+            F32     line_h = TXT_LineHeight(font, sizes[i]);
+            UI_SetNextFont(font);
+            UI_SetNextFontSize(FR_UIFontSize(sizes[i]));
+            UI_SetNextTextAlignment(UI_TextAlign_Center);
+            UI_SetNextColorTag((i == 0) ? Str8Lit("") : Str8Lit("dim"));
+            UI_Box* box = FR_BuildRectBox(UI_BoxFlag_DrawText, R2F32P(layout->page.min.x, y, layout->page.max.x, y + line_h),
+                                          "###edit no slides %llu", (unsigned long long)i);
+            UI_BoxEquipDisplayString(box, lines[i]);
+            y += line_h * 1.3f;
+         }
+      }
+
+      _EDIT_Slide* slide = PushArray(UI_BuildArena(), _EDIT_Slide, 1);
+      slide->app_state = app_state;
+      slide->page = layout->page;
+      UI_Box* box = FR_BuildRectBox(0, layout->page, "###edit slide");
+      UI_BoxEquipCustomDraw(box, _EDIT_DrawSlide, slide);
+   }
+
+   //- bgz: the preview's background, with a line where the text ends and
+   // the preview begins
+   UI_SetNextColorTag(Str8Lit("divider"));
+   FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(layout->preview.min.x, 0, layout->preview.min.x + 1.0f, layout->preview.max.y),
+                   "###edit preview divider");
+   UI_SetNextColorTag(Str8Lit("preview"));
+   FR_BuildRectBox(UI_BoxFlag_DrawBackground, layout->preview, "###edit preview");
 }
 
 internal void
@@ -1539,97 +1693,10 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
 ////////////////////////////////
 //~ bgz: drawing
 
+// The text. Everything else of the edit screen is the UI's (EDIT_Build),
+// drawn after this.
 internal void
 EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
-   ED_Editor*   editor = app_state->editor;
-   DECK_Deck*   deck = app_state->deck;
-   TXT_Fonts*   fonts = &app_state->fonts;
    _EDIT_Layout layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
-   F32          ui = layout.ui;
-   Vec2F32      mouse = Core_WM_MouseFromWindow(app_state->window);
-   Temp         scratch = ScratchBegin(0, 0);
-
-   Vec4F32 color_text = V4F32(0.84f, 0.86f, 0.90f, 1.0f);
-   Vec4F32 color_dim = V4F32(0.84f, 0.86f, 0.90f, 0.55f);
-   Vec4F32 color_syntax = V4F32(1.00f, 0.80f, 0.40f, 1.0f);
-
-   //- bgz: the text. The Format panel and the status line under it are the
-   // UI's (EDIT_Build), drawn after this.
-   ED_Draw(editor, app_state->frame_arena, layout.editor_box);
-
-   //- bgz: the preview. Its slide is laid out, and what is over it built,
-   // in the UI build (_EDIT_BuildPreview): this draws the slide, under that.
-   Core_D_Rect(layout.preview, R2F32P(0, 0, 1, 1), V4F32(0.125f, 0.13f, 0.15f, 1.0f));
-   // A line where the text ends and the preview begins.
-   Core_D_Rect(R2F32P(layout.preview.min.x, 0, layout.preview.min.x + 1.0f, window_dim.y), R2F32P(0, 0, 1, 1),
-               V4F32(0, 0, 0, 0.5f));
-
-   if (Dim2F32(layout.page).x > 0) {
-      Core_D_Rect(layout.page, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
-
-      if (app_state->slide_idx < deck->slide_count) {
-         // As it was laid out: the same scroll, and its bars are the UI's.
-         VIEW_HitList hits = {0};
-         hits.bars_by_caller = 1;
-         CARET_BeforeDraw(app_state);
-         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], layout.page, 1.0f, &hits);
-         CARET_AfterDrawOf(app_state, app_state->slide_idx);
-      } else {
-         // No slides yet: how to make the first.
-         String8 lines[] = {
-             Str8Lit("No slides yet"),
-             Str8Lit("Type  # Title  to start one, or click a line under Format"),
-         };
-         F32     scale = VIEW_ScaleFromDim(Dim2F32(layout.page));
-         F32     sizes[] = {44.0f * scale, 24.0f * scale};
-         Vec2F32 page_dim = Dim2F32(layout.page);
-         F32     y = layout.page.min.y + page_dim.y * 0.5f - TXT_LineHeight(fonts->bold, sizes[0]);
-         for (U64 i = 0; i < ArrayCount(lines); i += 1) {
-            FNT_Tag font = (i == 0) ? fonts->bold : fonts->regular;
-            F32     w = TXT_Width(font, sizes[i], lines[i]);
-            TXT_Draw(font, sizes[i], V2F32(layout.page.min.x + (page_dim.x - w) * 0.5f, y),
-                     (i == 0) ? color_text : color_dim, lines[i]);
-            y += TXT_LineHeight(font, sizes[i]) * 1.3f;
-         }
-      }
-   }
-
-   //- bgz: the row of small slides, the one showing with a frame around it
-   for (U64 i = 0; i < deck->slide_count; i += 1) {
-      Rng2F32 rect = _EDIT_ThumbRect(&layout, deck->slide_count, app_state->slide_idx, i);
-      if (rect.max.x > rect.min.x) {
-         B32 is_showing = (i == app_state->slide_idx);
-         if (is_showing || Contains2F32(rect, mouse)) {
-            F32 frame = (F32)(S32)(2.0f * ui);
-            Core_D_Rect(R2F32P(rect.min.x - frame, rect.min.y - frame, rect.max.x + frame, rect.max.y + frame),
-                        R2F32P(0, 0, 1, 1), is_showing ? color_syntax : V4F32(1, 1, 1, 0.35f));
-         }
-         Core_D_Rect(rect, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
-
-         // Only a picture that is loaded already is drawn: the slide showing
-         // and the ones next to it. Loading every picture of a long deck for
-         // its small slides would take the memory DECK_LoadSlide saves.
-         VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[i], rect,
-                        is_showing ? 1.0f : 0.8f, 0);
-      }
-   }
-
-   //- bgz: the + that adds a slide
-   if (layout.add_slide.max.x > layout.add_slide.min.x) {
-      B32 is_hot = Contains2F32(layout.add_slide, mouse);
-      Core_D_Rect(layout.add_slide, R2F32P(0, 0, 1, 1), is_hot ? V4F32(1, 1, 1, 0.16f) : V4F32(1, 1, 1, 0.07f));
-
-      // Drawn, not written: a + of two bars, in the middle.
-      Vec2F32 dim = Dim2F32(layout.add_slide);
-      F32     middle_x = (F32)(S32)(layout.add_slide.min.x + dim.x * 0.5f);
-      F32     middle_y = (F32)(S32)(layout.add_slide.min.y + dim.y * 0.5f);
-      F32     arm = (F32)(S32)(Min(dim.x, dim.y) * 0.22f);
-      F32     half = Max(1.0f, (F32)(S32)(1.5f * ui));
-      Core_D_Rect(R2F32P(middle_x - arm, middle_y - half, middle_x + arm, middle_y + half), R2F32P(0, 0, 1, 1),
-                  is_hot ? color_text : color_dim);
-      Core_D_Rect(R2F32P(middle_x - half, middle_y - arm, middle_x + half, middle_y + arm), R2F32P(0, 0, 1, 1),
-                  is_hot ? color_text : color_dim);
-   }
-
-   ScratchEnd(scratch);
+   ED_Draw(app_state->editor, app_state->frame_arena, layout.editor_box);
 }
