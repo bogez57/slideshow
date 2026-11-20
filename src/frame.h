@@ -157,6 +157,15 @@ internal void EDIT_PreviewClick(App_State* app_state, Vec2F32 pos, B32 keeps_mar
 // and the rest after the strip - 1 if what they did changed the text, the
 // cursor or a scroll; and PLACE_BuildLook last, for what is drawn: 1 if the
 // mouse is on something that can be moved.
+//
+// Selecting the words on the slide by the mouse, for any box a press at them
+// can be on - a line of words, a piece's box, the room beside the words
+// (CARET_BuildRooms) - with its signal. PLACE_IsAtWords: whether pos is
+// right at the words of kind and idx, where the mouse is the bar text is
+// typed at. PLACE_PressWords: a press on such a box, 1 if it was there - the
+// cursor has gone to the letter, or a double or triple click has selected
+// the word or the line. PLACE_SelectHeld: the button held since, which
+// selects to the mouse - 1 if that changed the cursor or a scroll.
 typedef struct PLACE_Hover PLACE_Hover;
 struct PLACE_Hover {
    B32            is_over;   // over one of the slide's boxes
@@ -172,6 +181,9 @@ internal void PLACE_BeforeLayout(App_State* app_state, F32 ui);
 internal B32  PLACE_BuildCorners(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hover);
 internal B32  PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hover);
 internal B32  PLACE_BuildLook(App_State* app_state, F32 ui, PLACE_Hover* hover);
+internal B32  PLACE_IsAtWords(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos);
+internal B32  PLACE_PressWords(App_State* app_state, UI_Signal signal, DECK_PlaceKind kind, U64 idx, F32 ui);
+internal B32  PLACE_SelectHeld(App_State* app_state, UI_Signal signal);
 
 // The edit screen's words, given a size and a colour: frame_look.c. All of
 // them are about the piece the cursor is in - the title, or a block of the
@@ -220,7 +232,7 @@ internal B32  CARET_Follow(App_State* app_state, VIEW_HitList* hits);
 internal void CARET_KeepRuns(App_State* app_state, VIEW_HitList* hits);
 internal void CARET_BeforeLayout(App_State* app_state);
 internal B32  CARET_BuildBars(App_State* app_state, F32 ui, B32 interactive);
-internal B32  CARET_BuildRooms(App_State* app_state, B32 interactive);
+internal B32  CARET_BuildRooms(App_State* app_state, F32 ui, B32 interactive);
 internal B32  CARET_BuildLook(App_State* app_state, F32 ui);
 // Presenting: a block with more words than room is moved through by the
 // wheel over it, as far as it was in the edit screen when the slide came

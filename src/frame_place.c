@@ -810,13 +810,66 @@ _PLACE_HoverCursor(App_State* app_state, B32 has_piece, DECK_PlaceKind kind, U64
    return result;
 }
 
+internal B32
+PLACE_PressWords(App_State* app_state, UI_Signal signal, DECK_PlaceKind kind, U64 idx, F32 ui) {
+   Vec2F32 pos = UI_DragStartMouse();
+   if (!(signal.f & UI_SignalFlag_LeftPressed) || _PLACE_BoxOf(app_state, kind, idx) == 0 || !PLACE_IsAtWords(app_state, kind, idx, pos)) {
+      return 0;
+   }
+   // Which press of a double or a triple click this is. The UI says when a
+   // press follows the last on the same box in a moment - but a box here is
+   // a whole line of words, or the room beside them, and a drag that ends
+   // with a quick click further along the line was taken for a double
+   // click: the word there selected, not the cursor put down. A press counts
+   // as the next only near the last one, as Windows has it.
+   F32 reach = _PLACE_DRAG_START * ui;
+   F32 gone_x = pos.x - app_state->place_click_mouse.x;
+   F32 gone_y = pos.y - app_state->place_click_mouse.y;
+   B32 is_next = ((signal.f & UI_SignalFlag_LeftDoubleClicked) && app_state->place_click_count != 0 && gone_x <= reach &&
+                  gone_x >= -reach && gone_y <= reach && gone_y >= -reach);
+   app_state->place_click_count = is_next ? Min(app_state->place_click_count + 1, 3) : 1;
+   app_state->place_click_mouse = pos;
+
+   // The cursor to the letter, then: a second press selects the word, a
+   // third the line, and the first is held to select by dragging - as in
+   // any editor. Nothing is moved.
+   EDIT_PreviewClick(app_state, pos, !!(signal.event_flags & WM_Modifier_Shift));
+   if (app_state->place_click_count == 3) {
+      CARET_SelectLine(app_state, kind, idx);
+   } else if (app_state->place_click_count == 2) {
+      CARET_SelectWord(app_state);
+   } else {
+      _PLACE_Begin(app_state, _PLACE_BoxOf(app_state, kind, idx), 0, pos, EDIT_PlaceDragState_Selecting);
+      app_state->place_drag.select_hit = -1;
+   }
+   return 1;
+}
+
+internal B32
+PLACE_SelectHeld(App_State* app_state, UI_Signal signal) {
+   // Asked of every box the press can have been on. The box pressed is the
+   // UI's active one until the button comes up, wherever the mouse goes, and
+   // signals a drag every frame - also when the mouse is still, which past
+   // the end of a block keeps its words moving.
+   B32             result = 0;
+   EDIT_PlaceDrag* drag = &app_state->place_drag;
+   if (drag->state == EDIT_PlaceDragState_Selecting && !(signal.f & UI_SignalFlag_LeftPressed)) {
+      if (signal.f & UI_SignalFlag_LeftReleased) {
+         drag->state = EDIT_PlaceDragState_None;
+      } else if (signal.f & UI_SignalFlag_LeftDragging) {
+         result = CARET_DragTo(app_state, drag->kind, drag->idx, UI_Mouse());
+      }
+   }
+   return result;
+}
+
 // One of the boxes of a piece of the slide - kind and idx, has_piece 0 for
 // one that is of none - asked for its signal. corner: of a handle, else 0.
 // hit_idx: of a hit of the preview, else -1. 1 if what was done to it changed
 // the text, the cursor or a block's scroll.
 internal B32
 _PLACE_Signal(App_State* app_state, UI_Box* box, B32 has_piece, DECK_PlaceKind kind, U64 idx, U32 corner, S64 hit_idx,
-              PLACE_Hover* hover) {
+              PLACE_Hover* hover, F32 ui) {
    B32       result = 0;
    UI_Signal signal = UI_SignalFromBox(box);
    VIEW_Box* piece = has_piece ? _PLACE_BoxOf(app_state, kind, idx) : 0;
@@ -836,38 +889,21 @@ _PLACE_Signal(App_State* app_state, UI_Box* box, B32 has_piece, DECK_PlaceKind k
          _PLACE_Begin(app_state, piece, corner, pos, EDIT_PlaceDragState_Dragging);
       } else {
          // A press is a click until the mouse goes somewhere: to the words,
-         // or the picture (frame_edit.c) - and watched, for a drag.
-         //
-         // Right at the words (PLACE_IsAtWords, where the mouse is the bar
-         // that text is typed at) the drag selects them and moves nothing,
-         // as in any editor. A second press there in a moment selects the
-         // word, a third the line. Anywhere else in the box the drag moves
-         // the box.
-         B32 at_words = (piece != 0 && PLACE_IsAtWords(app_state, kind, idx, pos));
-         EDIT_PreviewClick(app_state, pos, !!(signal.event_flags & WM_Modifier_Shift));
-         if (at_words && (signal.f & UI_SignalFlag_LeftTripleClicked)) {
-            CARET_SelectLine(app_state, kind, idx);
-         } else if (at_words && (signal.f & UI_SignalFlag_LeftDoubleClicked)) {
-            CARET_SelectWord(app_state);
-         } else if (piece != 0) {
-            _PLACE_Begin(app_state, piece, 0, pos, at_words ? EDIT_PlaceDragState_Selecting : EDIT_PlaceDragState_Pressed);
+         // or the picture (frame_edit.c) - and watched, for a drag. Right at
+         // the words the drag selects them instead (PLACE_PressWords).
+         if (piece == 0 || !PLACE_PressWords(app_state, signal, kind, idx, ui)) {
+            app_state->place_click_count = 0;
+            EDIT_PreviewClick(app_state, pos, !!(signal.event_flags & WM_Modifier_Shift));
+            if (piece != 0) {
+               _PLACE_Begin(app_state, piece, 0, pos, EDIT_PlaceDragState_Pressed);
+            }
+         } else if (app_state->place_drag.state == EDIT_PlaceDragState_Selecting) {
+            app_state->place_drag.select_hit = hit_idx;
          }
       }
       result = 1;
    }
-
-   // Held since a press at the words: the box pressed is asked, and it is
-   // the same one for as long as the text is, which a selection leaves be.
-   {
-      EDIT_PlaceDrag* drag = &app_state->place_drag;
-      if (drag->state == EDIT_PlaceDragState_Selecting && !(signal.f & UI_SignalFlag_LeftPressed)) {
-         if (signal.f & UI_SignalFlag_LeftReleased) {
-            drag->state = EDIT_PlaceDragState_None;
-         } else if (signal.f & UI_SignalFlag_LeftDragging) {
-            result |= CARET_DragTo(app_state, drag->kind, drag->idx, UI_Mouse());
-         }
-      }
-   }
+   result |= PLACE_SelectHeld(app_state, signal);
 
    if ((signal.f & UI_SignalFlag_RightPressed) && piece != 0) {
       DECK_Place* place = _PLACE_PlaceOf(&app_state->deck->slides[app_state->slide_idx], kind, idx);
@@ -909,7 +945,7 @@ PLACE_BuildCorners(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* h
          UI_Box* handle = FR_BuildRectBox(flags, _PLACE_HandleRect(box->rect, corner, ui), "###place corner %d %llu %u",
                                           (int)box->kind, (unsigned long long)box->idx, corner);
          handle->hover_cursor = _PLACE_HoverCursor(app_state, 1, box->kind, box->idx, corner);
-         result |= _PLACE_Signal(app_state, handle, 1, box->kind, box->idx, corner, -1, hover);
+         result |= _PLACE_Signal(app_state, handle, 1, box->kind, box->idx, corner, -1, hover, ui);
       }
    }
    return result;
@@ -924,7 +960,6 @@ PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hove
    }
    DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
    UI_BoxFlags flags = UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll;
-   UnusedVariable(ui);
 
    //- bgz: the words and the pictures, as drawn: the last drawn first, which
    // is the one on top. A block's words are over a picture under them
@@ -935,7 +970,20 @@ PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hove
       B32            has_piece = _PLACE_PieceOfHit(slide, hit, &kind, &idx);
       UI_Box*        box = FR_BuildRectBox(flags, hit->rect, "###place hit %llu", (unsigned long long)(i - 1));
       box->hover_cursor = _PLACE_HoverCursor(app_state, has_piece, kind, idx, 0);
-      result |= _PLACE_Signal(app_state, box, has_piece, kind, idx, 0, (S64)(i - 1), hover);
+      result |= _PLACE_Signal(app_state, box, has_piece, kind, idx, 0, (S64)(i - 1), hover, ui);
+   }
+
+   //- bgz: the line words are being selected from, when the drag has moved
+   // it out of its block's room: it has no hit now, and its box would be
+   // gone - and the UI lets go of a box that is not built, which left the
+   // selection stuck where it was, with the button still down. Built
+   // anyway, the same box by the same key, with no room to be pressed in:
+   // only held, until the button comes up.
+   EDIT_PlaceDrag* drag = &app_state->place_drag;
+   if (drag->state == EDIT_PlaceDragState_Selecting && drag->select_hit >= (S64)app_state->preview_hit_count) {
+      UI_Box* held = FR_BuildRectBox(flags, R2F32P(0, 0, 0, 0), "###place hit %llu", (unsigned long long)drag->select_hit);
+      held->hover_cursor = WM_Cursor_IBar;
+      result |= PLACE_SelectHeld(app_state, UI_SignalFromBox(held));
    }
 
    //- bgz: the pieces' own boxes, where no words are: a picture over the
@@ -949,7 +997,7 @@ PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hove
          }
          UI_Box* ui_box = FR_BuildRectBox(flags, box->rect, "###place box %d %llu", (int)box->kind, (unsigned long long)box->idx);
          ui_box->hover_cursor = _PLACE_HoverCursor(app_state, 1, box->kind, box->idx, 0);
-         result |= _PLACE_Signal(app_state, ui_box, 1, box->kind, box->idx, 0, -1, hover);
+         result |= _PLACE_Signal(app_state, ui_box, 1, box->kind, box->idx, 0, -1, hover, ui);
       }
    }
 

@@ -65,6 +65,11 @@ struct EDIT_PlaceDrag {
    Rng2F32             guide_box_x;
    Rng2F32             guide_box_y;
    DECK_Place          before;     // the slide's place of that kind as the text has it, to go back to
+   // Selecting: the hit of the preview pressed (a line of words), whose box
+   // is the UI's active one, or -1 for a piece's box or the room beside the
+   // words. A line moved out of its block's room by the drag has no hit,
+   // and its box is built without one (PLACE_BuildHits).
+   S64                 select_hit;
 };
 
 typedef struct App_State App_State;
@@ -245,6 +250,11 @@ struct App_State {
    // mouse makes without its being in the text: the @place line is written
    // when the button comes up.
    EDIT_PlaceDrag place_drag;
+   // The last press at the words on the slide, and which of a double or a
+   // triple click it was - 1, 2 or 3; 0 after a press anywhere else there
+   // (PLACE_PressWords).
+   Vec2F32 place_click_mouse;
+   U32     place_click_count;
 
    // The open screen (frame_open.c): over whichever screen is up, the decks
    // opened lately and what is in a folder, to pick a deck from.

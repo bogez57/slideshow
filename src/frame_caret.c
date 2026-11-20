@@ -11,7 +11,11 @@
 //    put the caret    click in the words, or in the room under them: it
 //                     goes to the nearest letter. Shift+click selects from
 //                     where it was
-//    see the box      the block the caret is in has a thin blue box around
+//    select           drag across the words (frame_place.c). A double
+//                     click takes a word, a triple click its line. Past
+//                     the top or bottom of a block with more words than
+//                     room, its words move on under the mouse
+//    see the box     the block the caret is in has a thin blue box around
 //                     the room its words have. They wrap at its width
 //    more words       than the room is tall: they stay the size they are,
 //                     and the room shows the part of them the caret is in,
@@ -192,19 +196,26 @@ _CARET_WordsBoxAt(App_State* app_state, Vec2F32 pos) {
 
 // The cursor to the letter of box's words nearest to pos, which need not be
 // in the box. keeps_mark: the mark stays where it is, so what is between it
-// and the cursor is selected.
+// and the cursor is selected. whole_lines: only of the lines that show whole,
+// if any do.
 internal B32
-_CARET_ClickIn(App_State* app_state, VIEW_Box* box, Vec2F32 pos, B32 keeps_mark) {
+_CARET_ClickIn(App_State* app_state, VIEW_Box* box, Vec2F32 pos, B32 keeps_mark, B32 whole_lines) {
    B32 result = 0;
    if (box != 0) {
       // The nearest of its runs that show: first by how far up or down the
       // point is from the run's line, then by how far across.
       VIEW_Run* nearest = 0;
       F32       nearest_far = 0;
-      for (U64 i = 0; i < app_state->preview_run_count; i += 1) {
-         VIEW_Run* run = &app_state->preview_runs[i];
+      // Twice through, the first time without the lines cut by the room's
+      // edge, when whole_lines asks for that and some are whole.
+      for (U64 k = 0; k < app_state->preview_run_count * 2; k += 1) {
+         if (k == app_state->preview_run_count && nearest != 0) {
+            break;
+         }
+         VIEW_Run* run = &app_state->preview_runs[k % app_state->preview_run_count];
+         B32       is_whole = (run->rect.min.y >= box->room.min.y - 1.0f && run->rect.max.y <= box->room.max.y + 1.0f);
          if (run->kind != box->kind || run->idx != box->idx || run->rect.max.y <= box->room.min.y ||
-             run->rect.min.y >= box->room.max.y) {
+             run->rect.min.y >= box->room.max.y || (k < app_state->preview_run_count && whole_lines && !is_whole)) {
             continue;
          }
          F32 down = (pos.y < run->rect.min.y) ? run->rect.min.y - pos.y : (pos.y >= run->rect.max.y) ? pos.y - run->rect.max.y : 0;
@@ -237,7 +248,7 @@ CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
    if (!_CARET_RunsAreGood(app_state) || !Contains2F32(app_state->preview_page, pos)) {
       return 0;
    }
-   return _CARET_ClickIn(app_state, _CARET_WordsBoxAt(app_state, pos), pos, keeps_mark);
+   return _CARET_ClickIn(app_state, _CARET_WordsBoxAt(app_state, pos), pos, keeps_mark, 0);
 }
 
 // The mouse held down from a press at the words of the title or of a block
@@ -247,6 +258,13 @@ CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
 // a line is the line's end, off the box is the nearest of its lines. Past
 // the top or bottom of a block with more words than room, the words move
 // under the mouse, faster the further it is.
+//
+// How fast is by the time since the last frame, not a step each frame: at
+// a step a frame it went with the screen's refresh, and a twentieth of a
+// notch a frame at the edge was some sixteen lines a second at 60 - a block
+// of fifteen lines went past in under a second, too fast to stop on a line.
+// Now at the edge three of its lines a second, and ten more for each line
+// height further out, as far as forty.
 internal B32
 CARET_DragTo(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos) {
    B32 result = 0;
@@ -258,18 +276,35 @@ CARET_DragTo(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos) {
          }
       }
       if (box != 0) {
-         if (kind == DECK_PlaceKind_Text) {
+         F32 scale = VIEW_ScaleFromDim(Dim2F32(app_state->preview_page));
+         B32 is_past = 0;
+         if (kind == DECK_PlaceKind_Text && scale > 0) {
             F32 past = (pos.y < box->room.min.y) ? pos.y - box->room.min.y : (pos.y > box->room.max.y) ? pos.y - box->room.max.y : 0;
-            if (past != 0) {
-               // A twentieth of a notch a frame at the edge, up to a third.
-               F32 step = Clamp(-0.33f, past * 0.01f, 0.33f);
-               step += (past < 0) ? -0.05f : 0.05f;
-               CARET_ScrollBlock(app_state, idx, step);
+            is_past = (past != 0);
+            if (is_past) {
+               // Its lines' height: the first run of its words.
+               F32 line_h = 0;
+               for (U64 i = 0; i < app_state->preview_run_count && line_h <= 0; i += 1) {
+                  VIEW_Run* run = &app_state->preview_runs[i];
+                  if (run->kind == kind && run->idx == idx) {
+                     line_h = run->rect.max.y - run->rect.min.y;
+                  }
+               }
+               line_h = (line_h > 0) ? line_h : 30.0f * scale;
+               F32 lines_per_s = Min(3.0f + 10.0f * AbsF32(past) / line_h, 40.0f);
+               F32 pixels = lines_per_s * line_h * UI_Dt();
+               // In notches of the wheel, which CARET_ScrollBlock moves 96
+               // page units each.
+               CARET_ScrollBlock(app_state, idx, ((past < 0) ? -pixels : pixels) / scale / 96.0f);
                result = 1;
             }
          }
+         // Past the room, to the line at its edge that shows whole. To one
+         // cut by the edge, the room moved on to show the caret's line
+         // (CARET_Follow), and the cursor went to the next cut one: the
+         // words ran on a line every few frames, whatever the speed above.
          U64 cursor = app_state->editor->cursor;
-         _CARET_ClickIn(app_state, box, pos, 1);
+         _CARET_ClickIn(app_state, box, pos, 1, is_past);
          result |= (cursor != app_state->editor->cursor);
       }
    }
@@ -461,7 +496,7 @@ CARET_BuildBars(App_State* app_state, F32 ui, B32 interactive) {
 }
 
 internal B32
-CARET_BuildRooms(App_State* app_state, B32 interactive) {
+CARET_BuildRooms(App_State* app_state, F32 ui, B32 interactive) {
    B32 result = 0;
    if (!interactive || !_CARET_RunsAreGood(app_state)) {
       return 0;
@@ -476,13 +511,22 @@ CARET_BuildRooms(App_State* app_state, B32 interactive) {
       UI_Box*   room = FR_BuildRectBox(UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll, Intersect2F32(box->room, app_state->preview_page),
                                        "###caret room %d %llu", (int)box->kind, (unsigned long long)box->idx);
       // A click here goes to the nearest letter, but the mouse is the bar
-      // that text is typed at only right at the words (frame_place.c).
-      room->hover_cursor = PLACE_IsAtWords(app_state, box->kind, box->idx, Core_WM_MouseFromWindow(app_state->window)) ? WM_Cursor_IBar : WM_Cursor_Pointer;
+      // that text is typed at only right at the words (frame_place.c) - and
+      // while words are selected by a drag from there, wherever it goes.
+      B32 is_selecting = (app_state->place_drag.state == EDIT_PlaceDragState_Selecting);
+      room->hover_cursor = (is_selecting || PLACE_IsAtWords(app_state, box->kind, box->idx, Core_WM_MouseFromWindow(app_state->window)))
+                               ? WM_Cursor_IBar
+                               : WM_Cursor_Pointer;
       UI_Signal signal = UI_SignalFromBox(room);
-      if (signal.f & UI_SignalFlag_LeftPressed) {
+      // The room reaches past the words' own boxes: beside the title's
+      // words, and a little to the left of a block's first letters. A press
+      // there that is still at the words selects, as one on them does.
+      if ((signal.f & UI_SignalFlag_LeftPressed) && !PLACE_PressWords(app_state, signal, box->kind, box->idx, ui)) {
+         app_state->place_click_count = 0;
          CARET_Click(app_state, UI_DragStartMouse(), !!(signal.event_flags & WM_Modifier_Shift));
-         result = 1;
       }
+      result |= !!(signal.f & UI_SignalFlag_LeftPressed);
+      result |= PLACE_SelectHeld(app_state, signal);
       if (signal.scroll.y != 0 && box->kind == DECK_PlaceKind_Text) {
          CARET_ScrollBlock(app_state, box->idx, (F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH);
          result = 1;

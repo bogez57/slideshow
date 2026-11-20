@@ -1230,7 +1230,7 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
       }
    }
    changed |= PLACE_BuildHits(app_state, ui, interactive, &hover);
-   changed |= CARET_BuildRooms(app_state, interactive);
+   changed |= CARET_BuildRooms(app_state, ui, interactive);
 
    //- bgz: the row of small slides - a press goes to the slide - and the +
    // that adds one after the slide showing
@@ -1311,7 +1311,14 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
          }
       }
 
-      if (can_move) {
+      // Right at the words a drag selects them (frame_place.c): said there,
+      // and while it does, instead of how the box is moved.
+      B32 is_at_words = (app_state->place_drag.state == EDIT_PlaceDragState_Selecting ||
+                         (can_move && hover.has_piece && hover.corner == 0 &&
+                          PLACE_IsAtWords(app_state, hover.kind, hover.idx, Core_WM_MouseFromWindow(app_state->window))));
+      if (is_at_words) {
+         caption = Str8Lit("Drag across the words to select them      Double-click a word, triple-click a line");
+      } else if (can_move) {
          caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click puts it back");
       } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
          // A picture line typed past the most a slide can have: not on the
