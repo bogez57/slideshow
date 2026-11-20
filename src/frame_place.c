@@ -16,7 +16,11 @@
 //                     when it comes near one. A line shows what it is on,
 //                     and an outline the other box the line is from
 //    put it back      right-click it: where the layout would have it
-//    give up a drag   Esc
+//    give up a drag   Esc - or F5, which presents
+//
+// The mouse says which it would be (_PLACE_HoverCursor): the arrow that
+// resizes over a corner, the four-way arrow while a piece is dragged, and the
+// bar that text is typed at over the title's and blocks' words.
 //
 // What comes of it is a line of the deck's text - "@place picture 0.55 0.2
 // 0.4 0.6", in parts of the page (deck.h) - written when the button comes
@@ -556,14 +560,24 @@ _PLACE_PieceOfHit(DECK_Slide* slide, VIEW_Hit* hit, DECK_PlaceKind* kind_out, U6
 }
 
 internal void
+PLACE_GiveUp(App_State* app_state) {
+   EDIT_PlaceDrag* drag = &app_state->place_drag;
+   DECK_Deck*      deck = app_state->deck;
+   ED_Editor*      editor = app_state->editor;
+   // The piece back where it was. Not into a deck made again from changed
+   // text: that has the place the text says already.
+   if (drag->state == EDIT_PlaceDragState_Dragging && editor != 0 && editor->edit_count == drag->edit_count &&
+       drag->slide_idx < deck->slide_count) {
+      *_PLACE_PlaceOf(&deck->slides[drag->slide_idx], drag->kind, drag->idx) = drag->before;
+   }
+   drag->state = EDIT_PlaceDragState_None;
+}
+
+internal void
 PLACE_Keys(App_State* app_state) {
    EDIT_PlaceDrag* drag = &app_state->place_drag;
    if (drag->state == EDIT_PlaceDragState_Dragging && Core_WM_KeyPress(&app_state->events, app_state->window, 0, WM_Key_Esc)) {
-      DECK_Deck* deck = app_state->deck;
-      if (drag->slide_idx < deck->slide_count) {
-         *_PLACE_PlaceOf(&deck->slides[drag->slide_idx], drag->kind, drag->idx) = drag->before;
-      }
-      drag->state = EDIT_PlaceDragState_None;
+      PLACE_GiveUp(app_state);
       // The box held lets go too: its release is no click.
       UI_KillAction();
    }
@@ -628,6 +642,29 @@ PLACE_BeforeLayout(App_State* app_state, F32 ui) {
       place->is_set = 1;
       place->rect = drag->now;
    }
+}
+
+// The mouse over one of the boxes of a piece of the slide - kind and idx,
+// has_piece 0 for one that is of none; corner: of a corner's handle, else 0:
+//
+//    a corner's handle      the arrow that resizes from there
+//    the piece dragged      the four-way arrow that moves it
+//    the title's or a       the bar that text is typed at: a click puts the
+//    block's words, and     caret at the letter (frame_caret.c)
+//    the room between them
+//    a picture              the arrow
+internal WM_Cursor
+_PLACE_HoverCursor(App_State* app_state, B32 has_piece, DECK_PlaceKind kind, U64 idx, U32 corner) {
+   EDIT_PlaceDrag* drag = &app_state->place_drag;
+   WM_Cursor       result = WM_Cursor_Pointer;
+   if (corner != 0) {
+      result = (corner == 1 || corner == 4) ? WM_Cursor_DownRight : WM_Cursor_UpRight;
+   } else if (has_piece && drag->state == EDIT_PlaceDragState_Dragging && drag->kind == kind && drag->idx == idx) {
+      result = WM_Cursor_UpDownLeftRight;
+   } else if (has_piece && kind != DECK_PlaceKind_Picture) {
+      result = WM_Cursor_IBar;
+   }
+   return result;
 }
 
 // One of the boxes of a piece of the slide - kind and idx, has_piece 0 for
@@ -701,6 +738,7 @@ PLACE_BuildCorners(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* h
       for (U32 corner = 1; corner <= 4; corner += 1) {
          UI_Box* handle = FR_BuildRectBox(flags, _PLACE_HandleRect(box->rect, corner, ui), "###place corner %d %llu %u",
                                           (int)box->kind, (unsigned long long)box->idx, corner);
+         handle->hover_cursor = _PLACE_HoverCursor(app_state, 1, box->kind, box->idx, corner);
          result |= _PLACE_Signal(app_state, handle, 1, box->kind, box->idx, corner, -1, hover);
       }
    }
@@ -726,11 +764,7 @@ PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hove
       U64            idx = 0;
       B32            has_piece = _PLACE_PieceOfHit(slide, hit, &kind, &idx);
       UI_Box*        box = FR_BuildRectBox(flags, hit->rect, "###place hit %llu", (unsigned long long)(i - 1));
-      // Over words the mouse is the bar that text is typed at: a click
-      // there puts the caret at the letter (frame_caret.c).
-      if (has_piece && kind != DECK_PlaceKind_Picture) {
-         box->hover_cursor = WM_Cursor_IBar;
-      }
+      box->hover_cursor = _PLACE_HoverCursor(app_state, has_piece, kind, idx, 0);
       result |= _PLACE_Signal(app_state, box, has_piece, kind, idx, 0, (S64)(i - 1), hover);
    }
 
@@ -744,6 +778,7 @@ PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hove
             continue;
          }
          UI_Box* ui_box = FR_BuildRectBox(flags, box->rect, "###place box %d %llu", (int)box->kind, (unsigned long long)box->idx);
+         ui_box->hover_cursor = _PLACE_HoverCursor(app_state, 1, box->kind, box->idx, 0);
          result |= _PLACE_Signal(app_state, ui_box, 1, box->kind, box->idx, 0, -1, hover);
       }
    }

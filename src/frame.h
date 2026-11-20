@@ -149,7 +149,8 @@ internal void EDIT_PreviewClick(App_State* app_state, Vec2F32 pos, B32 keeps_mar
 
 // The edit screen's picture and body, moved and resized with the mouse:
 // frame_place.c. All in the edit screen's UI build, around its slide:
-// PLACE_Keys before the edit screen's own keys (Esc gives up a drag),
+// PLACE_Keys before the edit screen's own keys (Esc gives up a drag, as
+// PLACE_GiveUp does, which F5 calls too),
 // PLACE_BeforeLayout before the slide is laid out (a drag goes with the
 // mouse), PLACE_BuildCorners and PLACE_BuildHits after, for the boxes that
 // are clicked - the corners' handles first, which are over a video's strip,
@@ -165,6 +166,7 @@ struct PLACE_Hover {
    U32            corner;    // the corner's handle it is over, or 0
    S64            hit_idx;   // the hit of the preview it is over, or -1
 };
+internal void PLACE_GiveUp(App_State* app_state);
 internal void PLACE_Keys(App_State* app_state);
 internal void PLACE_BeforeLayout(App_State* app_state, F32 ui);
 internal B32  PLACE_BuildCorners(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hover);

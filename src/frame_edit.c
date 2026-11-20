@@ -888,7 +888,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
          app_state->caret_body_scroll = 0;
          app_state->preview_hit_count = 0; // not drawn while presenting, and the window can change
          app_state->preview_box_count = 0;
-         app_state->place_drag.state = EDIT_PlaceDragState_None;
+         PLACE_GiveUp(app_state); // a drag under way: the piece back where it was
          app_state->fade_active = 0;
          app_state->slide_changed_us = 0;
          app_state->scroll_left_over = 0;
