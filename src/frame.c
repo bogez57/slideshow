@@ -405,7 +405,15 @@ _FR_PresentInput(App_State* app_state) {
       if (event->kind == WM_EventKind_Scroll) {
          // Over a block with more words than room, the wheel moves through
          // its words (frame_caret.c). Anywhere else, through the slides.
-         if (!CARET_PresentWheel(app_state, Core_WM_MouseFromWindow(window), event->delta.y / 120.0f)) {
+         //
+         // Over the block in this window only: the presenter's window hands
+         // its wheel on too (PRES_Input), and where its mouse is says
+         // nothing of what is under it here - asked of this window's mouse,
+         // a turn over the presenter's notes would scroll whatever block of
+         // the slide happens to be at the same place in this one. The
+         // event's own place, which is in the window it came to.
+         B32 is_here = (event->window.u64[0] == window.u64[0]);
+         if (!(is_here && CARET_PresentWheel(app_state, event->pos, event->delta.y / 120.0f))) {
             scroll += event->delta.y;
          }
       }
