@@ -192,10 +192,11 @@ struct App_State {
    // it has: the next close quits.
    B32 quit_warned;
 
-   // Edit screen: where the pieces of the slide in the preview were drawn
-   // last frame, and where in the text each is from - what a click on the
-   // preview is a click on. Good for the text as it was then:
-   // preview_hits_edit_count is the editor's edit_count they were made at.
+   // Edit screen: where the pieces of the slide in the preview are, as it
+   // was laid out this frame in the UI build (frame_edit.c), and where in the
+   // text each is from - what the boxes over it are built from. Good for the
+   // text as it was then: preview_hits_edit_count is the editor's edit_count
+   // they were made at.
    Arena*    preview_hits_arena;
    VIEW_Hit* preview_hits;
    U64       preview_hit_count;
@@ -207,8 +208,8 @@ struct App_State {
    B32 preview_focus_hidden;
    U64 preview_focus_hidden_cursor;
 
-   // Edit screen: the runs of letters of the preview's slide, as drawn last
-   // frame (VIEW_HitList's runs), on preview_hits_arena: what a click on a
+   // Edit screen: the runs of letters of the preview's slide, as laid out
+   // this frame (VIEW_HitList's runs), on preview_hits_arena: what a click on a
    // word is a click on the letter of, and where the caret goes
    // (frame_caret.c). Good for the same text as preview_hits.
    VIEW_Run* preview_runs;
@@ -232,11 +233,13 @@ struct App_State {
    U64 caret_left_slide;
 
    // A scroll bar of the preview's slide with the mouse's button down on
-   // it (frame_caret.c): the block whose it is, and how far under the top
-   // of the bar's thumb the mouse took hold.
-   B32 caret_bar_drag;
-   U64 caret_bar_block;
-   F32 caret_bar_grab;
+   // it (frame_caret.c): the block whose it is, how far under the top of the
+   // bar's thumb the mouse took hold, and the UI box pressed - the thumb or
+   // the track - which is held for as long as the UI has it active.
+   B32    caret_bar_drag;
+   U64    caret_bar_block;
+   F32    caret_bar_grab;
+   UI_Key caret_bar_key;
 
    // Presenting: the boxes of the slide showing, as last drawn, for the
    // wheel over a block with more words than room (CARET_PresentWheel).
@@ -244,15 +247,15 @@ struct App_State {
    U64      present_box_count;
    Rng2F32  present_page;
 
-   // Edit screen: where the preview's slide had its pictures, its title and
-   // its body last frame (VIEW_HitList's boxes), and its page: what the mouse moves
+   // Edit screen: where the preview's slide has its pictures, its title and
+   // its body this frame (VIEW_HitList's boxes), and its page: what the mouse moves
    // and resizes. Good for the same text as preview_hits.
    VIEW_Box preview_boxes[VIEW_MAX_BOXES];
    U64      preview_box_count;
    Rng2F32  preview_page;
 
    // Edit screen: the picture, the title or the body being moved or resized with the
-   // mouse (frame_edit.c). While it is, the slide is given the place the
+   // mouse (frame_place.c). While it is, the slide is given the place the
    // mouse makes without its being in the text: the @place line is written
    // when the button comes up.
    EDIT_PlaceDrag place_drag;

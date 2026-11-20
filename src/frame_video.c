@@ -19,7 +19,8 @@
 //    [Pause]  ====|--------------------  0:12 / 1:30  [Sound]
 //
 // A click on the first word plays and pauses, a click on the bar goes to
-// that point, a click on the last word turns all sound off and on. The edit screen draws the strip in the preview and takes its clicks
+// that point, a click on the last word turns all sound off and on. The edit
+// screen builds the strip in the preview as UI boxes, which take its clicks
 // (frame_edit.c). The presentation draws it for a moment after one of the
 // video's keys, and while the video is paused (frame.c):
 //
@@ -146,32 +147,156 @@ FR_VideoDrawStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F3
    ScratchEnd(scratch);
 }
 
-// A press at pos, for a video drawn at video_rect: plays, pauses or seeks if
-// it is on the strip. Returns whether it was - whether the press is used up.
-internal B32
-FR_VideoClickStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 pos) {
-   B32            result = 0;
-   _FR_VideoStrip strip = _FR_VideoStripFromRect(app_state, video_rect, ui);
+//- bgz: the strip in the UI layer
+//
+// Two sets of boxes, as the edit screen's preview has for everything over
+// its slide: ones that are clicked and not drawn, built before the slide's
+// own (frame_place.c) so a press on the strip is not a press on the
+// picture, and ones that are drawn, built after the slide is laid out again
+// for what the clicks did - over it, and under a piece's outline. The parts
+// of the strip are in its own boxes, with whole pixels: as the hand-drawn
+// strip was.
 
-   if (Contains2F32(strip.strip, pos)) {
-      result = 1;
-      if (Contains2F32(strip.button, pos)) {
-         VID_SetPlaying(video, !VID_IsPlaying(video));
-      } else if (Contains2F32(strip.sound, pos)) {
-         AUD_SetMuted(!AUD_IsMuted());
-      } else if (Contains2F32(strip.bar, pos) && Dim2F32(strip.bar).x > 0 && VID_Duration(video) > 0) {
-         F64 part = (F64)(pos.x - strip.bar.min.x) / (F64)Dim2F32(strip.bar).x;
-         VID_Seek(video, VID_Duration(video) * Clamp(0.0, part, 1.0));
-      }
-   }
-
-   return result;
+internal String8
+_FR_VideoPartKey(Arena* arena, U64 id, char* part) {
+   return PushStr8F(arena, "###video %llu %s", (unsigned long long)id, part);
 }
 
 internal B32
-FR_VideoStripContains(App_State* app_state, Rng2F32 video_rect, F32 ui, Vec2F32 pos) {
+FR_VideoBuildStripHits(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id) {
    _FR_VideoStrip strip = _FR_VideoStripFromRect(app_state, video_rect, ui);
-   return Contains2F32(strip.strip, pos);
+   UI_BoxFlags    flags = UI_BoxFlag_MouseClickable;
+   Temp           scratch = ScratchBegin(0, 0);
+
+   // The parts first, then the strip under them: a press on the strip that
+   // misses them is the strip's, and not the picture's.
+   UI_Box* button = FR_BuildRectBox(flags, strip.button, "%S", _FR_VideoPartKey(scratch.arena, id, "button"));
+   UI_Box* sound = (Dim2F32(strip.sound).x > 0) ? FR_BuildRectBox(flags, strip.sound, "%S", _FR_VideoPartKey(scratch.arena, id, "sound")) : 0;
+   UI_Box* bar = (Dim2F32(strip.bar).x > 0) ? FR_BuildRectBox(flags, strip.bar, "%S", _FR_VideoPartKey(scratch.arena, id, "bar")) : 0;
+   UI_Box* all = FR_BuildRectBox(flags, strip.strip, "%S", _FR_VideoPartKey(scratch.arena, id, "strip"));
+
+   B32       result = 0;
+   UI_Signal signal = UI_SignalFromBox(button);
+   result |= UI_Hovering(signal);
+   if (signal.f & UI_SignalFlag_LeftPressed) {
+      VID_SetPlaying(video, !VID_IsPlaying(video));
+   }
+   if (sound != 0) {
+      signal = UI_SignalFromBox(sound);
+      result |= UI_Hovering(signal);
+      if (signal.f & UI_SignalFlag_LeftPressed) {
+         AUD_SetMuted(!AUD_IsMuted());
+      }
+   }
+   if (bar != 0) {
+      signal = UI_SignalFromBox(bar);
+      result |= UI_Hovering(signal);
+      if ((signal.f & UI_SignalFlag_LeftPressed) && VID_Duration(video) > 0) {
+         F64 part = (F64)(UI_DragStartMouse().x - strip.bar.min.x) / (F64)Dim2F32(strip.bar).x;
+         VID_Seek(video, VID_Duration(video) * Clamp(0.0, part, 1.0));
+      }
+   }
+   result |= UI_Hovering(UI_SignalFromBox(all));
+
+   ScratchEnd(scratch);
+   return result;
+}
+
+// Whether the mouse is on a part of the strip: its click box hovered, or -
+// with no click boxes - under the mouse.
+internal B32
+_FR_VideoPartIsHot(U64 id, char* part, Rng2F32 rect, B32 interactive) {
+   B32 result = 0;
+   if (interactive) {
+      Temp scratch = ScratchBegin(0, 0);
+      result = UI_KeyMatch(UI_HotKey(), UI_KeyFromString(UI_ActiveSeedKey(), _FR_VideoPartKey(scratch.arena, id, part)));
+      ScratchEnd(scratch);
+   } else {
+      result = Contains2F32(rect, UI_Mouse());
+   }
+   return result;
+}
+
+// A box of the strip's, at rect in the window, inside the strip's box,
+// which starts at origin.
+internal UI_Box*
+_FR_VideoStripBox(UI_BoxFlags flags, Rng2F32 rect, Vec2F32 origin, U64 id, char* part) {
+   UI_SetNextRect(R2F32P(rect.min.x - origin.x, rect.min.y - origin.y, rect.max.x - origin.x, rect.max.y - origin.y));
+   return UI_BuildBoxFromStringf(flags, "###video look %llu %s", (unsigned long long)id, part);
+}
+
+internal void
+FR_VideoBuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id, B32 interactive) {
+   _FR_VideoStrip strip = _FR_VideoStripFromRect(app_state, video_rect, ui);
+   Temp           scratch = ScratchBegin(0, 0);
+
+   // Asked before the strip's box is the parent: the boxes clicked are keyed
+   // under the window's root.
+   B32 bar_hot = _FR_VideoPartIsHot(id, "bar", strip.bar, interactive);
+   B32 sound_hot = _FR_VideoPartIsHot(id, "sound", strip.sound, interactive);
+   B32 button_hot = _FR_VideoPartIsHot(id, "button", strip.button, interactive);
+
+   // Dark, whatever the video and the theme: the words on it are white.
+   // Whole pixels, as it was drawn by hand: the parts are inside it.
+   Rng2F32 all = R2F32P((F32)(S32)strip.strip.min.x, (F32)(S32)strip.strip.min.y, strip.strip.max.x, strip.strip.max.y);
+   UI_Box* box = 0;
+   UI_ColorTag(Str8Lit("strip")) {
+      box = FR_BuildRectBox(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, all, "###video look %llu", (unsigned long long)id);
+   }
+   UI_Parent(box) UI_ColorTag(Str8Lit("strip")) UI_FontSize(FR_UIFontSize(strip.px)) {
+      Vec2F32 origin = all.min;
+
+      //- bgz: the time: where it is, of how long it is. First: on top
+      F64 duration_s = VID_Duration(video);
+      F64 position_s = VID_Position(video);
+      if (Dim2F32(strip.bar).x > 0) {
+         String8 time = (duration_s > 0) ? PushStr8F(UI_BuildArena(), "%S / %S", _FR_VideoClock(scratch.arena, position_s),
+                                                     _FR_VideoClock(scratch.arena, duration_s))
+                                         : _FR_VideoClock(UI_BuildArena(), position_s);
+         UI_SetNextTextAlignment(UI_TextAlign_Left);
+         UI_SetNextTextPadding(0);
+         UI_Box* time_box = _FR_VideoStripBox(UI_BoxFlag_DrawText, R2F32P(strip.time_x, strip.strip.min.y, strip.sound.min.x, strip.strip.max.y),
+                                              origin, id, "time");
+         UI_BoxEquipDisplayString(time_box, time);
+
+         //- bgz: the bar: a thin line, the part played brighter, thicker
+         // under the mouse
+         F32 bar_h = (F32)(S32)Max(bar_hot ? 6.0f * ui : 3.0f * ui, 2.0f);
+         F32 bar_y = (F32)(S32)((strip.bar.min.y + strip.bar.max.y - bar_h) * 0.5f);
+         F32 played = (duration_s > 0) ? (F32)Clamp(0.0, position_s / duration_s, 1.0) : 0.0f;
+         F32 played_x = strip.bar.min.x + Dim2F32(strip.bar).x * played;
+         UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("played"), UI_ColorSlot_Background));
+         _FR_VideoStripBox(UI_BoxFlag_DrawBackground, R2F32P(strip.bar.min.x, bar_y, played_x, bar_y + bar_h), origin, id, "played");
+         UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("track"), UI_ColorSlot_Background));
+         _FR_VideoStripBox(UI_BoxFlag_DrawBackground, R2F32P(strip.bar.min.x, bar_y, strip.bar.max.x, bar_y + bar_h), origin, id, "track");
+      }
+
+      //- bgz: the last word: dim when sound is off
+      if (Dim2F32(strip.sound).x > 0) {
+         B32 is_muted = AUD_IsMuted();
+         UI_SetNextTextAlignment(UI_TextAlign_Center);
+         if (is_muted) {
+            UI_SetNextTextColor(UI_ThemeColor(Str8Lit("muted"), UI_ColorSlot_Text));
+         }
+         UI_Box* sound = _FR_VideoStripBox(UI_BoxFlag_DrawText, strip.sound, origin, id, "sound");
+         UI_BoxEquipDisplayString(sound, is_muted ? Str8Lit("Muted") : Str8Lit("Sound"));
+         if (sound_hot) {
+            UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Background));
+            _FR_VideoStripBox(UI_BoxFlag_DrawBackground, strip.sound, origin, id, "sound hot");
+         }
+      }
+
+      //- bgz: the word that plays and pauses
+      UI_SetNextTextAlignment(UI_TextAlign_Center);
+      UI_Box* button = _FR_VideoStripBox(UI_BoxFlag_DrawText, strip.button, origin, id, "button");
+      UI_BoxEquipDisplayString(button, VID_IsPlaying(video) ? Str8Lit("Pause") : Str8Lit("Play"));
+      if (button_hot) {
+         UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Background));
+         _FR_VideoStripBox(UI_BoxFlag_DrawBackground, strip.button, origin, id, "button hot");
+      }
+   }
+
+   ScratchEnd(scratch);
 }
 
 // Whether any of videos is playing.

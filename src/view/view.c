@@ -605,11 +605,13 @@ _VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 p
       F32 thumb_y = track.min.y + part * (room_h - thumb_h);
       Rng2F32 thumb = R2F32P(track.min.x, thumb_y, track.max.x, thumb_y + thumb_h);
 
-      R_Rect2DInst* track_inst = Core_D_Rect(track, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.2f * alpha));
-      R_Rect2DInst* thumb_inst = Core_D_Rect(thumb, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.55f * alpha));
-      for (U64 i = 0; i < ArrayCount(thumb_inst->corner_radii); i += 1) {
-         track_inst->corner_radii[i] = width * 0.5f;
-         thumb_inst->corner_radii[i] = width * 0.5f;
+      if (hits == 0 || !hits->bars_by_caller) {
+         R_Rect2DInst* track_inst = Core_D_Rect(track, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.2f * alpha));
+         R_Rect2DInst* thumb_inst = Core_D_Rect(thumb, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.55f * alpha));
+         for (U64 i = 0; i < ArrayCount(thumb_inst->corner_radii); i += 1) {
+            track_inst->corner_radii[i] = width * 0.5f;
+            thumb_inst->corner_radii[i] = width * 0.5f;
+         }
       }
 
       if (hits != 0 && hits->box_count != 0) {

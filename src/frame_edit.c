@@ -29,10 +29,12 @@
 // the slide. Dropping an image file on the window does the same, copying the
 // file into the deck's folder first if it is not there.
 //
-// The Format panel, the list of pictures and the status line are built with
-// the UI layer (EDIT_Build, called from FrameWork's UI build), and take their
-// own clicks and wheel there. The text, the preview, the small slides and
-// the + are drawn by hand (EDIT_Draw), and their clicks are EDIT_Input's.
+// The Format panel, the list of pictures, the status line and everything
+// over the preview's slide are built with the UI layer (EDIT_Build, called
+// from FrameWork's UI build), and take their own clicks and wheel there: see
+// "the preview, in the UI layer" below. The text, the slide itself, the
+// small slides and the + are drawn by hand (EDIT_Draw), under the UI's
+// boxes, and the small slides' and the +'s clicks are EDIT_Input's.
 //
 // The slide in the preview is typed into: a click on its title or on a
 // block of its words puts the cursor at the letter clicked, with a caret
@@ -647,6 +649,8 @@ _EDIT_ClickIn(App_State* app_state, Rng2F32 rect) {
 }
 
 // Which of the preview's pieces (app_state->preview_hits) a point is on, or -1.
+// Asked by a click, which is already known to be on the slide's boxes: of
+// several hits there, the one it goes to.
 // Where pieces are over each other, the one drawn last: the slide's pictures
 // are drawn first, in the order of their lines, then the title, then the
 // body - so words on a picture are the words, and of pictures over each
@@ -730,6 +734,26 @@ _EDIT_PreviewVideo(App_State* app_state, Rng2F32 page, U64 picture_idx, Rng2F32*
 }
 
 internal void
+EDIT_PreviewClick(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
+   ED_Editor* editor = app_state->editor;
+   if (editor->edit_count != app_state->preview_hits_edit_count) {
+      return;
+   }
+   // On words: the cursor to the letter (frame_caret.c). On a picture: its
+   // file's name selected, to be typed over.
+   if (!CARET_Click(app_state, pos, keeps_mark)) {
+      S64 hit_idx = _EDIT_PreviewHitAt(app_state, pos);
+      if (hit_idx >= 0 && app_state->preview_hits[hit_idx].text_range.max <= editor->size) {
+         VIEW_Hit* hit = &app_state->preview_hits[hit_idx];
+         ED_SetCursor(editor, hit->text_range.max);
+         editor->mark = hit->text_range.min;
+         app_state->preview_focus_hidden = 0;
+         editor->last_input_us = NowTimeUS();
+      }
+   }
+}
+
+internal void
 EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;
@@ -757,10 +781,9 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    ED_Editor*   editor = app_state->editor;
    _EDIT_Layout layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
 
-   //- bgz: the picture or the body under the mouse's hand (frame_place.c):
-   // before the keys - Esc gives up a drag - and before the clicks below
-   CARET_BarInput(app_state); // a block's scroll bar first: it is beside the block, over whatever is there
-   PLACE_Input(app_state, layout.ui);
+   //- bgz: a piece of the slide dragged by the mouse (frame_place.c): Esc
+   // gives it up, before Esc does anything else
+   PLACE_Keys(app_state);
 
    //- bgz: the screen's own keys, taken before the editor sees them
    B32 is_fullscreen = Core_WM_WindowIsFullscreen(window);
@@ -833,58 +856,6 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       U64 scan_us = (U64)(_EDIT_PICTURES_SCAN_SECONDS * 1000000.0f);
       if (NowTimeUS() - app_state->pictures_scanned_us >= scan_us) {
          _EDIT_ScanPictures(app_state);
-      }
-   }
-
-   //- bgz: a click on a piece of the slide in the preview: to its words
-   //
-   // Before anything this frame can have changed the text: where the pieces
-   // are from was worked out for the text as it was drawn.
-   // The video's strip of controls first: it is over the picture, and a
-   // click on it is not a click on the picture.
-   for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES; picture_idx += 1) {
-      Rng2F32    video_rect = {0};
-      VID_Video* video = _EDIT_PreviewVideo(app_state, layout.page, picture_idx, &video_rect);
-      if (video != 0) {
-         for (WM_Event* event = events->first; event != 0; event = event->next) {
-            if (event->kind == WM_EventKind_Press && event->key == WM_Key_LeftMouseButton &&
-                FR_VideoClickStrip(app_state, video, video_rect, layout.ui, event->pos)) {
-               Core_WM_EatEvent(events, event);
-               break;
-            }
-         }
-      }
-   }
-
-   if (editor->edit_count == app_state->preview_hits_edit_count) {
-      for (WM_Event* event = events->first; event != 0; event = event->next) {
-         if (event->kind != WM_EventKind_Press || event->key != WM_Key_LeftMouseButton) {
-            continue;
-         }
-         // On words: the cursor to the letter (frame_caret.c).
-         if (CARET_Click(app_state, event->pos, !!(event->modifiers & WM_Modifier_Shift))) {
-            Core_WM_EatEvent(events, event);
-            break;
-         }
-         S64 hit_idx = _EDIT_PreviewHitAt(app_state, event->pos);
-         if (hit_idx >= 0 && app_state->preview_hits[hit_idx].text_range.max <= editor->size) {
-            VIEW_Hit* hit = &app_state->preview_hits[hit_idx];
-            Core_WM_EatEvent(events, event);
-            ED_SetCursor(editor, hit->text_range.max);
-            editor->mark = hit->text_range.min;
-            app_state->preview_focus_hidden = 0;
-            editor->last_input_us = NowTimeUS();
-            break;
-         }
-      }
-   }
-
-   //- bgz: the wheel over a block of words in the preview moves its words
-   for (WM_Event *event = events->first, *next = 0; event != 0; event = next) {
-      next = event->next;
-      if (event->kind == WM_EventKind_Scroll && event->delta.y != 0 &&
-          CARET_Wheel(app_state, Core_WM_MouseFromWindow(window), event->delta.y / 120.0f)) {
-         Core_WM_EatEvent(events, event);
       }
    }
 
@@ -1070,6 +1041,211 @@ _EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 side, F32 gap, F32 row_h, F32 u
 
    ScratchEnd(scratch);
    return result;
+}
+
+////////////////////////////////
+//~ bgz: the preview, in the UI layer
+//
+// The slide is laid out first, for this frame - into a draw bucket that is
+// never drawn - and its pieces are kept: where its words, pictures, title
+// and blocks are (app_state->preview_hits, _runs, _boxes). The boxes over
+// it are built from those, so they are where the pieces are this frame, and
+// a signal is of where the box is now (FR_BuildRectBox):
+//
+//    1. what the mouse holds goes with it: a piece dragged (frame_place.c),
+//       a scroll bar (frame_caret.c)
+//    2. the slide laid out
+//    3. the boxes that are clicked, which are not drawn - first built, first
+//       asked: the blocks' scroll bars, the corners' handles, the videos'
+//       strips, the words and pictures, the pieces' boxes, the rooms of the
+//       words
+//    4. the slide laid out again, if a click changed the text, the cursor or
+//       a block's scroll
+//    5. the boxes that are drawn - first built, drawn on top: the outline
+//       of what the mouse is over, the videos' strips, the wash under the
+//       mouse, the box of the piece the cursor is in, the selection, the
+//       caret, and the caption under the slide
+//
+// So nothing over the slide is a frame behind it: not the caret after
+// typing at the bottom of a full block, not the outline of a box dragged,
+// not a scroll bar dragged.
+
+// The preview's slide laid out at page, and its pieces kept. The caret's
+// scroll follows the caret (CARET_Follow), and the slide is laid out again
+// if it moved.
+internal void
+_EDIT_LayoutPreview(App_State* app_state, Rng2F32 page, F32 ui) {
+   DECK_Deck* deck = app_state->deck;
+   app_state->preview_hit_count = 0;
+   app_state->preview_run_count = 0;
+   app_state->preview_box_count = 0;
+   if (Dim2F32(page).x <= 0 || app_state->slide_idx >= deck->slide_count) {
+      return;
+   }
+
+   // Asking for the slide is what loads its pictures, and what releases the
+   // pictures of slides far from this one.
+   DECK_LoadSlide(deck, app_state->slide_idx);
+   DECK_Slide*  slide = &deck->slides[app_state->slide_idx];
+   VIEW_HitList hits = {0};
+   hits.bars_by_caller = 1;
+   D_Bucket* bucket = Core_D_BucketMake();
+   Core_D_BucketScope(bucket) {
+      CARET_BeforeDraw(app_state);
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, slide, page, 1.0f, &hits);
+      if (CARET_Follow(app_state, &hits)) {
+         // A block's words moved to follow the caret, or back to where they
+         // end: the slide again, as it now is - or for a frame the caret's
+         // line would be cut off, or the wheel would show room past the
+         // words.
+         MemoryZeroStruct(&hits);
+         hits.bars_by_caller = 1;
+         CARET_BeforeDraw(app_state);
+         VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, slide, page, 1.0f, &hits);
+      }
+   }
+   CARET_AfterDrawOf(app_state, app_state->slide_idx);
+
+   if (app_state->preview_hits_arena == 0) {
+      app_state->preview_hits_arena = ArenaAlloc();
+   }
+   ArenaClear(app_state->preview_hits_arena);
+   app_state->preview_hits = PushArray(app_state->preview_hits_arena, VIEW_Hit, Max(hits.count, 1));
+   // The deck laid out is of the text at parsed_edit_count.
+   app_state->preview_hits_edit_count = app_state->parsed_edit_count;
+   MemoryCopyArray(app_state->preview_boxes, hits.boxes);
+   app_state->preview_box_count = hits.box_count;
+   app_state->preview_page = hits.page;
+
+   F32 grow = 4.0f * ui;
+   for (VIEW_Hit* hit = hits.first; hit != 0; hit = hit->next) {
+      // A little larger than what was drawn, to be easy to click, and no
+      // larger than the slide.
+      Rng2F32 rect = Intersect2F32(R2F32P(hit->rect.min.x - grow, hit->rect.min.y - grow * 0.5f, hit->rect.max.x + grow,
+                                          hit->rect.max.y + grow * 0.5f),
+                                   page);
+      if (rect.max.x <= rect.min.x || rect.max.y <= rect.min.y) {
+         continue;
+      }
+      VIEW_Hit* kept = &app_state->preview_hits[app_state->preview_hit_count];
+      app_state->preview_hit_count += 1;
+      kept->next = 0;
+      kept->rect = rect;
+      kept->text_range = hit->text_range;
+   }
+   CARET_KeepRuns(app_state, &hits);
+}
+
+internal void
+_EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) {
+   ED_Editor* editor = app_state->editor;
+   DECK_Deck* deck = app_state->deck;
+   F32        ui = layout->ui;
+
+   //- bgz: 1, 2: what the mouse holds, then the slide laid out
+   PLACE_BeforeLayout(app_state, ui);
+   CARET_BeforeLayout(app_state);
+   FR_SyncDeck(app_state);
+   deck = app_state->deck;
+   app_state->slide_idx = DECK_SlideFromTextPos(deck, editor->cursor);
+   _EDIT_LayoutPreview(app_state, layout->page, ui);
+
+   //- bgz: 3: the boxes that are clicked
+   U64         cursor_was = editor->cursor;
+   U64         mark_was = editor->mark;
+   U64         edit_count_was = editor->edit_count;
+   B32         changed = 0;
+   PLACE_Hover hover = {0};
+   hover.hit_idx = -1;
+   changed |= CARET_BuildBars(app_state, ui, interactive);
+   changed |= PLACE_BuildCorners(app_state, ui, interactive, &hover);
+   for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES && interactive; picture_idx += 1) {
+      Rng2F32    video_rect = {0};
+      VID_Video* video = _EDIT_PreviewVideo(app_state, layout->page, picture_idx, &video_rect);
+      // Over its strip is over its picture, for its outline.
+      if (video != 0 && FR_VideoBuildStripHits(app_state, video, video_rect, ui, picture_idx) && !hover.is_over) {
+         hover.is_over = 1;
+         hover.has_piece = 1;
+         hover.kind = DECK_PlaceKind_Picture;
+         hover.idx = picture_idx;
+      }
+   }
+   changed |= PLACE_BuildHits(app_state, ui, interactive, &hover);
+   changed |= CARET_BuildRooms(app_state, interactive);
+
+   //- bgz: 4: laid out again, for what they did
+   changed |= (editor->cursor != cursor_was || editor->mark != mark_was || editor->edit_count != edit_count_was);
+   if (changed) {
+      FR_SyncDeck(app_state);
+      deck = app_state->deck;
+      app_state->slide_idx = DECK_SlideFromTextPos(deck, editor->cursor);
+      _EDIT_LayoutPreview(app_state, layout->page, ui);
+   }
+
+   //- bgz: 5: the boxes that are drawn
+   String8 caption = {0};
+   if (app_state->slide_idx < deck->slide_count && Dim2F32(layout->page).x > 0) {
+      // The box the mouse is over - a picture's, the title's, a block's -
+      // with its corners, and what can be done with it said under the slide.
+      B32 can_move = PLACE_BuildLook(app_state, ui, &hover);
+
+      // The slide's videos: each its strip of controls, over the bottom of it.
+      for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES; picture_idx += 1) {
+         Rng2F32    video_rect = {0};
+         VID_Video* video = _EDIT_PreviewVideo(app_state, layout->page, picture_idx, &video_rect);
+         if (video != 0) {
+            FR_VideoBuildStripLook(app_state, video, video_rect, ui, picture_idx, interactive);
+         }
+      }
+
+      // Lit under the mouse - a wash of the theme's body colour, which shows
+      // on a light theme as on a dark one: the one piece a click there would
+      // go to.
+      if (interactive && hover.hit_idx >= 0 && (U64)hover.hit_idx < app_state->preview_hit_count) {
+         Vec4F32 lit = VIEW_ColorsFromTheme(deck->theme).body;
+         lit.w = 0.12f;
+         UI_SetNextBackgroundColor(lit);
+         FR_BuildRectBox(UI_BoxFlag_DrawBackground, app_state->preview_hits[hover.hit_idx].rect, "###edit preview lit");
+      }
+
+      // The words: the caret, and the box of the piece it is in
+      // (frame_caret.c). The box built below is then a picture's.
+      B32 words_have_box = CARET_BuildLook(app_state, ui);
+
+      // A box around the picture the cursor is on the line of. Not after
+      // Esc, until the cursor goes somewhere or a piece is clicked. In the
+      // words' box's blue (frame.c's "focus").
+      for (U64 i = 0; i < app_state->preview_hit_count && !words_have_box && !app_state->preview_focus_hidden; i += 1) {
+         VIEW_Hit* hit = &app_state->preview_hits[i];
+         if (editor->cursor >= hit->text_range.min && editor->cursor <= hit->text_range.max) {
+            UI_ColorTag(Str8Lit("focus")) {
+               FR_BuildEdge(hit->rect, Max(1.0f, (F32)(S32)(1.5f * ui)), UI_ColorFromSlot(UI_ColorSlot_Border), "###edit preview focus %llu",
+                            (unsigned long long)i);
+            }
+         }
+      }
+
+      if (can_move) {
+         caption = Str8Lit("Drag to move it      Shift lines it up      A corner resizes it      Right-click puts it back");
+      } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
+         // A picture line typed past the most a slide can have: not on the
+         // slide, which should not go unsaid.
+         caption = PushStr8F(UI_BuildArena(), "Slide %llu of %llu      Only the first %d pictures are shown",
+                             (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count, DECK_MAX_PICTURES);
+      } else {
+         caption = PushStr8F(UI_BuildArena(), "Slide %llu of %llu      Alt+Left / Alt+Right moves it",
+                             (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count);
+      }
+   }
+
+   //- bgz: the caption, under the slide
+   if (caption.size != 0) {
+      UI_SetNextColorTag(Str8Lit("dim"));
+      UI_SetNextTextAlignment(UI_TextAlign_Center);
+      UI_SetNextFontSize(FR_UIFontSize(layout->ui_px));
+      UI_Box* box = FR_BuildRectBox(UI_BoxFlag_DrawText, layout->caption, "###edit caption");
+      UI_BoxEquipDisplayString(box, caption);
+   }
 }
 
 internal void
@@ -1354,6 +1530,9 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
       app_state->slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
    }
 
+   //- bgz: the preview: its slide, and what is over it
+   _EDIT_BuildPreview(app_state, &layout, interactive);
+
    ScratchEnd(scratch);
 }
 
@@ -1378,10 +1557,8 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
    // UI's (EDIT_Build), drawn after this.
    ED_Draw(editor, app_state->frame_arena, layout.editor_box);
 
-   //- bgz: the preview
-   app_state->preview_hit_count = 0; // made again below, if a slide is drawn
-   app_state->preview_run_count = 0;
-   app_state->preview_box_count = 0;
+   //- bgz: the preview. Its slide is laid out, and what is over it built,
+   // in the UI build (_EDIT_BuildPreview): this draws the slide, under that.
    Core_D_Rect(layout.preview, R2F32P(0, 0, 1, 1), V4F32(0.125f, 0.13f, 0.15f, 1.0f));
    // A line where the text ends and the preview begins.
    Core_D_Rect(R2F32P(layout.preview.min.x, 0, layout.preview.min.x + 1.0f, window_dim.y), R2F32P(0, 0, 1, 1),
@@ -1390,107 +1567,13 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
    if (Dim2F32(layout.page).x > 0) {
       Core_D_Rect(layout.page, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
 
-      String8 caption = {0};
       if (app_state->slide_idx < deck->slide_count) {
-         // Asking for the slide is what loads its pictures, and what
-         // releases the pictures of slides far from this one.
-         DECK_LoadSlide(deck, app_state->slide_idx);
+         // As it was laid out: the same scroll, and its bars are the UI's.
          VIEW_HitList hits = {0};
+         hits.bars_by_caller = 1;
          CARET_BeforeDraw(app_state);
          VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], layout.page, 1.0f, &hits);
-         if (CARET_Follow(app_state, &hits)) {
-            // A block's words moved to follow the caret, or back to where
-            // they end: the slide again, over the first, as it now is - or
-            // for a frame the caret's line would be cut off, or the wheel
-            // would show room past the words.
-            Core_D_Rect(layout.page, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
-            MemoryZeroStruct(&hits);
-            CARET_BeforeDraw(app_state);
-            VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], layout.page, 1.0f, &hits);
-         }
-
-         //- bgz: the slide's pieces, kept for the next frame's clicks
-         if (app_state->preview_hits_arena == 0) {
-            app_state->preview_hits_arena = ArenaAlloc();
-         }
-         ArenaClear(app_state->preview_hits_arena);
-         app_state->preview_hits = PushArray(app_state->preview_hits_arena, VIEW_Hit, Max(hits.count, 1));
-         app_state->preview_hit_count = 0;
-         // The deck drawn is of the text at parsed_edit_count.
-         app_state->preview_hits_edit_count = app_state->parsed_edit_count;
-         MemoryCopyArray(app_state->preview_boxes, hits.boxes);
-         app_state->preview_box_count = hits.box_count;
-         app_state->preview_page = hits.page;
-
-         // The words: the caret, and the box of the piece it is in
-         // (frame_caret.c). The box drawn below is then a picture's.
-         B32 words_have_box = CARET_AfterDraw(app_state, &hits, ui);
-
-         F32 grow = 4.0f * ui;
-         for (VIEW_Hit* hit = hits.first; hit != 0; hit = hit->next) {
-            // A little larger than what was drawn, to be easy to click, and
-            // no larger than the slide.
-            Rng2F32 rect = Intersect2F32(R2F32P(hit->rect.min.x - grow, hit->rect.min.y - grow * 0.5f, hit->rect.max.x + grow,
-                                                hit->rect.max.y + grow * 0.5f),
-                                         layout.page);
-            if (rect.max.x <= rect.min.x || rect.max.y <= rect.min.y) {
-               continue;
-            }
-            VIEW_Hit* kept = &app_state->preview_hits[app_state->preview_hit_count];
-            app_state->preview_hit_count += 1;
-            kept->next = 0;
-            kept->rect = rect;
-            kept->text_range = hit->text_range;
-
-            // A box around the picture the cursor is on the line of. Not
-            // after Esc, until the cursor goes somewhere or a piece is
-            // clicked.
-            if (app_state->preview_focus_hidden && editor->cursor != app_state->preview_focus_hidden_cursor) {
-               app_state->preview_focus_hidden = 0;
-            }
-            if (!words_have_box && !app_state->preview_focus_hidden && editor->cursor >= hit->text_range.min &&
-                editor->cursor <= hit->text_range.max) {
-               // A thin box around it, in a blue that is the same on every
-               // theme: it is the editor's mark, not part of the slide.
-               F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
-               Vec4F32 blue = V4F32(0.26f, 0.60f, 1.0f, 1.0f);
-               Core_D_Rect(R2F32P(rect.min.x, rect.min.y, rect.max.x, rect.min.y + thick), R2F32P(0, 0, 1, 1), blue);
-               Core_D_Rect(R2F32P(rect.min.x, rect.max.y - thick, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
-               Core_D_Rect(R2F32P(rect.min.x, rect.min.y, rect.min.x + thick, rect.max.y), R2F32P(0, 0, 1, 1), blue);
-               Core_D_Rect(R2F32P(rect.max.x - thick, rect.min.y, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
-            }
-         }
-         // Lit under the mouse - a wash of the theme's body colour, which
-         // shows on a light theme as on a dark one: the one piece a click
-         // there would go to.
-         S64 hot_idx = _EDIT_PreviewHitAt(app_state, mouse);
-         if (hot_idx >= 0 && !app_state->show_open) {
-            Vec4F32 lit = VIEW_ColorsFromTheme(deck->theme).body;
-            lit.w = 0.12f;
-            Core_D_Rect(app_state->preview_hits[hot_idx].rect, R2F32P(0, 0, 1, 1), lit);
-         }
-         // The slide's videos: each its strip of controls, over the bottom of it.
-         for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES; picture_idx += 1) {
-            Rng2F32    video_rect = {0};
-            VID_Video* video = _EDIT_PreviewVideo(app_state, layout.page, picture_idx, &video_rect);
-            if (video != 0) {
-               FR_VideoDrawStrip(app_state, video, video_rect, ui, mouse);
-            }
-         }
-         // The box the mouse is over - a picture's, the title's, the body's - with its
-         // corners, and what can be done with it said under the slide.
-         if (PLACE_Draw(app_state, ui, mouse)) {
-            caption = Str8Lit("Drag to move it      Shift lines it up      A corner resizes it      Right-click puts it back");
-         } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
-            // A picture line typed past the most a slide can have: not on
-            // the slide, which should not go unsaid.
-            caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Only the first %d pictures are shown",
-                                (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count,
-                                DECK_MAX_PICTURES);
-         } else {
-            caption = PushStr8F(scratch.arena, "Slide %llu of %llu      Alt+Left / Alt+Right moves it",
-                                (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count);
-         }
+         CARET_AfterDrawOf(app_state, app_state->slide_idx);
       } else {
          // No slides yet: how to make the first.
          String8 lines[] = {
@@ -1508,15 +1591,6 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
                      (i == 0) ? color_text : color_dim, lines[i]);
             y += TXT_LineHeight(font, sizes[i]) * 1.3f;
          }
-      }
-
-      if (caption.size != 0) {
-         F32 caption_w = TXT_Width(fonts->regular, layout.ui_px, caption);
-         F32 caption_text_h = TXT_LineHeight(fonts->regular, layout.ui_px);
-         TXT_Draw(fonts->regular, layout.ui_px,
-                  V2F32(layout.caption.min.x + (Dim2F32(layout.caption).x - caption_w) * 0.5f,
-                        layout.caption.min.y + (Dim2F32(layout.caption).y - caption_text_h) * 0.5f),
-                  color_dim, caption);
       }
    }
 

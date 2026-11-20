@@ -128,6 +128,11 @@ struct VIEW_HitList {
    VIEW_Box boxes[VIEW_MAX_BOXES];
    U64      box_count;
    Rng2F32  page; // the page the slide was drawn on
+
+   // Set by the caller before the call: the scroll bars are only put on the
+   // boxes, not drawn - the caller has bars of its own there (the edit
+   // screen's, UI scroll bars).
+   B32 bars_by_caller;
 };
 
 // The slide is drawn with whichever of its pictures are loaded: loading is

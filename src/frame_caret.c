@@ -244,44 +244,16 @@ _CARET_ScrollOf(App_State* app_state, DECK_Slide* slide, U64 block_idx) {
    return result;
 }
 
-// The box among boxes whose scroll bar pos is on: a little wider than it is
-// drawn, as it is thin. 0 for none. scale is pixels to a page unit.
-internal VIEW_Box*
-_CARET_BarAt(VIEW_Box* boxes, U64 box_count, Vec2F32 pos, F32 scale) {
-   VIEW_Box* result = 0;
-   for (U64 i = 0; i < box_count && result == 0; i += 1) {
-      VIEW_Box* box = &boxes[i];
-      Rng2F32   reach = box->bar_track;
-      reach.min.x -= 5.0f * scale;
-      reach.max.x += 5.0f * scale;
-      if (box->kind == DECK_PlaceKind_Text && box->words_height > 0 && Contains2F32(reach, pos)) {
-         result = box;
-      }
+internal void
+CARET_ScrollBlock(App_State* app_state, U64 block_idx, F32 delta) {
+   if (_CARET_RunsAreGood(app_state)) {
+      // Some three lines of the body a notch (down the words when over 0).
+      // Kept to the words there are when the slide is next laid out
+      // (CARET_Follow).
+      DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+      F32*        scroll = _CARET_ScrollOf(app_state, slide, block_idx);
+      *scroll = Max(*scroll + delta * 96.0f, 0.0f);
    }
-   return result;
-}
-
-internal B32
-CARET_Wheel(App_State* app_state, Vec2F32 pos, F32 delta) {
-   B32 result = 0;
-   if (_CARET_RunsAreGood(app_state) && Contains2F32(app_state->preview_page, pos)) {
-      VIEW_Box* box = _CARET_WordsBoxAt(app_state, pos);
-      if (box == 0) {
-         // Over a block's scroll bar, beside it, as well.
-         box = _CARET_BarAt(app_state->preview_boxes, app_state->preview_box_count, pos,
-                            VIEW_ScaleFromDim(Dim2F32(app_state->preview_page)));
-      }
-      if (box != 0 && box->kind == DECK_PlaceKind_Text) {
-         // Some three lines of the body a notch (delta is in notches, down
-         // the words when over 0). Kept to the words there are when the
-         // slide is next drawn (CARET_Follow).
-         DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
-         F32*        scroll = _CARET_ScrollOf(app_state, slide, box->idx);
-         *scroll = Max(*scroll + delta * 96.0f, 0.0f);
-         result = 1;
-      }
-   }
-   return result;
 }
 
 // The most a box's block can be moved down its words, in page units: none
@@ -292,52 +264,127 @@ _CARET_MaxScroll(VIEW_Box* box, F32 scale) {
    return (scale > 0 && box->words_height > track_h) ? (box->words_height - track_h) / scale : 0.0f;
 }
 
+// The scroll of box's block for its bar's thumb with its top grab pixels
+// above mouse_y.
 internal void
-CARET_BarInput(App_State* app_state) {
-   if (!_CARET_RunsAreGood(app_state)) {
-      app_state->caret_bar_drag = 0;
+_CARET_DragBar(App_State* app_state, VIEW_Box* box, F32 mouse_y) {
+   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   F32         scale = VIEW_ScaleFromDim(Dim2F32(app_state->preview_page));
+   F32         track_h = box->bar_track.max.y - box->bar_track.min.y;
+   F32         thumb_h = box->bar_thumb.max.y - box->bar_thumb.min.y;
+   F32         part = (track_h > thumb_h) ? (mouse_y - app_state->caret_bar_grab - box->bar_track.min.y) / (track_h - thumb_h) : 0.0f;
+   *_CARET_ScrollOf(app_state, slide, box->idx) = Clamp(0.0f, part, 1.0f) * _CARET_MaxScroll(box, scale);
+}
+
+internal void
+CARET_BeforeLayout(App_State* app_state) {
+   if (!app_state->caret_bar_drag) {
       return;
    }
-   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
-   Vec2F32     mouse = Core_WM_MouseFromWindow(app_state->window);
-   F32         scale = VIEW_ScaleFromDim(Dim2F32(app_state->preview_page));
+   // Held while the box pressed - its thumb, or its track - is the UI's
+   // active one: the bar's track does not move as its thumb does, and its
+   // box is there every frame the block has more words than room. Its
+   // place is the last layout's, which is where the mouse was taken to it.
+   VIEW_Box* box = 0;
+   for (U64 i = 0; i < app_state->preview_box_count && app_state->slide_idx < app_state->deck->slide_count; i += 1) {
+      VIEW_Box* candidate = &app_state->preview_boxes[i];
+      if (candidate->kind == DECK_PlaceKind_Text && candidate->idx == app_state->caret_bar_block && candidate->words_height > 0) {
+         box = candidate;
+      }
+   }
+   if (box == 0 || app_state->show_open || !UI_KeyMatch(UI_ActiveKey(UI_MouseButtonKind_Left), app_state->caret_bar_key)) {
+      app_state->caret_bar_drag = 0;
+   } else {
+      // The window's mouse: the UI's is off the window when the window is
+      // not in front and the mouse has not moved for a moment.
+      _CARET_DragBar(app_state, box, Core_WM_MouseFromWindow(app_state->window).y);
+   }
+}
 
-   //- bgz: a press on a bar takes hold of it: of its thumb where the mouse
-   // is, or, on the track beside the thumb, of the thumb's middle - which
-   // then comes to the mouse
-   for (WM_Event* event = app_state->events.first; event != 0 && !app_state->caret_bar_drag; event = event->next) {
-      if (event->kind != WM_EventKind_Press || event->key != WM_Key_LeftMouseButton) {
+internal B32
+CARET_BuildBars(App_State* app_state, F32 ui, B32 interactive) {
+   B32 result = 0;
+   if (!_CARET_RunsAreGood(app_state)) {
+      return 0;
+   }
+   UI_BoxFlags flags = interactive ? (UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll) : 0;
+   // The UI's own scroll bar's look (_UI_DrawScrollThumb): a thin thumb
+   // with no track, the bar's whole width under the mouse or held. In the
+   // colour of the slide's words, the one colour sure to show on its theme.
+   Vec4F32 color = VIEW_ColorsFromTheme(app_state->deck->theme).body;
+   color.w = 0.55f;
+   F32 bar_w = 10.0f * ui;
+
+   for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+      VIEW_Box* box = &app_state->preview_boxes[i];
+      if (box->kind != DECK_PlaceKind_Text || box->words_height <= 0) {
          continue;
       }
-      VIEW_Box* box = _CARET_BarAt(app_state->preview_boxes, app_state->preview_box_count, event->pos, scale);
-      if (box != 0) {
+      // The thumb is drawn against the bar's right edge: there, where the
+      // view puts it, a gap from the block's room.
+      Rng2F32 bar = R2F32P(box->bar_track.max.x + 1.0f - bar_w, box->bar_track.min.y, box->bar_track.max.x + 1.0f,
+                           box->bar_track.max.y);
+      Rng2F32 thumb_rect = R2F32P(bar.min.x, box->bar_thumb.min.y, bar.max.x, box->bar_thumb.max.y);
+
+      // The thumb first, over the track and asked first.
+      UI_Box* thumb = FR_BuildRectBox(flags, thumb_rect, "###caret thumb %llu", (unsigned long long)box->idx);
+      thumb->background_color = color;
+      UI_BoxEquipCustomDraw(thumb, _UI_DrawScrollThumb, 0);
+      UI_Box* track = FR_BuildRectBox(flags, bar, "###caret bar %llu", (unsigned long long)box->idx);
+      if (!interactive) {
+         continue;
+      }
+
+      //- bgz: a press takes hold of the bar: of its thumb where the mouse
+      // is, or, on the track beside the thumb, of the thumb's middle - which
+      // then comes to the mouse
+      UI_Signal thumb_signal = UI_SignalFromBox(thumb);
+      UI_Signal track_signal = UI_SignalFromBox(track);
+      UI_Box*   pressed = (thumb_signal.f & UI_SignalFlag_LeftPressed) ? thumb : (track_signal.f & UI_SignalFlag_LeftPressed) ? track : 0;
+      if (pressed != 0) {
+         Vec2F32 pos = UI_DragStartMouse();
          app_state->caret_bar_drag = 1;
          app_state->caret_bar_block = box->idx;
-         app_state->caret_bar_grab = (event->pos.y >= box->bar_thumb.min.y && event->pos.y <= box->bar_thumb.max.y)
-                                         ? event->pos.y - box->bar_thumb.min.y
-                                         : (box->bar_thumb.max.y - box->bar_thumb.min.y) * 0.5f;
-         Core_WM_EatEvent(&app_state->events, event);
+         app_state->caret_bar_key = pressed->key;
+         app_state->caret_bar_grab = (pressed == thumb) ? pos.y - box->bar_thumb.min.y : (box->bar_thumb.max.y - box->bar_thumb.min.y) * 0.5f;
+         _CARET_DragBar(app_state, box, pos.y);
+         result = 1;
+      }
+      S16 scroll = thumb_signal.scroll.y + track_signal.scroll.y;
+      if (scroll != 0) {
+         CARET_ScrollBlock(app_state, box->idx, (F32)scroll / FR_UI_SCROLL_PER_NOTCH);
+         result = 1;
       }
    }
+   return result;
+}
 
-   //- bgz: one held: the thumb's top goes with the mouse
-   if (app_state->caret_bar_drag) {
-      VIEW_Box* box = 0;
-      for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
-         if (app_state->preview_boxes[i].kind == DECK_PlaceKind_Text && app_state->preview_boxes[i].idx == app_state->caret_bar_block &&
-             app_state->preview_boxes[i].words_height > 0) {
-            box = &app_state->preview_boxes[i];
-         }
+internal B32
+CARET_BuildRooms(App_State* app_state, B32 interactive) {
+   B32 result = 0;
+   if (!interactive || !_CARET_RunsAreGood(app_state)) {
+      return 0;
+   }
+   // Under the pieces' own boxes, which are built before: the room under a
+   // block's words, and beside the title's.
+   for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+      VIEW_Box* box = &app_state->preview_boxes[i];
+      if (box->kind == DECK_PlaceKind_Picture) {
+         continue;
       }
-      if (box == 0 || !Core_WM_KeyIsDown(WM_Key_LeftMouseButton)) {
-         app_state->caret_bar_drag = 0;
-      } else {
-         F32 track_h = box->bar_track.max.y - box->bar_track.min.y;
-         F32 thumb_h = box->bar_thumb.max.y - box->bar_thumb.min.y;
-         F32 part = (track_h > thumb_h) ? (mouse.y - app_state->caret_bar_grab - box->bar_track.min.y) / (track_h - thumb_h) : 0.0f;
-         *_CARET_ScrollOf(app_state, slide, box->idx) = Clamp(0.0f, part, 1.0f) * _CARET_MaxScroll(box, scale);
+      UI_Box*   room = FR_BuildRectBox(UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll, Intersect2F32(box->room, app_state->preview_page),
+                                       "###caret room %d %llu", (int)box->kind, (unsigned long long)box->idx);
+      UI_Signal signal = UI_SignalFromBox(room);
+      if (signal.f & UI_SignalFlag_LeftPressed) {
+         CARET_Click(app_state, UI_DragStartMouse(), !!(signal.event_flags & WM_Modifier_Shift));
+         result = 1;
+      }
+      if (signal.scroll.y != 0 && box->kind == DECK_PlaceKind_Text) {
+         CARET_ScrollBlock(app_state, box->idx, (F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH);
+         result = 1;
       }
    }
+   return result;
 }
 
 internal void
@@ -437,7 +484,7 @@ _CARET_RunsFromHits(Arena* arena, VIEW_HitList* hits, U64* count_out) {
 // caret's, or with no caret - the cursor on an @ line - the piece that line
 // is about. 0 for none.
 internal VIEW_Box*
-_CARET_BoxOfCursor(App_State* app_state, VIEW_HitList* hits, VIEW_Run* runs, U64 run_count, _CARET_Place* caret_out) {
+_CARET_BoxOfCursor(App_State* app_state, VIEW_Box* boxes, U64 box_count, VIEW_Run* runs, U64 run_count, _CARET_Place* caret_out) {
    *caret_out = _CARET_PlaceFromPos(app_state, runs, run_count, app_state->editor->cursor);
    DECK_PlaceKind kind = caret_out->kind;
    U64            idx = caret_out->idx;
@@ -447,9 +494,9 @@ _CARET_BoxOfCursor(App_State* app_state, VIEW_HitList* hits, VIEW_Run* runs, U64
       has_piece = (_LOOK_Target(app_state, &slide_idx, &kind, &idx) && slide_idx == app_state->slide_idx);
    }
    VIEW_Box* result = 0;
-   for (U64 i = 0; i < hits->box_count && has_piece; i += 1) {
-      if (hits->boxes[i].kind == kind && hits->boxes[i].idx == idx) {
-         result = &hits->boxes[i];
+   for (U64 i = 0; i < box_count && has_piece; i += 1) {
+      if (boxes[i].kind == kind && boxes[i].idx == idx) {
+         result = &boxes[i];
       }
    }
    return result;
@@ -469,7 +516,7 @@ CARET_Follow(App_State* app_state, VIEW_HitList* hits) {
    U64          run_count = 0;
    VIEW_Run*    runs = _CARET_RunsFromHits(scratch.arena, hits, &run_count);
    _CARET_Place caret = {0};
-   VIEW_Box*    box = _CARET_BoxOfCursor(app_state, hits, runs, run_count, &caret);
+   VIEW_Box*    box = _CARET_BoxOfCursor(app_state, hits->boxes, hits->box_count, runs, run_count, &caret);
    DECK_PlaceKind kind = caret.kind;
    U64            idx = caret.idx;
    F32            scale = VIEW_ScaleFromDim(Dim2F32(hits->page));
@@ -539,24 +586,23 @@ CARET_Follow(App_State* app_state, VIEW_HitList* hits) {
    return result;
 }
 
-internal B32
-CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
-   DECK_Deck*  deck = app_state->deck;
-   DECK_Slide* slide = &deck->slides[app_state->slide_idx];
-   ED_Editor*  editor = app_state->editor;
-
-   //- bgz: the scroll is the preview's, not the deck's
-   _CARET_PutScroll(slide, 0, 0);
-
-   //- bgz: the runs, kept for the next frame's clicks
-   // On the arena the hits are on, which EDIT_Draw has just cleared.
+internal void
+CARET_KeepRuns(App_State* app_state, VIEW_HitList* hits) {
+   // On the arena the hits are kept on, which the layout has just cleared.
    app_state->preview_runs = _CARET_RunsFromHits(app_state->preview_hits_arena, hits, &app_state->preview_run_count);
+}
 
-   if (editor->edit_count != app_state->parsed_edit_count) {
+internal B32
+CARET_BuildLook(App_State* app_state, F32 ui) {
+   DECK_Deck*  deck = app_state->deck;
+   ED_Editor*  editor = app_state->editor;
+   if (!_CARET_RunsAreGood(app_state) || editor->edit_count != app_state->parsed_edit_count) {
       return 0;
    }
+   DECK_Slide*    slide = &deck->slides[app_state->slide_idx];
    _CARET_Place   caret = {0};
-   VIEW_Box*      box = _CARET_BoxOfCursor(app_state, hits, app_state->preview_runs, app_state->preview_run_count, &caret);
+   VIEW_Box*      box = _CARET_BoxOfCursor(app_state, app_state->preview_boxes, app_state->preview_box_count, app_state->preview_runs,
+                                           app_state->preview_run_count, &caret);
    DECK_PlaceKind kind = caret.kind;
    U64            idx = caret.idx;
    if (box != 0) {
@@ -571,53 +617,10 @@ CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
    }
    B32 result = 0;
    if (box != 0 && kind != DECK_PlaceKind_Picture && !app_state->preview_focus_hidden) {
-      // A thin box around the room its words have, in a blue that is the
-      // same on every theme: it is the editor's mark, not part of the slide.
-      // Just outside the room, where the words wrap - and so beside, not a
-      // little way off, the outline the mouse's box has (PLACE_Draw), which
-      // is just inside it: one line, not two side by side.
-      F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
-      Vec4F32 blue = V4F32(0.26f, 0.60f, 1.0f, 1.0f);
-      Rng2F32 rect = Intersect2F32(Pad2F32(box->room, thick), hits->page);
-      if (rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
-         Core_D_Rect(R2F32P(rect.min.x, rect.min.y, rect.max.x, rect.min.y + thick), R2F32P(0, 0, 1, 1), blue);
-         Core_D_Rect(R2F32P(rect.min.x, rect.max.y - thick, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
-         Core_D_Rect(R2F32P(rect.min.x, rect.min.y, rect.min.x + thick, rect.max.y), R2F32P(0, 0, 1, 1), blue);
-         Core_D_Rect(R2F32P(rect.max.x - thick, rect.min.y, rect.max.x, rect.max.y), R2F32P(0, 0, 1, 1), blue);
-      }
       result = 1;
 
-      //- bgz: what is selected, washed in the same blue: the part of each
-      // run that is in the selection, where the run shows
-      String8 text = ED_Text(editor);
-      U64     select_min = Min(editor->cursor, editor->mark);
-      U64     select_max = Max(editor->cursor, editor->mark);
-      for (U64 i = 0; i < app_state->preview_run_count && select_min != select_max; i += 1) {
-         VIEW_Run* run = &app_state->preview_runs[i];
-         U64       from = Max(run->text_range.min, select_min);
-         U64       to = Min(run->text_range.max, select_max);
-         if (from < to) {
-            Rng2F32 washed = R2F32P(_CARET_XInRun(text, run, from), run->rect.min.y, _CARET_XInRun(text, run, to), run->rect.max.y);
-            // On to the next word of the line, if that is selected too: the
-            // space between them, so the wash is not in pieces.
-            VIEW_Run* next = (i + 1 < app_state->preview_run_count) ? &app_state->preview_runs[i + 1] : 0;
-            if (next != 0 && to == run->text_range.max && select_max > next->text_range.min && next->rect.min.y == run->rect.min.y &&
-                next->kind == run->kind && next->idx == run->idx && next->rect.min.x > washed.max.x) {
-               washed.max.x = next->rect.min.x;
-            }
-            for (U64 k = 0; k < hits->box_count; k += 1) {
-               if (hits->boxes[k].kind == run->kind && hits->boxes[k].idx == run->idx) {
-                  washed = Intersect2F32(washed, hits->boxes[k].room);
-               }
-            }
-            if (washed.max.x > washed.min.x && washed.max.y > washed.min.y) {
-               Core_D_Rect(washed, R2F32P(0, 0, 1, 1), V4F32(0.26f, 0.60f, 1.0f, 0.35f));
-            }
-         }
-      }
-
-      //- bgz: the caret: solid just after input, then blinking, as the
-      // editor's is. In the colour of the words, which shows on the theme.
+      //- bgz: the caret, on top: solid just after input, then blinking, as
+      // the editor's is. In the colour of the words, which shows on the theme.
       if (caret.is_found && caret.rect.min.y >= box->room.min.y - 1.0f && caret.rect.max.y <= box->room.max.y + 1.0f) {
          U64 since_input_us = NowTimeUS() - editor->last_input_us;
          B32 is_on = (since_input_us < 500000) || ((since_input_us / 500000) % 2 == 0);
@@ -628,9 +631,53 @@ CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
             if (look->has_color) {
                color = look->color;
             }
-            F32         width = Max((F32)(S32)(1.5f * ui), 1.0f);
-            F32         x = (F32)(S32)caret.rect.min.x;
-            Core_D_Rect(R2F32P(x, caret.rect.min.y, x + width, caret.rect.max.y), R2F32P(0, 0, 1, 1), color);
+            F32 width = Max((F32)(S32)(1.5f * ui), 1.0f);
+            F32 x = (F32)(S32)caret.rect.min.x;
+            UI_SetNextBackgroundColor(color);
+            FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(x, caret.rect.min.y, x + width, caret.rect.max.y), "###caret caret");
+         }
+      }
+
+      UI_ColorTag(Str8Lit("focus")) {
+         //- bgz: what is selected, washed in the blue of the box: the part of
+         // each run that is in the selection, where the run shows
+         String8 text = ED_Text(editor);
+         U64     select_min = Min(editor->cursor, editor->mark);
+         U64     select_max = Max(editor->cursor, editor->mark);
+         for (U64 i = 0; i < app_state->preview_run_count && select_min != select_max; i += 1) {
+            VIEW_Run* run = &app_state->preview_runs[i];
+            U64       from = Max(run->text_range.min, select_min);
+            U64       to = Min(run->text_range.max, select_max);
+            if (from < to) {
+               Rng2F32 washed = R2F32P(_CARET_XInRun(text, run, from), run->rect.min.y, _CARET_XInRun(text, run, to), run->rect.max.y);
+               // On to the next word of the line, if that is selected too:
+               // the space between them, so the wash is not in pieces.
+               VIEW_Run* next = (i + 1 < app_state->preview_run_count) ? &app_state->preview_runs[i + 1] : 0;
+               if (next != 0 && to == run->text_range.max && select_max > next->text_range.min && next->rect.min.y == run->rect.min.y &&
+                   next->kind == run->kind && next->idx == run->idx && next->rect.min.x > washed.max.x) {
+                  washed.max.x = next->rect.min.x;
+               }
+               for (U64 k = 0; k < app_state->preview_box_count; k += 1) {
+                  if (app_state->preview_boxes[k].kind == run->kind && app_state->preview_boxes[k].idx == run->idx) {
+                     washed = Intersect2F32(washed, app_state->preview_boxes[k].room);
+                  }
+               }
+               if (washed.max.x > washed.min.x && washed.max.y > washed.min.y) {
+                  FR_BuildRectBox(UI_BoxFlag_DrawBackground, washed, "###caret wash %llu", (unsigned long long)i);
+               }
+            }
+         }
+
+         //- bgz: a thin box around the room its words have, in a blue that
+         // is the same on every theme: it is the editor's mark, not part of
+         // the slide. Just outside the room, where the words wrap - and so
+         // beside, not a little way off, the outline the mouse's box has
+         // (frame_place.c), which is just inside it: one line, not two side
+         // by side.
+         F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
+         Rng2F32 rect = Intersect2F32(Pad2F32(box->room, thick), app_state->preview_page);
+         if (rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
+            FR_BuildEdge(rect, thick, UI_ColorFromSlot(UI_ColorSlot_Border), "###caret focus");
          }
       }
    }

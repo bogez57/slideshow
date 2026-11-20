@@ -68,12 +68,23 @@ internal F32 FR_UIScale(Vec2F32 window_dim);
 // of that size (TXT_Draw) is drawn: the font cache's points, whole ones.
 internal F32 FR_UIFontSize(F32 px);
 
+//- bgz: boxes at a place of their own (frame.c)
+//
+// FR_BuildRectBox: a UI box at rect, in window pixels, under the parent
+// pushed - which must be at the window's top left, as the UI's root is. Its
+// signal is from rect, this frame's, and not from where the box was laid out
+// last frame. FR_BuildEdge: a box that draws only an outline thick pixels
+// wide, around rect exactly, in color.
+internal UI_Box* FR_BuildRectBox(UI_BoxFlags flags, Rng2F32 rect, char* fmt, ...);
+internal UI_Box* FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...);
+
 //- bgz: the edit screen (frame_edit.c)
 //
-// Input for the keys and the hand-drawn parts: the text, the preview, the
-// small slides. EDIT_Build builds the UI parts - the Format panel, the list
-// of pictures, the status line - in FrameWork's UI build. Not interactive:
-// drawn, but taking no clicks or wheel, as when the open screen is over it.
+// Input for the keys and the hand-drawn parts: the text, the small slides.
+// EDIT_Build builds the UI parts - the Format panel, the list of pictures,
+// the status line, and the preview's slide laid out with what is over it -
+// in FrameWork's UI build. Not interactive: drawn, but taking no clicks or
+// wheel, as when the open screen is over it. EDIT_Draw draws the rest.
 internal void EDIT_Input(App_State* app_state, Vec2F32 window_dim);
 internal void EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive);
 internal void EDIT_Draw(App_State* app_state, Vec2F32 window_dim);
@@ -98,10 +109,16 @@ internal void COPY_Update(App_State* app_state);
 internal void COPY_CancelAll(App_State* app_state);
 
 // A slide's video: frame_video.c.
+//
+// Its strip of controls, for a video drawn at video_rect, as UI boxes: the
+// boxes clicked, which are not drawn (FR_VideoBuildStripHits: 1 if the mouse
+// is over the strip), and the ones drawn (FR_VideoBuildStripLook), lit where
+// the first are hovered. id tells a slide's videos apart. The presentation
+// builds only the second, with interactive 0: its clicks are for the slides,
+// and the strip is only lit by where the mouse is.
+internal B32  FR_VideoBuildStripHits(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id);
+internal void FR_VideoBuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id, B32 interactive);
 internal void FR_VideoDrawStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 mouse);
-internal B32  FR_VideoClickStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 pos);
-// Whether pos is on the strip FR_VideoDrawStrip draws for a video at video_rect.
-internal B32  FR_VideoStripContains(App_State* app_state, Rng2F32 video_rect, F32 ui, Vec2F32 pos);
 // A slide's videos together: whether any is playing, and all paused if one
 // is, else all played.
 internal B32  FR_VideoSlideIsPlaying(DECK_Deck* deck, U64 slide_idx);
@@ -109,11 +126,37 @@ internal void FR_VideoToggleSlide(DECK_Deck* deck, U64 slide_idx);
 internal B32  FR_VideoKeys(App_State* app_state);
 internal void FR_VideoUpdate(App_State* app_state);
 
+// What the UI's signal counts for a notch of the wheel (UI_SignalFromBox's
+// scroll, with the slideshow's UI_AnimationInfo).
+#define FR_UI_SCROLL_PER_NOTCH 4.0f
+
+// The edit screen's preview: a press on the slide at pos, as a click - to
+// the letter of the words there, or the picture's name (frame_edit.c).
+internal void EDIT_PreviewClick(App_State* app_state, Vec2F32 pos, B32 keeps_mark);
+
 // The edit screen's picture and body, moved and resized with the mouse:
-// frame_place.c. PLACE_Input before EDIT_Input's own clicks, PLACE_Draw over
-// the preview's slide: 1 if the mouse is on something that can be moved.
-internal void PLACE_Input(App_State* app_state, F32 ui);
-internal B32  PLACE_Draw(App_State* app_state, F32 ui, Vec2F32 mouse);
+// frame_place.c. All in the edit screen's UI build, around its slide:
+// PLACE_Keys before the edit screen's own keys (Esc gives up a drag),
+// PLACE_BeforeLayout before the slide is laid out (a drag goes with the
+// mouse), PLACE_BuildCorners and PLACE_BuildHits after, for the boxes that
+// are clicked - the corners' handles first, which are over a video's strip,
+// and the rest after the strip - 1 if what they did changed the text, the
+// cursor or a scroll; and PLACE_BuildLook last, for what is drawn: 1 if the
+// mouse is on something that can be moved.
+typedef struct PLACE_Hover PLACE_Hover;
+struct PLACE_Hover {
+   B32            is_over;   // over one of the slide's boxes
+   B32            has_piece; // and that box is of a piece that can be moved
+   DECK_PlaceKind kind;
+   U64            idx;
+   U32            corner;    // the corner's handle it is over, or 0
+   S64            hit_idx;   // the hit of the preview it is over, or -1
+};
+internal void PLACE_Keys(App_State* app_state);
+internal void PLACE_BeforeLayout(App_State* app_state, F32 ui);
+internal B32  PLACE_BuildCorners(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hover);
+internal B32  PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hover);
+internal B32  PLACE_BuildLook(App_State* app_state, F32 ui, PLACE_Hover* hover);
 
 // The edit screen's words, given a size and a colour: frame_look.c. All of
 // them are about the piece the cursor is in - the title, or a block of the
@@ -132,22 +175,32 @@ internal B32     LOOK_SizeIsUsual(App_State* app_state);
 // The edit screen's words, typed into on the slide: frame_caret.c.
 // CARET_Click: a press at pos in the preview - 1 if it was in the title's
 // words or a block's, and the cursor has gone to the letter there
-// (keeps_mark: selecting from where it was). CARET_Wheel: the wheel at pos,
-// delta notches down - 1 if it was over a block, whose words it has moved.
-// CARET_BeforeDraw and CARET_AfterDraw go around the preview's
-// VIEW_DrawSlide: the first puts on the slide how far down each block's
-// words it shows, the second keeps the runs and draws the caret and the
-// box of the piece it is in - 1 if it drew that box. CARET_Follow, between
-// them, moves the words to follow the caret and keeps them to where they
-// end: 1 if it moved any, and the slide is to be drawn again.
+// (keeps_mark: selecting from where it was). CARET_ScrollBlock: a block's
+// words moved delta notches down.
+//
+// Around the preview's slide as it is laid out (frame_edit.c):
+// CARET_BeforeDraw, before VIEW_DrawSlide, puts on the slide how far down
+// each block's words it shows; CARET_Follow, after it, moves the words to
+// follow the caret and keeps them to where they end - 1 if it moved any, and
+// the slide is to be laid out again; CARET_KeepRuns keeps the runs, for
+// clicks and the caret.
+//
+// Then UI boxes: CARET_BeforeLayout moves a scroll bar held by the mouse
+// before the slide is laid out; CARET_BuildBars builds the scroll bars of
+// blocks with more words than room, and CARET_BuildRooms the boxes of the
+// rooms the words have - a click there goes to the nearest letter - both 1
+// if what was done to them changed the cursor or a scroll; CARET_BuildLook,
+// last, the box of the piece the cursor is in, the selection and the caret:
+// 1 if it built that box.
 internal B32  CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark);
-internal B32  CARET_Wheel(App_State* app_state, Vec2F32 pos, F32 delta);
+internal void CARET_ScrollBlock(App_State* app_state, U64 block_idx, F32 delta);
 internal void CARET_BeforeDraw(App_State* app_state);
 internal B32  CARET_Follow(App_State* app_state, VIEW_HitList* hits);
-internal B32  CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui);
-// A block's scroll bar, in the preview, taken hold of and dragged by the
-// mouse: before the edit screen's other clicks.
-internal void CARET_BarInput(App_State* app_state);
+internal void CARET_KeepRuns(App_State* app_state, VIEW_HitList* hits);
+internal void CARET_BeforeLayout(App_State* app_state);
+internal B32  CARET_BuildBars(App_State* app_state, F32 ui, B32 interactive);
+internal B32  CARET_BuildRooms(App_State* app_state, B32 interactive);
+internal B32  CARET_BuildLook(App_State* app_state, F32 ui);
 // Presenting: a block with more words than room is moved through by the
 // wheel over it, as far as it was in the edit screen when the slide came
 // up. CARET_PresentAfterDraw, after CARET_BeforeDraw and the slide's

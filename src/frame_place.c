@@ -26,11 +26,30 @@
 // makes (DECK_Place's is_set, without a line), and is drawn there.
 //
 // A press that does not go anywhere is a click, as before: the cursor goes
-// to the words (frame_edit.c). So a press inside a box is not taken from
-// the click, only watched. A press on a corner is taken.
+// to the words (frame_edit.c). So a press inside a box is a click, and only
+// watched for a drag. A press on a corner is a drag at once.
 //
-// The boxes are last frame's, as the hits of the preview are: good only
-// while the text is what it was when they were drawn.
+// All of it is UI boxes (src\ui), built in the edit screen's UI build after
+// its slide is laid out for the frame (frame_edit.c), so they are where the
+// pieces are now:
+//
+//    PLACE_BuildHits   boxes that are clicked and not drawn: every corner's
+//                      handle, every hit of the slide (a line of words, a
+//                      picture) as the piece it is of, and every piece's own
+//                      box. In that order: what is built first is asked first,
+//                      so a corner is before everything, a block's words are
+//                      before a picture they are over, and a picture before
+//                      the title's or a block's box under it. Their signals
+//                      press, right-press, hover and wheel
+//    PLACE_BuildLook   boxes that are drawn and not clicked: the outline and
+//                      corners of what the mouse is over, the lines Shift lines
+//                      up with - after the slide is laid out again for what
+//                      the clicks did
+//
+// A drag is moved before the slide is laid out (PLACE_BeforeLayout), so the
+// slide and its outline are where the mouse is in the same frame. It goes on
+// while the button is down, wherever the mouse is: a block resized wraps its
+// words again, and the box of the line that was pressed on may be gone.
 
 // The side of a corner's handle, and how far the mouse goes with the button
 // down before it is a drag and not a click. In UI units.
@@ -59,7 +78,7 @@ _PLACE_HandleRect(Rng2F32 box, U32 corner, F32 ui) {
    return R2F32P(x - half, y - half, x + half, y + half);
 }
 
-// Whether the boxes kept from the last frame are of the text as it is.
+// Whether the slide's boxes, as laid out, are of the text as it is.
 internal B32
 _PLACE_BoxesAreGood(App_State* app_state) {
    return (app_state->editor != 0 && app_state->editor->edit_count == app_state->preview_hits_edit_count &&
@@ -153,18 +172,6 @@ _PLACE_BoxAt(App_State* app_state, Vec2F32 pos) {
       result = title;
    } else {
       result = text;
-   }
-   return result;
-}
-
-// Whether pos is on the strip of controls of one of the preview's videos.
-internal B32
-_PLACE_IsOnVideoStrip(App_State* app_state, F32 ui, Vec2F32 pos) {
-   B32 result = 0;
-   for (U64 picture_idx = 0; picture_idx < DECK_MAX_PICTURES && !result; picture_idx += 1) {
-      Rng2F32    video_rect = {0};
-      VID_Video* video = _EDIT_PreviewVideo(app_state, app_state->preview_page, picture_idx, &video_rect);
-      result = (video != 0 && FR_VideoStripContains(app_state, video_rect, ui, pos));
    }
    return result;
 }
@@ -507,134 +514,240 @@ _PLACE_Begin(App_State* app_state, VIEW_Box* from, U32 corner, Vec2F32 pos, EDIT
    drag->before = *_PLACE_PlaceOf(&app_state->deck->slides[app_state->slide_idx], kind, idx);
 }
 
-// Before the edit screen's own keys and clicks (EDIT_Input), and before
-// anything this frame has changed the text.
+
+// The box the slide's piece of kind and idx was laid out in, this frame: 0
+// if it has none - a picture behind the words.
+internal VIEW_Box*
+_PLACE_BoxOf(App_State* app_state, DECK_PlaceKind kind, U64 idx) {
+   VIEW_Box* result = 0;
+   for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+      if (app_state->preview_boxes[i].kind == kind && app_state->preview_boxes[i].idx == idx) {
+         result = &app_state->preview_boxes[i];
+      }
+   }
+   return result;
+}
+
+// Which piece of the slide a hit of the preview is of: the title's words,
+// a line of a block's, or a picture. 0 if none - a hit is always one of
+// those, but the text can be ahead of the slide drawn.
+internal B32
+_PLACE_PieceOfHit(DECK_Slide* slide, VIEW_Hit* hit, DECK_PlaceKind* kind_out, U64* idx_out) {
+   B32 result = 0;
+   U64 block_idx = _PLACE_BlockOfRange(slide, hit->text_range);
+   if (hit->text_range.min == slide->title_range.min && hit->text_range.max == slide->title_range.max) {
+      *kind_out = DECK_PlaceKind_Title;
+      *idx_out = 0;
+      result = 1;
+   } else if (block_idx != max_U64) {
+      *kind_out = DECK_PlaceKind_Text;
+      *idx_out = block_idx;
+      result = 1;
+   } else {
+      for (U64 i = 0; i < slide->picture_count && !result; i += 1) {
+         if (slide->pictures[i].range.min == hit->text_range.min && slide->pictures[i].range.max == hit->text_range.max) {
+            *kind_out = DECK_PlaceKind_Picture;
+            *idx_out = i;
+            result = 1;
+         }
+      }
+   }
+   return result;
+}
+
 internal void
-PLACE_Input(App_State* app_state, F32 ui) {
+PLACE_Keys(App_State* app_state) {
    EDIT_PlaceDrag* drag = &app_state->place_drag;
-   ED_Editor*      editor = app_state->editor;
-   DECK_Deck*      deck = app_state->deck;
-   WM_EventList*   events = &app_state->events;
-
-   //- bgz: one under way
-   if (drag->state != EDIT_PlaceDragState_None) {
-      B32 is_same = (editor != 0 && editor->edit_count == drag->edit_count && drag->slide_idx == app_state->slide_idx &&
-                     drag->slide_idx < deck->slide_count && !app_state->show_open);
-      if (!is_same) {
-         // The text has changed under it, or the slide: given up. A deck
-         // made again from the text has the place the text says already.
-         if (editor != 0 && editor->edit_count == drag->edit_count && drag->slide_idx < deck->slide_count) {
-            *_PLACE_PlaceOf(&deck->slides[drag->slide_idx], drag->kind, drag->idx) = drag->before;
-         }
-         drag->state = EDIT_PlaceDragState_None;
-         return;
+   if (drag->state == EDIT_PlaceDragState_Dragging && Core_WM_KeyPress(&app_state->events, app_state->window, 0, WM_Key_Esc)) {
+      DECK_Deck* deck = app_state->deck;
+      if (drag->slide_idx < deck->slide_count) {
+         *_PLACE_PlaceOf(&deck->slides[drag->slide_idx], drag->kind, drag->idx) = drag->before;
       }
-
-      DECK_Slide* slide = &deck->slides[drag->slide_idx];
-      Vec2F32     mouse = Core_WM_MouseFromWindow(app_state->window);
-
-      DECK_Place* place = _PLACE_PlaceOf(slide, drag->kind, drag->idx);
-
-      if (drag->state == EDIT_PlaceDragState_Dragging && Core_WM_KeyPress(events, app_state->window, 0, WM_Key_Esc)) {
-         *place = drag->before;
-         drag->state = EDIT_PlaceDragState_None;
-         return;
-      }
-
-      if (!Core_WM_KeyIsDown(WM_Key_LeftMouseButton)) {
-         if (drag->state == EDIT_PlaceDragState_Dragging) {
-            *place = drag->before;
-            _PLACE_WriteLine(editor, slide, drag->kind, drag->idx, &drag->before, drag->now);
-            editor->last_input_us = NowTimeUS();
-         }
-         drag->state = EDIT_PlaceDragState_None;
-         return;
-      }
-
-      if (drag->state == EDIT_PlaceDragState_Pressed) {
-         // Not "far": windows.h makes that word nothing.
-         F32 reach = _PLACE_DRAG_START * ui;
-         F32 gone_x = mouse.x - drag->press_mouse.x;
-         F32 gone_y = mouse.y - drag->press_mouse.y;
-         if (gone_x > reach || gone_x < -reach || gone_y > reach || gone_y < -reach) {
-            drag->state = EDIT_PlaceDragState_Dragging;
-         }
-      }
-      if (drag->state == EDIT_PlaceDragState_Dragging) {
-         drag->now = _PLACE_RectFromMouse(drag, app_state->preview_page, mouse);
-         // Shift lines it up with what it is near.
-         drag->has_guide_x = 0;
-         drag->has_guide_y = 0;
-         if (Core_WM_KeyIsDown(WM_Key_Shift)) {
-            drag->now = _PLACE_LinedUp(app_state, drag, drag->now, ui);
-         }
-         place->is_set = 1;
-         place->rect = drag->now;
-      }
-      return;
-   }
-
-   //- bgz: one begun, or a box put back
-   if (!_PLACE_BoxesAreGood(app_state)) {
-      return;
-   }
-   for (WM_Event* event = events->first; event != 0; event = event->next) {
-      if (event->kind != WM_EventKind_Press) {
-         continue;
-      }
-
-      if (event->key == WM_Key_LeftMouseButton) {
-         // A corner first: its handle reaches past the box, and over
-         // whatever else is there. Of the box the point is on, if it is on
-         // one, then of any - the last drawn, which is on top, first.
-         VIEW_Box* on = _PLACE_BoxAt(app_state, event->pos);
-         VIEW_Box* held = 0;
-         U32       held_corner = 0;
-         for (U64 i = app_state->preview_box_count + 1; i > 0 && held == 0; i -= 1) {
-            VIEW_Box* box = (i == app_state->preview_box_count + 1) ? on : &app_state->preview_boxes[i - 1];
-            for (U32 corner = 1; corner <= 4 && box != 0; corner += 1) {
-               if (Contains2F32(_PLACE_HandleRect(box->rect, corner, ui), event->pos)) {
-                  held = box;
-                  held_corner = corner;
-                  break;
-               }
-            }
-         }
-         if (held != 0) {
-            _PLACE_Begin(app_state, held, held_corner, event->pos, EDIT_PlaceDragState_Dragging);
-            Core_WM_EatEvent(events, event);
-            break;
-         }
-
-         // Inside a box: watched, and left for the click it may be. Not on
-         // a video's strip of controls: a press there is the strip's.
-         if (on != 0 && !_PLACE_IsOnVideoStrip(app_state, ui, event->pos)) {
-            _PLACE_Begin(app_state, on, 0, event->pos, EDIT_PlaceDragState_Pressed);
-            break;
-         }
-      }
-
-      if (event->key == WM_Key_RightMouseButton) {
-         VIEW_Box* on = _PLACE_BoxAt(app_state, event->pos);
-         if (on != 0) {
-            DECK_Place* place = _PLACE_PlaceOf(&deck->slides[app_state->slide_idx], on->kind, on->idx);
-            if (place->has_line) {
-               _PLACE_RemoveLine(editor, place);
-               editor->last_input_us = NowTimeUS();
-               FR_Notice(app_state, Str8Lit("Back where the layout puts it"));
-            }
-            Core_WM_EatEvent(events, event);
-            break;
-         }
-      }
+      drag->state = EDIT_PlaceDragState_None;
+      // The box held lets go too: its release is no click.
+      UI_KillAction();
    }
 }
 
-// The outline and the corners of the box the mouse is over, or that is
-// being dragged. After the preview's slide is drawn and its boxes kept.
-// Returns 1 if it drew any: the mouse is on something that can be moved.
+internal void
+PLACE_BeforeLayout(App_State* app_state, F32 ui) {
+   EDIT_PlaceDrag* drag = &app_state->place_drag;
+   ED_Editor*      editor = app_state->editor;
+   DECK_Deck*      deck = app_state->deck;
+   if (drag->state == EDIT_PlaceDragState_None) {
+      return;
+   }
+
+   B32 is_same = (editor != 0 && editor->edit_count == drag->edit_count && drag->slide_idx == app_state->slide_idx &&
+                  drag->slide_idx < deck->slide_count && !app_state->show_open);
+   if (!is_same) {
+      // The text has changed under it, or the slide: given up. A deck made
+      // again from the text has the place the text says already.
+      if (editor != 0 && editor->edit_count == drag->edit_count && drag->slide_idx < deck->slide_count) {
+         *_PLACE_PlaceOf(&deck->slides[drag->slide_idx], drag->kind, drag->idx) = drag->before;
+      }
+      drag->state = EDIT_PlaceDragState_None;
+      return;
+   }
+
+   DECK_Slide* slide = &deck->slides[drag->slide_idx];
+   DECK_Place* place = _PLACE_PlaceOf(slide, drag->kind, drag->idx);
+   // The window's mouse, not the UI's: the UI puts it off the window when
+   // the window is not the one in front and it has not moved for a moment.
+   Vec2F32 mouse = Core_WM_MouseFromWindow(app_state->window);
+
+   // The button held since the press. Not asked of the box pressed: a
+   // resized block wraps its words again, and the line pressed on may be
+   // gone, and its box with it.
+   if (!Core_WM_KeyIsDown(WM_Key_LeftMouseButton)) {
+      if (drag->state == EDIT_PlaceDragState_Dragging) {
+         *place = drag->before;
+         _PLACE_WriteLine(editor, slide, drag->kind, drag->idx, &drag->before, drag->now);
+         editor->last_input_us = NowTimeUS();
+      }
+      drag->state = EDIT_PlaceDragState_None;
+      return;
+   }
+
+   if (drag->state == EDIT_PlaceDragState_Pressed) {
+      F32 reach = _PLACE_DRAG_START * ui;
+      F32 gone_x = mouse.x - drag->press_mouse.x;
+      F32 gone_y = mouse.y - drag->press_mouse.y;
+      if (gone_x > reach || gone_x < -reach || gone_y > reach || gone_y < -reach) {
+         drag->state = EDIT_PlaceDragState_Dragging;
+      }
+   }
+   if (drag->state == EDIT_PlaceDragState_Dragging) {
+      drag->now = _PLACE_RectFromMouse(drag, app_state->preview_page, mouse);
+      // Shift lines it up with what it is near.
+      drag->has_guide_x = 0;
+      drag->has_guide_y = 0;
+      if (Core_WM_KeyIsDown(WM_Key_Shift)) {
+         drag->now = _PLACE_LinedUp(app_state, drag, drag->now, ui);
+      }
+      place->is_set = 1;
+      place->rect = drag->now;
+   }
+}
+
+// One of the boxes of a piece of the slide - kind and idx, has_piece 0 for
+// one that is of none - asked for its signal. corner: of a corner's handle,
+// else 0. hit_idx: of a hit of the preview, else -1. 1 if what was done to it
+// changed the text, the cursor or a block's scroll.
 internal B32
-PLACE_Draw(App_State* app_state, F32 ui, Vec2F32 mouse) {
+_PLACE_Signal(App_State* app_state, UI_Box* box, B32 has_piece, DECK_PlaceKind kind, U64 idx, U32 corner, S64 hit_idx,
+              PLACE_Hover* hover) {
+   B32       result = 0;
+   UI_Signal signal = UI_SignalFromBox(box);
+   VIEW_Box* piece = has_piece ? _PLACE_BoxOf(app_state, kind, idx) : 0;
+
+   if (UI_Hovering(signal) && !hover->is_over) {
+      hover->is_over = 1;
+      hover->has_piece = (piece != 0);
+      hover->kind = kind;
+      hover->idx = idx;
+      hover->corner = corner;
+      hover->hit_idx = hit_idx;
+   }
+
+   if (signal.f & UI_SignalFlag_LeftPressed) {
+      Vec2F32 pos = UI_DragStartMouse();
+      if (corner != 0 && piece != 0) {
+         _PLACE_Begin(app_state, piece, corner, pos, EDIT_PlaceDragState_Dragging);
+      } else {
+         // A press is a click until the mouse goes somewhere: to the words,
+         // or the picture (frame_edit.c) - and watched, for a drag.
+         EDIT_PreviewClick(app_state, pos, !!(signal.event_flags & WM_Modifier_Shift));
+         if (piece != 0) {
+            _PLACE_Begin(app_state, piece, 0, pos, EDIT_PlaceDragState_Pressed);
+         }
+      }
+      result = 1;
+   }
+
+   if ((signal.f & UI_SignalFlag_RightPressed) && piece != 0) {
+      DECK_Place* place = _PLACE_PlaceOf(&app_state->deck->slides[app_state->slide_idx], kind, idx);
+      if (place->has_line) {
+         _PLACE_RemoveLine(app_state->editor, place);
+         app_state->editor->last_input_us = NowTimeUS();
+         FR_Notice(app_state, Str8Lit("Back where the layout puts it"));
+         result = 1;
+      }
+   }
+
+   // The wheel over a block's words moves them (frame_caret.c). Over
+   // anything else of the slide it does nothing - not the block under a
+   // picture.
+   if (signal.scroll.y != 0 && has_piece && kind == DECK_PlaceKind_Text) {
+      CARET_ScrollBlock(app_state, idx, (F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH);
+      result = 1;
+   }
+
+   return result;
+}
+
+internal B32
+PLACE_BuildCorners(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hover) {
+   B32 result = 0;
+   if (!interactive || !_PLACE_BoxesAreGood(app_state)) {
+      return 0;
+   }
+   UI_BoxFlags flags = UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll;
+
+   // Their handles reach past their boxes, over whatever else is there -
+   // a video's strip too. The last drawn, which is on top, first.
+   for (U64 i = app_state->preview_box_count; i > 0; i -= 1) {
+      VIEW_Box* box = &app_state->preview_boxes[i - 1];
+      for (U32 corner = 1; corner <= 4; corner += 1) {
+         UI_Box* handle = FR_BuildRectBox(flags, _PLACE_HandleRect(box->rect, corner, ui), "###place corner %d %llu %u",
+                                          (int)box->kind, (unsigned long long)box->idx, corner);
+         result |= _PLACE_Signal(app_state, handle, 1, box->kind, box->idx, corner, -1, hover);
+      }
+   }
+   return result;
+}
+
+internal B32
+PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hover) {
+   B32 result = 0;
+   // Not built at all under the open screen: they are only to be clicked.
+   if (!interactive || !_PLACE_BoxesAreGood(app_state)) {
+      return 0;
+   }
+   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   UI_BoxFlags flags = UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll;
+   UnusedVariable(ui);
+
+   //- bgz: the words and the pictures, as drawn: the last drawn first, which
+   // is the one on top. A block's words are over a picture under them
+   for (U64 i = app_state->preview_hit_count; i > 0; i -= 1) {
+      VIEW_Hit*      hit = &app_state->preview_hits[i - 1];
+      DECK_PlaceKind kind = DECK_PlaceKind_Title;
+      U64            idx = 0;
+      B32            has_piece = _PLACE_PieceOfHit(slide, hit, &kind, &idx);
+      UI_Box*        box = FR_BuildRectBox(flags, hit->rect, "###place hit %llu", (unsigned long long)(i - 1));
+      result |= _PLACE_Signal(app_state, box, has_piece, kind, idx, 0, (S64)(i - 1), hover);
+   }
+
+   //- bgz: the pieces' own boxes, where no words are: a picture over the
+   // title's or a block's, and the title's over a block's
+   DECK_PlaceKind kinds[] = {DECK_PlaceKind_Picture, DECK_PlaceKind_Title, DECK_PlaceKind_Text};
+   for (U64 k = 0; k < ArrayCount(kinds); k += 1) {
+      for (U64 i = app_state->preview_box_count; i > 0; i -= 1) {
+         VIEW_Box* box = &app_state->preview_boxes[i - 1];
+         if (box->kind != kinds[k] || (box->kind == DECK_PlaceKind_Picture && box->idx >= slide->picture_count)) {
+            continue;
+         }
+         UI_Box* ui_box = FR_BuildRectBox(flags, box->rect, "###place box %d %llu", (int)box->kind, (unsigned long long)box->idx);
+         result |= _PLACE_Signal(app_state, ui_box, 1, box->kind, box->idx, 0, -1, hover);
+      }
+   }
+
+   return result;
+}
+
+internal B32
+PLACE_BuildLook(App_State* app_state, F32 ui, PLACE_Hover* hover) {
    B32             result = 0;
    EDIT_PlaceDrag* drag = &app_state->place_drag;
    if (app_state->show_open || app_state->slide_idx >= app_state->deck->slide_count) {
@@ -644,81 +757,68 @@ PLACE_Draw(App_State* app_state, F32 ui, Vec2F32 mouse) {
    B32       is_dragging = (drag->state == EDIT_PlaceDragState_Dragging);
    VIEW_Box* over = 0;
    if (is_dragging) {
-      for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
-         VIEW_Box* candidate = &app_state->preview_boxes[i];
-         if (candidate->kind == drag->kind && candidate->idx == drag->idx) {
-            over = candidate;
-         }
-      }
-   } else if (_PLACE_BoxesAreGood(app_state)) {
-      over = _PLACE_BoxAt(app_state, mouse);
-      // A corner's handle reaches past its box.
-      for (U64 i = app_state->preview_box_count; i > 0 && over == 0; i -= 1) {
-         for (U32 corner = 1; corner <= 4; corner += 1) {
-            if (Contains2F32(_PLACE_HandleRect(app_state->preview_boxes[i - 1].rect, corner, ui), mouse)) {
-               over = &app_state->preview_boxes[i - 1];
-               break;
-            }
-         }
-      }
+      over = _PLACE_BoxOf(app_state, drag->kind, drag->idx);
+   } else if (_PLACE_BoxesAreGood(app_state) && hover->is_over && hover->has_piece) {
+      over = _PLACE_BoxOf(app_state, hover->kind, hover->idx);
    }
 
-   if (over != 0) {
-      Rng2F32 box = over->rect;
-      Vec4F32 accent = VIEW_ColorsFromTheme(app_state->deck->theme).accent;
-      Vec4F32 line_color = accent;
-      line_color.w = is_dragging ? 1.0f : 0.7f;
-      F32 thick = Max(1.0f, (F32)(S32)(1.5f * ui));
-
-      Core_D_Rect(R2F32P(box.min.x, box.min.y, box.max.x, box.min.y + thick), R2F32P(0, 0, 1, 1), line_color);
-      Core_D_Rect(R2F32P(box.min.x, box.max.y - thick, box.max.x, box.max.y), R2F32P(0, 0, 1, 1), line_color);
-      Core_D_Rect(R2F32P(box.min.x, box.min.y, box.min.x + thick, box.max.y), R2F32P(0, 0, 1, 1), line_color);
-      Core_D_Rect(R2F32P(box.max.x - thick, box.min.y, box.max.x, box.max.y), R2F32P(0, 0, 1, 1), line_color);
-
-      for (U32 corner = 1; corner <= 4; corner += 1) {
-         Rng2F32 handle = _PLACE_HandleRect(box, corner, ui);
-         B32     is_hot = (is_dragging ? drag->corner == corner : Contains2F32(handle, mouse));
-         Core_D_Rect(handle, R2F32P(0, 0, 1, 1), accent);
-         Core_D_Rect(R2F32P(handle.min.x + thick, handle.min.y + thick, handle.max.x - thick, handle.max.y - thick),
-                     R2F32P(0, 0, 1, 1), is_hot ? accent : V4F32(1, 1, 1, 1));
-      }
-      result = 1;
-   }
-
-   // What a drag with Shift down is lined up with: a line the whole way
-   // across the page, or down it.
+   //- bgz: what a drag with Shift down is lined up with: a line the whole
+   // way across the page, or down it, and the box each line came from
    if (is_dragging) {
       Rng2F32 page = app_state->preview_page;
       Vec2F32 page_dim = Dim2F32(page);
-      Vec4F32 guide_color = V4F32(1.0f, 0.25f, 0.65f, 0.9f); // not a colour any theme has
       F32     guide_thick = Max(1.0f, (F32)(S32)ui);
-      if (drag->has_guide_x) {
-         F32 x = (F32)(S32)(page.min.x + drag->guide_x * page_dim.x - guide_thick * 0.5f);
-         x = Clamp(page.min.x, x, page.max.x - guide_thick);
-         Core_D_Rect(R2F32P(x, page.min.y, x + guide_thick, page.max.y), R2F32P(0, 0, 1, 1), guide_color);
+      UI_ColorTag(Str8Lit("guide")) {
+         if (drag->has_guide_x) {
+            F32 x = (F32)(S32)(page.min.x + drag->guide_x * page_dim.x - guide_thick * 0.5f);
+            x = Clamp(page.min.x, x, page.max.x - guide_thick);
+            FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(x, page.min.y, x + guide_thick, page.max.y), "###place guide x");
+         }
+         if (drag->has_guide_y) {
+            F32 y = (F32)(S32)(page.min.y + drag->guide_y * page_dim.y - guide_thick * 0.5f);
+            y = Clamp(page.min.y, y, page.max.y - guide_thick);
+            FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(page.min.x, y, page.max.x, y + guide_thick), "###place guide y");
+         }
+         Vec4F32 box_color = UI_ColorFromSlot(UI_ColorSlot_Border);
+         for (U32 axis = 0; axis < 2; axis += 1) {
+            B32     has_box = (axis == 0) ? (drag->has_guide_x && drag->has_guide_box_x) : (drag->has_guide_y && drag->has_guide_box_y);
+            Rng2F32 from = (axis == 0) ? drag->guide_box_x : drag->guide_box_y;
+            if (!has_box || (axis == 1 && drag->has_guide_x && drag->has_guide_box_x && MemoryMatchStruct(&from, &drag->guide_box_x))) {
+               continue;
+            }
+            Rng2F32 box = R2F32P((F32)(S32)(page.min.x + from.min.x * page_dim.x), (F32)(S32)(page.min.y + from.min.y * page_dim.y),
+                                 (F32)(S32)(page.min.x + from.max.x * page_dim.x), (F32)(S32)(page.min.y + from.max.y * page_dim.y));
+            FR_BuildEdge(box, guide_thick, box_color, "###place guide box %u", axis);
+         }
       }
-      if (drag->has_guide_y) {
-         F32 y = (F32)(S32)(page.min.y + drag->guide_y * page_dim.y - guide_thick * 0.5f);
-         y = Clamp(page.min.y, y, page.max.y - guide_thick);
-         Core_D_Rect(R2F32P(page.min.x, y, page.max.x, y + guide_thick), R2F32P(0, 0, 1, 1), guide_color);
+   }
+
+   //- bgz: the box the mouse is over, or that is dragged, with its corners.
+   // In the theme's accent: it is about the slide's own piece
+   if (over != 0) {
+      Rng2F32 box = over->rect;
+      Vec4F32 accent = VIEW_ColorsFromTheme(app_state->deck->theme).accent;
+      F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
+
+      for (U32 corner = 1; corner <= 4; corner += 1) {
+         Rng2F32 handle = _PLACE_HandleRect(box, corner, ui);
+         B32     is_hot = is_dragging ? (drag->corner == corner) : (hover->corner == corner);
+         UI_SetNextBackgroundColor(accent);
+         UI_Box* outer = FR_BuildRectBox(UI_BoxFlag_DrawBackground, handle, "###place look corner %u", corner);
+         UI_Parent(outer) UI_ColorTag(Str8Lit("handle")) {
+            Rng2F32 inner = R2F32P(thick, thick, Dim2F32(handle).x - thick, Dim2F32(handle).y - thick);
+            if (is_hot) {
+               UI_SetNextBackgroundColor(accent);
+            }
+            UI_SetNextRect(inner);
+            UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground, "###place look corner inner %u", corner);
+         }
       }
 
-      // And the box each line came from, in the same colour, fainter.
-      Vec4F32 box_color = guide_color;
-      box_color.w = 0.6f;
-      for (U32 axis = 0; axis < 2; axis += 1) {
-         B32     has_box = (axis == 0) ? (drag->has_guide_x && drag->has_guide_box_x) : (drag->has_guide_y && drag->has_guide_box_y);
-         Rng2F32 from = (axis == 0) ? drag->guide_box_x : drag->guide_box_y;
-         if (!has_box || (axis == 1 && drag->has_guide_x && drag->has_guide_box_x && MemoryMatchStruct(&from, &drag->guide_box_x))) {
-            continue;
-         }
-         Rng2F32 box = R2F32P((F32)(S32)(page.min.x + from.min.x * page_dim.x), (F32)(S32)(page.min.y + from.min.y * page_dim.y),
-                              (F32)(S32)(page.min.x + from.max.x * page_dim.x), (F32)(S32)(page.min.y + from.max.y * page_dim.y));
-         Core_D_Rect(R2F32P(box.min.x, box.min.y, box.max.x, box.min.y + guide_thick), R2F32P(0, 0, 1, 1), box_color);
-         Core_D_Rect(R2F32P(box.min.x, box.max.y - guide_thick, box.max.x, box.max.y), R2F32P(0, 0, 1, 1), box_color);
-         Core_D_Rect(R2F32P(box.min.x, box.min.y, box.min.x + guide_thick, box.max.y), R2F32P(0, 0, 1, 1), box_color);
-         Core_D_Rect(R2F32P(box.max.x - guide_thick, box.min.y, box.max.x, box.max.y), R2F32P(0, 0, 1, 1), box_color);
-      }
+      Vec4F32 line_color = accent;
+      line_color.w = is_dragging ? 1.0f : 0.7f;
+      FR_BuildEdge(box, thick, line_color, "###place look outline");
+      result = 1;
    }
 
    return result;

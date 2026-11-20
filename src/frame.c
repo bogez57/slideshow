@@ -837,14 +837,16 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
 // _FR_BeginUIBuild, _FR_DrawUITree).
 //
 // Built with it: the open screen (OPEN_Build, frame_open.c) and the edit
-// screen's Format panel, list of pictures and status line (EDIT_Build,
-// frame_edit.c). The text editor, the slides and the small slides are drawn
-// by hand.
+// screen's Format panel, list of pictures, status line, and what is over
+// its slide - the caret, the boxes of its pieces and their corners, scroll
+// bars, videos' controls, the caption (EDIT_Build, frame_edit.c). The text
+// editor, the slides themselves and the small slides are drawn by hand.
 //
 // The UI's events are what the screens' own input (EDIT_Input, OPEN_Input)
-// left: a click that took is eaten there. The hand-drawn parts and the UI
-// parts do not overlap, so neither gets the other's clicks; while the open
-// screen is up, the edit screen's input does not run at all.
+// left: a click that took is eaten there. The hand-drawn parts that take
+// clicks and the UI parts do not overlap, so neither gets the other's
+// clicks; while the open screen is up, the edit screen's input does not run
+// at all, and its UI boxes are built only to be seen.
 
 // This frame's window events as the UI's. Selects the UI's state first: the
 // list is on UI_BuildArena, which is the selected state's, and lasts until
@@ -892,6 +894,65 @@ _FR_UIEventsFromEvents(App_State* app_state) {
    }
 
    return ui_events;
+}
+
+internal UI_Box*
+_FR_BuildRectBoxV(UI_BoxFlags flags, Rng2F32 rect, char* fmt, va_list args) {
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 key = PushStr8FV(scratch.arena, fmt, args);
+   UI_SetNextRect(rect);
+   UI_Box* box = UI_BuildBoxFromString(flags, key);
+   // The layout puts it at rect too, from its fixed place, but only at
+   // UI_EndBuild: its signal would be asked of where it was last frame - a
+   // frame behind a piece of the slide that has just moved.
+   box->rect = rect;
+   ScratchEnd(scratch);
+   return box;
+}
+
+internal UI_Box*
+FR_BuildRectBox(UI_BoxFlags flags, Rng2F32 rect, char* fmt, ...) {
+   va_list args;
+   va_start(args, fmt);
+   UI_Box* box = _FR_BuildRectBoxV(flags, rect, fmt, args);
+   va_end(args);
+   return box;
+}
+
+typedef struct _FR_Edge _FR_Edge;
+struct _FR_Edge {
+   Rng2F32 rect;
+   F32     thick;
+};
+
+// Drawn at the rect it was given, not the box's: the layout puts a box on
+// whole pixels, and an outline around a piece of the slide is where the
+// piece is, which is not.
+internal void
+_FR_DrawEdge(UI_Box* box, void* user_data) {
+   _FR_Edge* edge = (_FR_Edge*)user_data;
+   Rng2F32   r = edge->rect;
+   F32       t = edge->thick;
+   Vec4F32   c = box->border_color;
+   Core_D_Rect(R2F32P(r.min.x, r.min.y, r.max.x, r.min.y + t), R2F32P(0, 0, 1, 1), c);
+   Core_D_Rect(R2F32P(r.min.x, r.max.y - t, r.max.x, r.max.y), R2F32P(0, 0, 1, 1), c);
+   Core_D_Rect(R2F32P(r.min.x, r.min.y, r.min.x + t, r.max.y), R2F32P(0, 0, 1, 1), c);
+   Core_D_Rect(R2F32P(r.max.x - t, r.min.y, r.max.x, r.max.y), R2F32P(0, 0, 1, 1), c);
+}
+
+internal UI_Box*
+FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...) {
+   va_list args;
+   va_start(args, fmt);
+   UI_Box* box = _FR_BuildRectBoxV(0, rect, fmt, args);
+   va_end(args);
+   // On the build arena: it is drawn after the build, and gone with it.
+   _FR_Edge* edge = PushArray(UI_BuildArena(), _FR_Edge, 1);
+   edge->rect = rect;
+   edge->thick = thick;
+   box->border_color = color;
+   UI_BoxEquipCustomDraw(box, _FR_DrawEdge, edge);
+   return box;
 }
 
 internal F32
@@ -952,6 +1013,22 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
        {"action", UI_ColorSlot_Text, {{0.60f, 0.85f, 0.60f, 1.00f}}},          // Browse, New deck, Present
        {"syntax", UI_ColorSlot_Text, {{1.00f, 0.80f, 0.40f, 1.00f}}},          // a Format line, as it is written
        {"picture", UI_ColorSlot_Text, {{0.60f, 0.85f, 0.60f, 1.00f}}},         // a picture's name
+
+       //- bgz: the edit screen's preview (frame_edit.c, frame_caret.c,
+       // frame_place.c, frame_video.c). What is of the slide itself - the
+       // caret, a piece's outline, the wash under the mouse, a block's scroll
+       // bar - is in the slide's theme's colours instead, to show on it.
+       {"focus", UI_ColorSlot_Border, {{0.26f, 0.60f, 1.00f, 1.00f}}},       // the box of the piece the cursor is in
+       {"focus", UI_ColorSlot_Background, {{0.26f, 0.60f, 1.00f, 0.35f}}},   // what is selected, on the slide
+       {"guide", UI_ColorSlot_Background, {{1.00f, 0.25f, 0.65f, 0.90f}}},   // what Shift lines a drag up with: no theme has it
+       {"guide", UI_ColorSlot_Border, {{1.00f, 0.25f, 0.65f, 0.54f}}},       // and the box the line is from
+       {"handle", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 1.00f}}},  // inside a corner's handle
+       {"strip", UI_ColorSlot_Background, {{0.00f, 0.00f, 0.00f, 0.62f}}},   // a video's controls: dark over any video
+       {"strip", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.95f}}},
+       {"strip hot", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.18f}}},
+       {"strip muted", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.50f}}},
+       {"strip track", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.25f}}},
+       {"strip played", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.95f}}},
    };
    static UI_Theme theme = {theme_patterns, ArrayCount(theme_patterns)};
 
@@ -1130,6 +1207,10 @@ FrameWork(App_State* app_state) {
    // Before input: the edit screen measures text to know what a click is on.
    _FR_BeginText(app_state, window_dim);
 
+   // Before the UI build too: the edit screen lays its slide out there, into
+   // a bucket of its own, to know where its pieces are this frame.
+   Core_D_BeginFrame();
+
    // The presenter's window is for presenting: it goes when the text comes
    // back. Its keys are made the main window's before anything reads them.
    PRES_Input(app_state);
@@ -1183,7 +1264,6 @@ FrameWork(App_State* app_state) {
       UI_EndBuild();
    }
 
-   Core_D_BeginFrame();
    D_Bucket* bucket = Core_D_BucketMake();
    Core_D_BucketScope(bucket) {
       // The background, which is all there is behind a slide that does not
