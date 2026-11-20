@@ -34,8 +34,9 @@
 // the + - are built with the UI layer (EDIT_Build, called from FrameWork's UI
 // build), and take their own clicks and wheel there: see "the preview, in
 // the UI layer" below. The slides are drawn by the boxes they are in (the
-// view, as a box's custom draw). The text is drawn by hand (EDIT_Draw), and
-// its keys and mouse are EDIT_Input's, through the editor (editor.h).
+// view, as a box's custom draw), and so is the text (the editor, editor.h,
+// which is also given the text box's press, drag and wheel). The keys are
+// EDIT_Input's, before the build: the screen's own, then the editor's.
 //
 // The slide in the preview is typed into: a click on its title or on a
 // block of its words puts the cursor at the letter clicked, with a caret
@@ -873,7 +874,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    }
 
    //- bgz: everything else is the editor's
-   ED_Input(editor, app_state->frame_arena, events, window, layout.editor_box);
+   ED_Input(editor, app_state->frame_arena, events, layout.editor_box);
 
    //- bgz: the deck, and the slide the cursor is on
    FR_SyncDeck(app_state);
@@ -1402,6 +1403,21 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
    FR_BuildRectBox(UI_BoxFlag_DrawBackground, layout->preview, "###edit preview");
 }
 
+typedef struct _EDIT_Pane _EDIT_Pane;
+struct _EDIT_Pane {
+   ED_Editor* editor;
+   Arena*     arena; // the frame's, for the rows it lays out
+   ED_Box     box;
+};
+
+// The text, as the editor draws it.
+internal void
+_EDIT_DrawPane(UI_Box* box, void* user_data) {
+   UnusedVariable(box);
+   _EDIT_Pane* pane = (_EDIT_Pane*)user_data;
+   ED_Draw(pane->editor, pane->arena, pane->box);
+}
+
 internal void
 EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
    ED_Editor*   editor = app_state->editor;
@@ -1423,6 +1439,31 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
    S64 color_picked = -1;  // as LOOK_SetColor's named_idx
 
    UI_BoxFlags click_flags = interactive ? UI_BoxFlag_Clickable : 0;
+
+   //- bgz: the text: a box the editor draws in, whose mouse is the editor's
+   // - a press, a drag, the wheel. Its keys are EDIT_Input's.
+   {
+      _EDIT_Pane* pane = PushArray(UI_BuildArena(), _EDIT_Pane, 1);
+      pane->editor = editor;
+      pane->arena = app_state->frame_arena;
+      pane->box = layout.editor_box;
+      UI_Box* box = FR_BuildRectBox(interactive ? (UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll) : 0, layout.editor_box.rect, "###edit text");
+      UI_BoxEquipCustomDraw(box, _EDIT_DrawPane, pane);
+      if (interactive) {
+         UI_Signal signal = UI_SignalFromBox(box);
+         if (signal.f & UI_SignalFlag_LeftPressed) {
+            ED_Press(editor, app_state->frame_arena, layout.editor_box, UI_DragStartMouse(), !!(signal.event_flags & WM_Modifier_Shift));
+         } else if (UI_Dragging(signal)) {
+            // Over the box or not, until the button comes up. The window's
+            // mouse: the UI's is off the window when the window is not in
+            // front and the mouse has not moved for a moment.
+            ED_Drag(editor, app_state->frame_arena, layout.editor_box, Core_WM_MouseFromWindow(app_state->window));
+         }
+         if (signal.scroll.y != 0) {
+            ED_Wheel(editor, layout.editor_box, (F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH);
+         }
+      }
+   }
 
    UI_SetNextRect(R2F32P(0, layout.format_header.min.y, left_w, layout.status.max.y));
    UI_SetNextChildLayoutAxis(Axis2_Y);
@@ -1688,15 +1729,4 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
    _EDIT_BuildPreview(app_state, &layout, interactive);
 
    ScratchEnd(scratch);
-}
-
-////////////////////////////////
-//~ bgz: drawing
-
-// The text. Everything else of the edit screen is the UI's (EDIT_Build),
-// drawn after this.
-internal void
-EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
-   _EDIT_Layout layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
-   ED_Draw(app_state->editor, app_state->frame_arena, layout.editor_box);
 }

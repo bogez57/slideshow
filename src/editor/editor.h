@@ -72,7 +72,6 @@ struct ED_Editor {
 
    F32 scroll_y;         // pixels the text is scrolled up by
    B32 scroll_to_cursor; // the cursor moved: bring it into view when next drawn
-   B32 is_dragging;      // the mouse went down in the text and is still down
    U64 last_input_us;    // the cursor does not blink just after input
 };
 
@@ -91,8 +90,8 @@ struct ED_RowArray {
    U64     count;
 };
 
-// Where the text is drawn and how big. The same one is given to ED_Input and
-// ED_Draw in a frame.
+// Where the text is drawn and how big. The same one is given to ED_Input,
+// the mouse's calls and ED_Draw in a frame.
 typedef struct ED_Box ED_Box;
 struct ED_Box {
    Rng2F32 rect;
@@ -137,10 +136,19 @@ internal void ED_WrapSelection(ED_Editor* editor, String8 mark, String8 placehol
 
 internal void ED_SetCursor(ED_Editor* editor, U64 pos);
 
-// Keys, typing and the mouse. Events it uses are eaten, so what the caller
-// wants for itself (its own shortcuts) it takes first. arena is for the
-// frame: the row layout and the clipboard's text go on it.
-internal void ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, WM_Window window, ED_Box box);
+// Keys and typing. Events it uses are eaten, so what the caller wants for
+// itself (its own shortcuts) it takes first. arena is for the frame: the row
+// layout and the clipboard's text go on it.
+internal void ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, ED_Box box);
+
+// The mouse, as the caller's box over the text has it (the edit screen's UI
+// box): a press at pos puts the cursor at the nearest gap between letters
+// there - selecting from where it was, with is_selecting; a drag, while the
+// button that went down in the text stays down, over the box or not, takes
+// the cursor along and leaves the mark; the wheel scrolls notches down.
+internal void ED_Press(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos, B32 is_selecting);
+internal void ED_Drag(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos);
+internal void ED_Wheel(ED_Editor* editor, ED_Box box, F32 notches);
 
 internal void ED_Draw(ED_Editor* editor, Arena* arena, ED_Box box);
 

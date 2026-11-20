@@ -3,9 +3,8 @@
 //
 // FrameWork is everything between the renderer's begin and end of a frame
 // (main.c): read this frame's input and the clock, build the UI layer's tree
-// (the open screen, the edit screen's panels), then draw the screen that is
-// up - the presentation, which is in this file, or the edit screen
-// (frame_edit.c) - and the UI's tree over it. It also runs with no events at
+// (the open screen, the whole edit screen: frame_edit.c), then draw the
+// presentation, which is in this file, if it is up, and the UI's tree over it. It also runs with no events at
 // all, when Windows asks for a repaint during a resize - see
 // _Main_RepaintFrame in main.c.
 
@@ -836,12 +835,12 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
 // hand. Ported from the editor's frame.c (_FR_ProcessEvents,
 // _FR_BeginUIBuild, _FR_DrawUITree).
 //
-// Built with it: the open screen (OPEN_Build, frame_open.c) and the edit
-// screen's Format panel, list of pictures, status line, and its preview -
+// Built with it: the open screen (OPEN_Build, frame_open.c) and the whole
+// edit screen (EDIT_Build, frame_edit.c): the text (drawn by its box, with the
+// editor), the Format panel, list of pictures, status line, and the preview -
 // the slide (drawn by its box, with the view), what is over it (the caret,
 // the boxes of its pieces and their corners, scroll bars, videos' controls),
-// the caption, the small slides and the + (EDIT_Build, frame_edit.c). The
-// text editor, and the presentation, are drawn by hand.
+// the caption, the small slides and the +. The presentation is drawn by hand.
 //
 // The UI's events are what the screens' own input (EDIT_Input, OPEN_Input)
 // left: a click that took is eaten there. The hand-drawn parts that take
@@ -1280,15 +1279,14 @@ FrameWork(App_State* app_state) {
       Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1),
                   VIEW_ColorsFromTheme(app_state->deck->theme).background);
 
-      if (app_state->is_editing) {
-         EDIT_Draw(app_state, window_dim);
-      } else {
+      // The edit screen is all the UI's.
+      if (!app_state->is_editing) {
          _FR_DrawSlide(app_state, window_dim);
          _FR_DrawOverlays(app_state, window_dim);
       }
 
       // Last, over everything drawn by hand: the open screen, and the edit
-      // screen's Format panel and status line.
+      // screen.
       _FR_DrawUITree(app_state);
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);

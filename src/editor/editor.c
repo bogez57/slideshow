@@ -768,10 +768,36 @@ _ED_MoveRows(ED_Editor* editor, ED_RowArray rows, S64 row_delta, B32 is_selectin
 }
 
 internal void
-ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, WM_Window window, ED_Box box) {
+ED_Press(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos, B32 is_selecting) {
    _ED_Metrics metrics = _ED_MetricsFromBox(box);
-   Vec2F32     mouse = Core_WM_MouseFromWindow(window);
-   B32         mouse_is_over = Contains2F32(box.rect, mouse);
+   ED_RowArray rows = _ED_Layout(arena, editor, metrics.columns);
+   _ED_MoveTo(editor, _ED_PosFromPoint(editor, rows, &metrics, pos), is_selecting);
+   editor->want_column = -1;
+   editor->last_input_us = NowTimeUS();
+}
+
+internal void
+ED_Drag(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos) {
+   _ED_Metrics metrics = _ED_MetricsFromBox(box);
+   ED_RowArray rows = _ED_Layout(arena, editor, metrics.columns);
+   U64         at = _ED_PosFromPoint(editor, rows, &metrics, pos);
+   if (at != editor->cursor) {
+      editor->cursor = at;
+      editor->scroll_to_cursor = 1;
+      editor->last_input_us = NowTimeUS();
+   }
+}
+
+internal void
+ED_Wheel(ED_Editor* editor, ED_Box box, F32 notches) {
+   _ED_Metrics metrics = _ED_MetricsFromBox(box);
+   // Three rows a notch. Kept to the text when it is next drawn.
+   editor->scroll_y += notches * metrics.row_h * 3.0f;
+}
+
+internal void
+ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, ED_Box box) {
+   _ED_Metrics metrics = _ED_MetricsFromBox(box);
    B32         had_input = 0;
 
    WM_Event* next_event = 0;
@@ -814,24 +840,9 @@ ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, WM_Window window
             }
          }
          used = 1;
-      } else if (event->kind == WM_EventKind_Scroll) {
-         if (mouse_is_over) {
-            editor->scroll_y += event->delta.y / 120.0f * metrics.row_h * 3.0f;
-            used = 1;
-         }
       } else if (event->kind == WM_EventKind_Press) {
          used = 1;
          switch (event->key) {
-         case WM_Key_LeftMouseButton: {
-            if (Contains2F32(box.rect, event->pos)) {
-               _ED_MoveTo(editor, _ED_PosFromPoint(editor, rows, &metrics, event->pos), is_shift);
-               editor->want_column = -1;
-               editor->is_dragging = 1;
-            } else {
-               used = 0;
-            }
-         } break;
-
          case WM_Key_Left: {
             if (!is_shift && !is_ctrl && editor->cursor != editor->mark) {
                _ED_MoveTo(editor, _ED_SelectionMin(editor), 0);
@@ -954,22 +965,6 @@ ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, WM_Window window
       if (used) {
          Core_WM_EatEvent(events, event);
          had_input = 1;
-      }
-   }
-
-   // A drag: the selection follows the mouse for as long as the button that
-   // went down in the text stays down, over the box or not.
-   if (editor->is_dragging) {
-      if (Core_WM_KeyIsDown(WM_Key_LeftMouseButton)) {
-         ED_RowArray rows = _ED_Layout(arena, editor, metrics.columns);
-         U64         pos = _ED_PosFromPoint(editor, rows, &metrics, mouse);
-         if (pos != editor->cursor) {
-            editor->cursor = pos;
-            editor->scroll_to_cursor = 1;
-            had_input = 1;
-         }
-      } else {
-         editor->is_dragging = 0;
       }
    }
 
