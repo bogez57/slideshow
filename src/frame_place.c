@@ -23,8 +23,9 @@
 //
 // The mouse says which it would be (_PLACE_HoverCursor): over a handle the
 // arrow that resizes the way it does, the four-way arrow while a piece is
-// dragged, and the bar that text is typed at over the title's and blocks'
-// words.
+// dragged, and the bar that text is typed at right at the title's and blocks'
+// words (PLACE_IsAtWords) - the plain arrow in the rest of their boxes, which
+// is where they are taken hold of to be moved.
 //
 // What comes of it is a line of the deck's text - "@place picture 0.55 0.2
 // 0.4 0.6", in parts of the page (deck.h) - written when the button comes
@@ -740,6 +741,29 @@ PLACE_BeforeLayout(App_State* app_state, F32 ui) {
 //    block's words, and     caret at the letter (frame_caret.c)
 //    the room between them
 //    a picture              the arrow
+// 1 if pos is at the words of the title or a block, as shown: on one of
+// their lines, and no further from its letters than half the line is tall.
+// A line with no words yet has that much about where they will start. The
+// rest of the box - beside a short line, under the last - is not: a press
+// there still puts the cursor at the nearest letter, but it is where the box
+// is taken hold of to move it, and the mouse says so.
+internal B32
+PLACE_IsAtWords(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos) {
+   B32       result = 0;
+   VIEW_Box* box = _PLACE_BoxOf(app_state, kind, idx);
+   if (box != 0 && kind != DECK_PlaceKind_Picture && Contains2F32(box->room, pos)) {
+      for (U64 i = 0; i < app_state->preview_run_count && !result; i += 1) {
+         VIEW_Run* run = &app_state->preview_runs[i];
+         if (run->kind != kind || run->idx != idx) {
+            continue;
+         }
+         F32 pad = (run->rect.max.y - run->rect.min.y) * 0.5f;
+         result = (pos.y >= run->rect.min.y && pos.y < run->rect.max.y && pos.x >= run->rect.min.x - pad && pos.x < run->rect.max.x + pad);
+      }
+   }
+   return result;
+}
+
 internal WM_Cursor
 _PLACE_HoverCursor(App_State* app_state, B32 has_piece, DECK_PlaceKind kind, U64 idx, U32 corner) {
    EDIT_PlaceDrag* drag = &app_state->place_drag;
@@ -750,7 +774,7 @@ _PLACE_HoverCursor(App_State* app_state, B32 has_piece, DECK_PlaceKind kind, U64
       result = (corner == 1 || corner == 4) ? WM_Cursor_DownRight : WM_Cursor_UpRight;
    } else if (has_piece && drag->state == EDIT_PlaceDragState_Dragging && drag->kind == kind && drag->idx == idx) {
       result = WM_Cursor_UpDownLeftRight;
-   } else if (has_piece && kind != DECK_PlaceKind_Picture) {
+   } else if (has_piece && PLACE_IsAtWords(app_state, kind, idx, Core_WM_MouseFromWindow(app_state->window))) {
       result = WM_Cursor_IBar;
    }
    return result;
