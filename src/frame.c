@@ -733,21 +733,45 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
           {Str8Lit("Drop a folder or file"), Str8Lit("Open it")},
       };
 
-      F32 px = 20.0f * scale;
-      F32 row_h = TXT_LineHeight(fonts->regular, px) * 1.25f;
-      F32 pad = 28.0f * scale;
-      F32 column_gap = 36.0f * scale;
-
-      // As wide as the widest of each column.
+      // Measured at the overlays' size, and then, in a window too small for
+      // that - narrower than the list is wide, or shorter than it is tall -
+      // measured again smaller, to fit inside it. The overlays' least size
+      // is for reading, but a list cut off at both sides, the keys gone off
+      // the left and what they do off the right, can't be read at all.
+      F32 list_scale = scale;
+      F32 px = 0;
+      F32 row_h = 0;
+      F32 pad = 0;
+      F32 column_gap = 0;
       F32 key_w = 0;
       F32 what_w = 0;
-      for (U64 i = 0; i < ArrayCount(rows); i += 1) {
-         key_w = Max(key_w, TXT_Width(fonts->bold, px, rows[i][0]));
-         what_w = Max(what_w, TXT_Width(fonts->regular, px, rows[i][1]));
-      }
+      F32 panel_w = 0;
+      F32 panel_h = 0;
+      for (U64 pass = 0; pass < 2; pass += 1) {
+         px = 20.0f * list_scale;
+         row_h = TXT_LineHeight(fonts->regular, px) * 1.25f;
+         pad = 28.0f * list_scale;
+         column_gap = 36.0f * list_scale;
 
-      F32 panel_w = pad + key_w + column_gap + what_w + pad;
-      F32 panel_h = pad + row_h * (F32)ArrayCount(rows) + pad;
+         // As wide as the widest of each column.
+         key_w = 0;
+         what_w = 0;
+         for (U64 i = 0; i < ArrayCount(rows); i += 1) {
+            key_w = Max(key_w, TXT_Width(fonts->bold, px, rows[i][0]));
+            what_w = Max(what_w, TXT_Width(fonts->regular, px, rows[i][1]));
+         }
+
+         panel_w = pad + key_w + column_gap + what_w + pad;
+         panel_h = pad + row_h * (F32)ArrayCount(rows) + pad;
+
+         F32 fit = Min(window_dim.x / Max(panel_w, 1.0f), window_dim.y / Max(panel_h, 1.0f));
+         if (fit >= 1.0f) {
+            break;
+         }
+         // A little under what fits: the sizes are whole points, and the
+         // line heights do not shrink exactly with them.
+         list_scale *= fit * 0.95f;
+      }
       F32 panel_x = (window_dim.x - panel_w) * 0.5f;
       F32 panel_y = (window_dim.y - panel_h) * 0.5f;
 
