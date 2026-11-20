@@ -732,21 +732,19 @@ PLACE_BeforeLayout(App_State* app_state, F32 ui) {
    }
 }
 
-// The mouse over one of the boxes of a piece of the slide - kind and idx,
-// has_piece 0 for one that is of none; corner: of a handle, else 0:
-//
-//    a handle               the arrow that resizes the way it does
-//    the piece dragged      the four-way arrow that moves it
-//    the title's or a       the bar that text is typed at: a click puts the
-//    block's words, and     caret at the letter (frame_caret.c)
-//    the room between them
-//    a picture              the arrow
 // 1 if pos is at the words of the title or a block, as shown: on one of
 // their lines, and no further from its letters than half the line is tall.
 // A line with no words yet has that much about where they will start. The
 // rest of the box - beside a short line, under the last - is not: a press
 // there still puts the cursor at the nearest letter, but it is where the box
 // is taken hold of to move it, and the mouse says so.
+//
+// A line reaches a fifth of itself up and down as well. The view leaves a
+// little room between the items of a list (0.30 of a line, view.c), and
+// without this the mouse turned to the arrow and back for every bullet it
+// was moved down across - for a strip too thin to aim a drag at anyway. The
+// wider room after an empty line of the file, or above a heading, stays the
+// box's, as does the most of what is under the last line.
 internal B32
 PLACE_IsAtWords(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos) {
    B32       result = 0;
@@ -757,12 +755,26 @@ PLACE_IsAtWords(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos)
          if (run->kind != kind || run->idx != idx) {
             continue;
          }
-         F32 pad = (run->rect.max.y - run->rect.min.y) * 0.5f;
-         result = (pos.y >= run->rect.min.y && pos.y < run->rect.max.y && pos.x >= run->rect.min.x - pad && pos.x < run->rect.max.x + pad);
+         F32 height = run->rect.max.y - run->rect.min.y;
+         F32 pad_x = height * 0.5f;
+         F32 pad_y = height * 0.2f;
+         result = (pos.y >= run->rect.min.y - pad_y && pos.y < run->rect.max.y + pad_y && pos.x >= run->rect.min.x - pad_x &&
+                   pos.x < run->rect.max.x + pad_x);
       }
    }
    return result;
 }
+
+// The mouse over one of the boxes of a piece of the slide - kind and idx,
+// has_piece 0 for one that is of none; corner: of a handle, else 0:
+//
+//    a handle               the arrow that resizes the way it does
+//    the piece dragged      the four-way arrow that moves it
+//    the title's or a       the bar that text is typed at: a click puts the
+//    block's words          caret at the letter (frame_caret.c)
+//    (PLACE_IsAtWords)
+//    the rest of their box, the arrow
+//    and a picture
 
 internal WM_Cursor
 _PLACE_HoverCursor(App_State* app_state, B32 has_piece, DECK_PlaceKind kind, U64 idx, U32 corner) {
