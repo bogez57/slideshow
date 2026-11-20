@@ -1301,9 +1301,18 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
       // A box around the picture the cursor is on the line of. Not after
       // Esc, until the cursor goes somewhere or a piece is clicked. In the
       // words' box's blue (frame.c's "focus").
+      //
+      // Anywhere on the line, not only in the file's name: a picture just
+      // dropped or picked has the cursor at its line's end, past the ")".
+      String8 text = ED_Text(editor);
+      U64     line_start = Min(editor->cursor, text.size);
+      while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
+      U64 line_end = Min(editor->cursor, text.size);
+      while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
       for (U64 i = 0; i < app_state->preview_hit_count && !words_have_box && !app_state->preview_focus_hidden; i += 1) {
          VIEW_Hit* hit = &app_state->preview_hits[i];
-         if (editor->cursor >= hit->text_range.min && editor->cursor <= hit->text_range.max) {
+         B32       is_on_line = (hit->text_range.min >= line_start && hit->text_range.min <= line_end);
+         if (is_on_line || (editor->cursor >= hit->text_range.min && editor->cursor <= hit->text_range.max)) {
             UI_ColorTag(Str8Lit("focus")) {
                FR_BuildEdge(hit->rect, Max(1.0f, (F32)(S32)(1.5f * ui)), UI_ColorFromSlot(UI_ColorSlot_Border), "###edit preview focus %llu",
                             (unsigned long long)i);

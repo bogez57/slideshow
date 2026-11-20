@@ -631,13 +631,42 @@ _CARET_RunsFromHits(Arena* arena, VIEW_HitList* hits, U64* count_out) {
 // The caret among runs, and the box of the piece the cursor is in: the
 // caret's, or with no caret - the cursor on an @ line - the piece that line
 // is about. 0 for none.
+// Whether the cursor is on the line of one of the slide's pictures: the
+// line of its path, ![](name).
+internal B32
+_CARET_CursorIsOnPictureLine(App_State* app_state) {
+   B32        result = 0;
+   DECK_Deck* deck = app_state->deck;
+   ED_Editor* editor = app_state->editor;
+   if (editor != 0 && app_state->slide_idx < deck->slide_count) {
+      String8 text = ED_Text(editor);
+      U64     cursor = Min(editor->cursor, text.size);
+      U64     line_start = cursor;
+      while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
+      U64 line_end = cursor;
+      while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
+
+      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+      for (U64 i = 0; i < slide->picture_count && !result; i += 1) {
+         Rng1U64 range = slide->pictures[i].range;
+         result = (range.max != 0 && range.min >= line_start && range.min <= line_end);
+      }
+   }
+   return result;
+}
+
 internal VIEW_Box*
 _CARET_BoxOfCursor(App_State* app_state, VIEW_Box* boxes, U64 box_count, VIEW_Run* runs, U64 run_count, _CARET_Place* caret_out) {
    *caret_out = _CARET_PlaceFromPos(app_state, runs, run_count, app_state->editor->cursor);
    DECK_PlaceKind kind = caret_out->kind;
    U64            idx = caret_out->idx;
    B32            has_piece = caret_out->is_found;
-   if (!has_piece) {
+   // A picture's line is the picture's, not the words': the edit screen
+   // puts the box around the picture (EDIT_Build). Without this, the line
+   // of a picture just clicked or dropped would have the box around the
+   // title or a block of words instead - the piece _LOOK_Target picks for
+   // a line that is not about words - and the picture none.
+   if (!has_piece && !_CARET_CursorIsOnPictureLine(app_state)) {
       U64 slide_idx = 0;
       has_piece = (_LOOK_Target(app_state, &slide_idx, &kind, &idx) && slide_idx == app_state->slide_idx);
    }
