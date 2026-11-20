@@ -41,7 +41,7 @@ struct EDIT_PlaceDrag {
    EDIT_PlaceDragState state;
    DECK_PlaceKind      kind;
    U64                 idx;         // which of the slide's pictures, or of its body's blocks
-   U32                 corner;      // 0: all of it is moved. 1 to 4: that corner is - top left, top right, bottom left, bottom right
+   U32                 corner;      // 0: all of it is moved. 1 to 4: that corner is - top left, top right, bottom left, bottom right. 5 to 8: that side is - left, right, top, bottom
    U64                 slide_idx;
    U64                 edit_count;  // the editor's when the button went down: a change to the text ends it
    Vec2F32             press_mouse;

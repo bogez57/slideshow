@@ -7,7 +7,9 @@
 // over one, its outline and a handle at each corner show.
 //
 //    move it          press inside the box and drag
-//    resize it        drag a corner. A picture keeps its shape. A block of
+//    resize it        drag a corner, or the handle in the middle of a side:
+//                     a side changes only the width, or only the height.
+//                     A picture keeps its shape. A block of
 //                     words takes any shape: its words wrap at the width, and
 //                     those that do not fit the height are not shown
 //    line it up       hold Shift while dragging: an edge or the middle of
@@ -72,14 +74,47 @@
 #define _PLACE_TEXT_MIN_W 0.2f
 #define _PLACE_TEXT_MIN_H 0.12f
 
-// The handle at a corner of box: 1 top left, 2 top right, 3 bottom left, 4
-// bottom right.
+// A box's handles, by number (EDIT_PlaceDrag's corner): its corners - 1 top
+// left, 2 top right, 3 bottom left, 4 bottom right - and the middles of its
+// sides - 5 left, 6 right, 7 top, 8 bottom. A corner moves two edges, a side
+// one.
+#define _PLACE_HANDLE_COUNT 8
+
+// Which edge a handle moves, across: -1 the left, 1 the right, 0 neither.
+internal S32
+_PLACE_HandleSideX(U32 handle) {
+   return (handle == 1 || handle == 3 || handle == 5) ? -1 : (handle == 2 || handle == 4 || handle == 6) ? 1 : 0;
+}
+
+// And down: -1 the top, 1 the bottom, 0 neither.
+internal S32
+_PLACE_HandleSideY(U32 handle) {
+   return (handle == 1 || handle == 2 || handle == 7) ? -1 : (handle == 3 || handle == 4 || handle == 8) ? 1 : 0;
+}
+
+// Where a handle of box is.
 internal Rng2F32
-_PLACE_HandleRect(Rng2F32 box, U32 corner, F32 ui) {
+_PLACE_HandleRect(Rng2F32 box, U32 handle, F32 ui) {
    F32 half = (F32)(S32)(_PLACE_HANDLE * ui * 0.5f);
-   F32 x = (corner == 1 || corner == 3) ? box.min.x : box.max.x;
-   F32 y = (corner == 1 || corner == 2) ? box.min.y : box.max.y;
+   S32 side_x = _PLACE_HandleSideX(handle);
+   S32 side_y = _PLACE_HandleSideY(handle);
+   F32 x = (side_x < 0) ? box.min.x : (side_x > 0) ? box.max.x : (F32)(S32)((box.min.x + box.max.x) * 0.5f);
+   F32 y = (side_y < 0) ? box.min.y : (side_y > 0) ? box.max.y : (F32)(S32)((box.min.y + box.max.y) * 0.5f);
    return R2F32P(x - half, y - half, x + half, y + half);
+}
+
+// Whether box has that handle: a side's is left out on a side too short to
+// have it clear of the corners'.
+internal B32
+_PLACE_HasHandle(Rng2F32 box, U32 handle, F32 ui) {
+   F32 room = _PLACE_HANDLE * ui * 3.5f;
+   B32 result = 1;
+   if (handle == 5 || handle == 6) {
+      result = (box.max.y - box.min.y >= room);
+   } else if (handle == 7 || handle == 8) {
+      result = (box.max.x - box.min.x >= room);
+   }
+   return result;
 }
 
 // Whether the slide's boxes, as laid out, are of the text as it is.
@@ -238,9 +273,12 @@ _PLACE_RectFromMouse(EDIT_PlaceDrag* drag, Rng2F32 page, Vec2F32 mouse) {
       }
       result = R2F32P(start.min.x + dx, start.min.y + dy, start.max.x + dx, start.max.y + dy);
    } else {
-      // The corner across from the one held stays where it is.
-      B32 is_left = (drag->corner == 1 || drag->corner == 3);
-      B32 is_top = (drag->corner == 1 || drag->corner == 2);
+      // The corner across from the one held stays where it is - or, with a
+      // side held, the side across from it, and the other two as well.
+      S32 side_x = _PLACE_HandleSideX(drag->corner);
+      S32 side_y = _PLACE_HandleSideY(drag->corner);
+      B32 is_left = (side_x < 0);
+      B32 is_top = (side_y < 0);
       F32 anchor_x = is_left ? start.max.x : start.min.x;
       F32 anchor_y = is_top ? start.max.y : start.min.y;
 
@@ -251,10 +289,32 @@ _PLACE_RectFromMouse(EDIT_PlaceDrag* drag, Rng2F32 page, Vec2F32 mouse) {
       // The most there is room for on the page, from that corner.
       F32 max_w = Max(is_left ? anchor_x : 1.0f - anchor_x, min_w);
       F32 max_h = Max(is_top ? anchor_y : 1.0f - anchor_y, min_h);
-      F32 w = Clamp(min_w, w0 + (is_left ? -dx : dx), max_w);
-      F32 h = Clamp(min_h, h0 + (is_top ? -dy : dy), max_h);
+      F32 w = (side_x != 0) ? Clamp(min_w, w0 + (is_left ? -dx : dx), max_w) : w0;
+      F32 h = (side_y != 0) ? Clamp(min_h, h0 + (is_top ? -dy : dy), max_h) : h0;
 
-      if (drag->kind == DECK_PlaceKind_Picture && w0 > 0 && h0 > 0) {
+      B32 is_picture = (drag->kind == DECK_PlaceKind_Picture && w0 > 0 && h0 > 0);
+      if (is_picture && (side_x == 0 || side_y == 0)) {
+         // A picture keeps its shape, by a side too: the other way grows
+         // with it, as much above its middle as below - or left of it as
+         // right - and no further than the page from there.
+         F32 grow = (side_x != 0) ? w / w0 : h / h0;
+         if (side_x != 0) {
+            F32 middle = (start.min.y + start.max.y) * 0.5f;
+            F32 room = 2.0f * Min(middle, 1.0f - middle);
+            if (room >= h0) {
+               grow = Min(grow, room / h0);
+            }
+         } else {
+            F32 middle = (start.min.x + start.max.x) * 0.5f;
+            F32 room = 2.0f * Min(middle, 1.0f - middle);
+            if (room >= w0) {
+               grow = Min(grow, room / w0);
+            }
+         }
+         grow = Max(grow, DECK_PLACE_MIN / Min(w0, h0));
+         w = w0 * grow;
+         h = h0 * grow;
+      } else if (is_picture) {
          // A picture keeps its shape: as large as the further of the two
          // ways the mouse has gone asks for, and no larger than fits.
          F32 grow = Max(w / w0, h / h0);
@@ -268,6 +328,17 @@ _PLACE_RectFromMouse(EDIT_PlaceDrag* drag, Rng2F32 page, Vec2F32 mouse) {
       result.max.x = is_left ? anchor_x : anchor_x + w;
       result.min.y = is_top ? anchor_y - h : anchor_y;
       result.max.y = is_top ? anchor_y : anchor_y + h;
+      // A picture by a side: about its middle, the other way.
+      if (is_picture && side_y == 0) {
+         F32 middle = (start.min.y + start.max.y) * 0.5f;
+         result.min.y = middle - h * 0.5f;
+         result.max.y = middle + h * 0.5f;
+      }
+      if (is_picture && side_x == 0) {
+         F32 middle = (start.min.x + start.max.x) * 0.5f;
+         result.min.x = middle - w * 0.5f;
+         result.max.x = middle + w * 0.5f;
+      }
    }
 
    return result;
@@ -417,10 +488,17 @@ _PLACE_LinedUp(App_State* app_state, EDIT_PlaceDrag* drag, Rng2F32 rect, F32 ui)
          }
       }
    } else {
-      //- bgz: a corner: the edges it moves
-      B32     is_left = (drag->corner == 1 || drag->corner == 3);
-      B32     is_top = (drag->corner == 1 || drag->corner == 2);
+      //- bgz: a corner, or a side: the edges it moves
+      S32     side_x = _PLACE_HandleSideX(drag->corner);
+      S32     side_y = _PLACE_HandleSideY(drag->corner);
+      B32     is_left = (side_x < 0);
+      B32     is_top = (side_y < 0);
       B32     keeps_shape = (drag->kind == DECK_PlaceKind_Picture && w > 0 && h > 0);
+      // A picture held by a side grows about its middle the other way
+      // (_PLACE_RectFromMouse): it is left where the mouse has it.
+      if (keeps_shape && (side_x == 0 || side_y == 0)) {
+         return rect;
+      }
       F32     anchor_x = is_left ? rect.max.x : rect.min.x;
       F32     anchor_y = is_top ? rect.max.y : rect.min.y;
       Vec2F32 min_size = _PLACE_MinSize(drag);
@@ -449,6 +527,14 @@ _PLACE_LinedUp(App_State* app_state, EDIT_PlaceDrag* drag, Rng2F32 rect, F32 ui)
                                       is_left ? w - hi_w : lo_w - w, is_left ? w - lo_w : hi_w - w, &shift_x);
       S64 line_y = _PLACE_NearestLine(is_top ? rect.min.y : rect.max.y, ys, y_count, reach_y,
                                       is_top ? h - hi_h : lo_h - h, is_top ? h - lo_h : hi_h - h, &shift_y);
+
+      // A side moves one edge: the other way nothing is lined up.
+      if (side_x == 0) {
+         line_x = -1;
+      }
+      if (side_y == 0) {
+         line_y = -1;
+      }
 
       // A picture: the nearer of the two on the screen, the other way
       // following from the corner that stays.
@@ -657,7 +743,9 @@ internal WM_Cursor
 _PLACE_HoverCursor(App_State* app_state, B32 has_piece, DECK_PlaceKind kind, U64 idx, U32 corner) {
    EDIT_PlaceDrag* drag = &app_state->place_drag;
    WM_Cursor       result = WM_Cursor_Pointer;
-   if (corner != 0) {
+   if (corner >= 5) {
+      result = (_PLACE_HandleSideX(corner) != 0) ? WM_Cursor_LeftRight : WM_Cursor_UpDown;
+   } else if (corner != 0) {
       result = (corner == 1 || corner == 4) ? WM_Cursor_DownRight : WM_Cursor_UpRight;
    } else if (has_piece && drag->state == EDIT_PlaceDragState_Dragging && drag->kind == kind && drag->idx == idx) {
       result = WM_Cursor_UpDownLeftRight;
@@ -735,7 +823,10 @@ PLACE_BuildCorners(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* h
    // a video's strip too. The last drawn, which is on top, first.
    for (U64 i = app_state->preview_box_count; i > 0; i -= 1) {
       VIEW_Box* box = &app_state->preview_boxes[i - 1];
-      for (U32 corner = 1; corner <= 4; corner += 1) {
+      for (U32 corner = 1; corner <= _PLACE_HANDLE_COUNT; corner += 1) {
+         if (!_PLACE_HasHandle(box->rect, corner, ui)) {
+            continue;
+         }
          UI_Box* handle = FR_BuildRectBox(flags, _PLACE_HandleRect(box->rect, corner, ui), "###place corner %d %llu %u",
                                           (int)box->kind, (unsigned long long)box->idx, corner);
          handle->hover_cursor = _PLACE_HoverCursor(app_state, 1, box->kind, box->idx, corner);
@@ -840,7 +931,10 @@ PLACE_BuildLook(App_State* app_state, F32 ui, PLACE_Hover* hover) {
       Vec4F32 accent = VIEW_ColorsFromTheme(app_state->deck->theme).accent;
       F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
 
-      for (U32 corner = 1; corner <= 4; corner += 1) {
+      for (U32 corner = 1; corner <= _PLACE_HANDLE_COUNT; corner += 1) {
+         if (!_PLACE_HasHandle(box, corner, ui)) {
+            continue;
+         }
          Rng2F32 handle = _PLACE_HandleRect(box, corner, ui);
          B32     is_hot = is_dragging ? (drag->corner == corner) : (hover->corner == corner);
          UI_SetNextBackgroundColor(accent);
