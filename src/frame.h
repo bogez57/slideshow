@@ -117,7 +117,6 @@ internal void COPY_CancelAll(App_State* app_state);
 // and the strip is only lit by where the mouse is.
 internal B32  FR_VideoBuildStripHits(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id);
 internal void FR_VideoBuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id, B32 interactive);
-internal void FR_VideoDrawStrip(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, Vec2F32 mouse);
 // A slide's videos together: whether any is playing, and all paused if one
 // is, else all played.
 internal B32  FR_VideoSlideIsPlaying(DECK_Deck* deck, U64 slide_idx);

@@ -3,8 +3,8 @@
 //
 // FrameWork is everything between the renderer's begin and end of a frame
 // (main.c): read this frame's input and the clock, build the UI layer's tree
-// (the open screen, the whole edit screen: frame_edit.c), then draw the
-// presentation, which is in this file, if it is up, and the UI's tree over it. It also runs with no events at
+// (the open screen, and the whole of the screen that is up: the edit screen,
+// frame_edit.c, or the presentation, which is in this file), then draw it. It also runs with no events at
 // all, when Windows asks for a repaint during a resize - see
 // _Main_RepaintFrame in main.c.
 
@@ -575,15 +575,26 @@ _FR_PresentInput(App_State* app_state) {
 
 ////////////////////////////////
 //~ bgz: the presentation: drawing
+//
+// UI boxes, built in FrameWork's UI build, that take no clicks: the slide is
+// a box the size of the window whose custom draw is _FR_DrawSlide, and what
+// is over it - the play bar, the slide's number, the notes, the list of
+// keys, a notice, the video's strip of controls - are boxes of their own.
+// The presentation's clicks and wheel are the whole window's, read with its
+// keys (_FR_PresentInput): a click anywhere is the next slide, and the wheel
+// adds up a touchpad's small movements until they come to a notch.
 
 // Overlays are sized with the page (view.h), but not below this part of full
 // size: in a small window the slides can be read small, a list of keys not.
 #define _FR_MIN_OVERLAY_SCALE 0.7f
 
+// The slide, and the one fading out under it: the custom draw of the
+// window's box.
 internal void
-_FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
+_FR_DrawSlide(UI_Box* box, void* user_data) {
+   App_State* app_state = (App_State*)user_data;
    DECK_Deck* deck = app_state->deck;
-   Rng2F32    window_rect = R2F32P(0, 0, window_dim.x, window_dim.y);
+   Rng2F32    window_rect = box->rect;
 
    // The slide showing is asked for first: that is what loads its picture,
    // and what releases the pictures of slides far from it.
@@ -621,136 +632,75 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
    if (app_state->slide_idx < deck->slide_count) {
       // With its blocks as far down their words as the wheel has them
       // (frame_caret.c): a block with more words than room has a scroll
-      // bar, and the wheel over it moves it.
+      // bar - the view's own, part of the slide, which fades with it - and
+      // the wheel over it moves it.
       VIEW_HitList hits = {0};
       CARET_BeforeDraw(app_state);
-      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx],
-                     window_rect, fade_t, &hits);
+      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], window_rect,
+                     fade_t, &hits);
       CARET_PresentAfterDraw(app_state, &hits);
-   }
-   // The slide's video has its strip of controls along the bottom of the
-   // slide for a moment after one of its keys, and while it is paused -
-   // once it has been started: not in the frame or two before it is.
-   VID_Video* video = DECK_VideoFromSlide(deck, app_state->slide_idx);
-   if (video != 0 && app_state->video_auto_slide == app_state->slide_idx + 1) {
-      U64 strip_us = (U64)(FR_VIDEO_STRIP_SECONDS * 1000000.0f);
-      B32 key_was_recent = (app_state->video_key_us != 0 && NowTimeUS() - app_state->video_key_us < strip_us);
-      // Paused: all of the slide's videos, not only the first, which may be
-      // a short one that has ended while the others play on.
-      if (!FR_VideoSlideIsPlaying(deck, app_state->slide_idx) || key_was_recent) {
-         FR_VideoDrawStrip(app_state, video, VIEW_PageRectFromRect(window_rect), FR_UIScale(window_dim),
-                           Core_WM_MouseFromWindow(app_state->window));
-      }
    }
 }
 
-// What is drawn over the slide: the play bar, the slide's number, the list of
-// keys, a notice - and, with no slides at all, what to do about that.
+// A line of words at top_left, as TXT_Draw would put it, px tall, in color.
 internal void
-_FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
+_FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 words, char* fmt, ...) {
+   Temp    scratch = ScratchBegin(0, 0);
+   va_list args;
+   va_start(args, fmt);
+   String8 key = PushStr8FV(scratch.arena, fmt, args);
+   va_end(args);
+   // A little wider than the words: the UI cuts words that do not fit their
+   // box short, and its measure can be a pixel over the font cache's.
+   F32 w = TXT_Width(font, px, words) + px;
+   // A line's height: the UI puts the words in the middle of it, down, which
+   // is where TXT_Draw puts them from its top - to the pixel at most sizes,
+   // a pixel higher at some.
+   F32 top = top_left.y;
+   F32 h = TXT_LineHeight(font, px);
+   UI_SetNextFont(font);
+   UI_SetNextFontSize(FR_UIFontSize(px));
+   UI_SetNextTextColor(color);
+   UI_SetNextTextPadding(0);
+   UI_SetNextTextAlignment(UI_TextAlign_Left);
+   UI_Box* box = FR_BuildRectBox(UI_BoxFlag_DrawText, R2F32P(top_left.x, top, top_left.x + w, top + h), "%S", key);
+   UI_BoxEquipDisplayString(box, words);
+   ScratchEnd(scratch);
+}
+
+// A panel's background at rect, in the colour of tag.
+internal UI_Box*
+_FR_BuildPanel(String8 tag, Rng2F32 rect, F32 radius, char* key) {
+   UI_SetNextColorTag(tag);
+   UI_SetNextCornerRadius00(radius);
+   UI_SetNextCornerRadius01(radius);
+   UI_SetNextCornerRadius10(radius);
+   UI_SetNextCornerRadius11(radius);
+   return FR_BuildRectBox(UI_BoxFlag_DrawBackground, rect, "%s", key);
+}
+
+// What is drawn over the slide, top first: a notice, the list of keys, the
+// notes, the slide's number, the play bar, what to do with no slides, the
+// video's strip - then the slide itself.
+internal void
+_FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
    DECK_Deck* deck = app_state->deck;
    TXT_Fonts* fonts = &app_state->fonts;
    F32        scale = Max(VIEW_ScaleFromDim(window_dim), _FR_MIN_OVERLAY_SCALE);
    Temp       scratch = ScratchBegin(0, 0);
 
-   //- bgz: no slides
-   if (deck->slide_count == 0) {
-      String8 lines[] = {
-          Str8Lit("No slides"),
-          Str8Lit("Ctrl+O opens a deck or starts a new one"),
-      };
-      F32     sizes[] = {40.0f * scale, 22.0f * scale};
-      Vec4F32 colors[] = {V4F32(1, 1, 1, 0.9f), V4F32(1, 1, 1, 0.55f)};
-
-      F32 y = window_dim.y * 0.5f - TXT_LineHeight(fonts->bold, sizes[0]);
-      for (U64 i = 0; i < ArrayCount(lines); i += 1) {
-         FNT_Tag font = (i == 0) ? fonts->bold : fonts->regular;
-         F32     w = TXT_Width(font, sizes[i], lines[i]);
-         TXT_Draw(font, sizes[i], V2F32((window_dim.x - w) * 0.5f, y), colors[i], lines[i]);
-         y += TXT_LineHeight(font, sizes[i]) * 1.2f;
-      }
-   }
-
-   //- bgz: playing
-   //
-   // A thin bar along the bottom that fills as the slide's turn runs out -
-   // which is also what shows that it is playing at all.
-   if (app_state->playing && deck->slide_count > 1) {
-      F32 play_seconds = (F32)(NowTimeUS() - app_state->play_from_us) / 1000000.0f;
-      F32 play_t = Clamp(0, play_seconds / FR_PLAY_SECONDS, 1);
-      F32 bar_h = 3.0f;
-      Core_D_Rect(R2F32P(0, window_dim.y - bar_h, window_dim.x * play_t, window_dim.y), R2F32P(0, 0, 1, 1),
-                  V4F32(1, 1, 1, 0.5f));
-   }
-
-   //- bgz: the slide's number, and the name of the file it is from
-   if (app_state->show_info && deck->slide_count != 0) {
-      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
-      String8     name = Str8SkipLastSlash(deck->file.size != 0 ? deck->file
-                                                                    : (slide->picture_count != 0 ? slide->pictures[0].path : Str8Lit("")));
-      String8     text = PushStr8F(scratch.arena, "%llu / %llu   %S", (unsigned long long)(app_state->slide_idx + 1),
-                                   (unsigned long long)deck->slide_count, name);
-
-      F32 px = 18.0f * scale;
-      F32 pad = 8.0f * scale;
-      F32 w = TXT_Width(fonts->regular, px, text);
+   //- bgz: a notice, along the top
+   String8 notice = FR_CurrentNotice(app_state);
+   if (notice.size != 0) {
+      F32 px = 20.0f * scale;
+      F32 pad = 10.0f * scale;
+      F32 w = TXT_Width(fonts->regular, px, notice);
       F32 h = TXT_LineHeight(fonts->regular, px);
-      F32 x = window_dim.x - w - pad * 3.0f;
-      F32 y = window_dim.y - h - pad * 3.0f;
-
-      // On a dark panel, since it may be over a bright picture.
-      Core_D_Rect(R2F32P(x - pad, y - pad * 0.5f, x + w + pad, y + h + pad * 0.5f), R2F32P(0, 0, 1, 1),
-                  V4F32(0, 0, 0, 0.55f));
-      TXT_Draw(fonts->regular, px, V2F32(x, y), V4F32(1, 1, 1, 0.85f), text);
-   }
-
-   //- bgz: the notes: the slide's @note lines and the next slide's title, on a
-   // strip along the bottom - for whoever presents, on a screen only they see
-   if (app_state->show_notes && deck->slide_count != 0) {
-      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
-      F32         px = 22.0f * scale;
-      F32         small_px = 17.0f * scale;
-      F32         pad = 18.0f * scale;
-      F32         line_h = TXT_LineHeight(fonts->regular, px);
-      F32         small_h = TXT_LineHeight(fonts->regular, small_px);
-      F32         text_w = Max(window_dim.x - pad * 2.0f, 1.0f);
-
-      // What comes next: the next slide's title, or that this is the last.
-      String8 next = Str8Lit("Next: the end");
-      if (app_state->slide_idx + 1 < deck->slide_count) {
-         DECK_Slide* next_slide = &deck->slides[app_state->slide_idx + 1];
-         String8     next_name = next_slide->title;
-         if (next_name.size == 0) {
-            next_name = (next_slide->picture_count != 0) ? Str8SkipLastSlash(next_slide->pictures[0].path)
-                                                         : Str8Lit("a slide with no title");
-         }
-         next = PushStr8F(scratch.arena, "Next: %S", next_name);
-      }
-
-      // The notes' lines, wrapped, to know how tall the strip is.
-      String8List lines = {0};
-      for (String8Node* note = slide->notes.first; note != 0; note = note->next) {
-         String8List wrapped = TXT_Wrap(scratch.arena, fonts->regular, px, note->string, text_w);
-         for (String8Node* line = wrapped.first; line != 0; line = line->next) {
-            Str8ListPush(scratch.arena, &lines, line->string);
-         }
-      }
-      if (lines.node_count == 0) {
-         Str8ListPush(scratch.arena, &lines, Str8Lit("No notes on this slide. A line of  @note Say this  adds one."));
-      }
-
-      F32 strip_h = pad + line_h * (F32)lines.node_count + pad * 0.5f + small_h + pad;
-      F32 strip_y = window_dim.y - strip_h;
-      Core_D_Rect(R2F32P(0, strip_y, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1), V4F32(0.02f, 0.02f, 0.03f, 0.86f));
-
-      F32 y = strip_y + pad;
-      B32 has_notes = (slide->notes.node_count != 0);
-      for (String8Node* line = lines.first; line != 0; line = line->next) {
-         TXT_Draw(fonts->regular, px, V2F32(pad, y), has_notes ? V4F32(1, 1, 1, 0.95f) : V4F32(1, 1, 1, 0.5f), line->string);
-         y += line_h;
-      }
-      y += pad * 0.5f;
-      TXT_Draw(fonts->regular, small_px, V2F32(pad, y), V4F32(1.0f, 0.85f, 0.5f, 0.9f), next);
+      F32 x = (window_dim.x - w) * 0.5f;
+      F32 y = pad * 2.0f;
+      _FR_BuildWords(fonts->regular, px, V2F32(x, y), UI_ThemeColor(Str8Lit("notice"), UI_ColorSlot_Text), notice, "###present notice");
+      _FR_BuildPanel(Str8Lit("notice"), R2F32P(x - pad * 1.5f, y - pad * 0.5f, x + w + pad * 1.5f, y + h + pad * 0.5f), 0,
+                     "###present notice panel");
    }
 
    //- bgz: the list of keys
@@ -794,34 +744,136 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
       F32 panel_x = (window_dim.x - panel_w) * 0.5f;
       F32 panel_y = (window_dim.y - panel_h) * 0.5f;
 
-      R_Rect2DInst* panel = Core_D_Rect(R2F32P(panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
-                                        R2F32P(0, 0, 1, 1), V4F32(0.02f, 0.02f, 0.03f, 0.88f));
-      for (U64 i = 0; i < ArrayCount(panel->corner_radii); i += 1) {
-         panel->corner_radii[i] = 10.0f * scale;
-      }
-      panel->edge_softness = 1.0f;
-
-      F32 y = panel_y + pad;
+      Vec4F32 key_color = UI_ThemeColor(Str8Lit("keys"), UI_ColorSlot_Text);
+      Vec4F32 what_color = UI_ThemeColor(Str8Lit("keys what"), UI_ColorSlot_Text);
+      F32     y = panel_y + pad;
       for (U64 i = 0; i < ArrayCount(rows); i += 1) {
-         TXT_Draw(fonts->bold, px, V2F32(panel_x + pad, y), V4F32(1, 1, 1, 0.95f), rows[i][0]);
-         TXT_Draw(fonts->regular, px, V2F32(panel_x + pad + key_w + column_gap, y), V4F32(1, 1, 1, 0.7f), rows[i][1]);
+         _FR_BuildWords(fonts->bold, px, V2F32(panel_x + pad, y), key_color, rows[i][0], "###present key %llu", (unsigned long long)i);
+         _FR_BuildWords(fonts->regular, px, V2F32(panel_x + pad + key_w + column_gap, y), what_color, rows[i][1], "###present what %llu",
+                        (unsigned long long)i);
          y += row_h;
       }
+      _FR_BuildPanel(Str8Lit("keys"), R2F32P(panel_x, panel_y, panel_x + panel_w, panel_y + panel_h), 10.0f * scale, "###present keys");
    }
 
-   //- bgz: a notice, along the top
-   String8 notice = FR_CurrentNotice(app_state);
-   if (notice.size != 0) {
-      F32 px = 20.0f * scale;
-      F32 pad = 10.0f * scale;
-      F32 w = TXT_Width(fonts->regular, px, notice);
-      F32 h = TXT_LineHeight(fonts->regular, px);
-      F32 x = (window_dim.x - w) * 0.5f;
-      F32 y = pad * 2.0f;
-      Core_D_Rect(R2F32P(x - pad * 1.5f, y - pad * 0.5f, x + w + pad * 1.5f, y + h + pad * 0.5f), R2F32P(0, 0, 1, 1),
-                  V4F32(0, 0, 0, 0.75f));
-      TXT_Draw(fonts->regular, px, V2F32(x, y), V4F32(1.0f, 0.85f, 0.5f, 1.0f), notice);
+   //- bgz: the notes: the slide's @note lines and the next slide's title, on a
+   // strip along the bottom - for whoever presents, on a screen only they see
+   if (app_state->show_notes && deck->slide_count != 0) {
+      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+      F32         px = 22.0f * scale;
+      F32         small_px = 17.0f * scale;
+      F32         pad = 18.0f * scale;
+      F32         line_h = TXT_LineHeight(fonts->regular, px);
+      F32         small_h = TXT_LineHeight(fonts->regular, small_px);
+      F32         text_w = Max(window_dim.x - pad * 2.0f, 1.0f);
+
+      // What comes next: the next slide's title, or that this is the last.
+      // On the build arena: its box shows it once the build is done.
+      String8 next = Str8Lit("Next: the end");
+      if (app_state->slide_idx + 1 < deck->slide_count) {
+         DECK_Slide* next_slide = &deck->slides[app_state->slide_idx + 1];
+         String8     next_name = next_slide->title;
+         if (next_name.size == 0) {
+            next_name = (next_slide->picture_count != 0) ? Str8SkipLastSlash(next_slide->pictures[0].path)
+                                                         : Str8Lit("a slide with no title");
+         }
+         next = PushStr8F(UI_BuildArena(), "Next: %S", next_name);
+      }
+
+      // The notes' lines, wrapped, to know how tall the strip is.
+      String8List lines = {0};
+      for (String8Node* note = slide->notes.first; note != 0; note = note->next) {
+         String8List wrapped = TXT_Wrap(UI_BuildArena(), fonts->regular, px, note->string, text_w);
+         for (String8Node* line = wrapped.first; line != 0; line = line->next) {
+            Str8ListPush(scratch.arena, &lines, line->string);
+         }
+      }
+      if (lines.node_count == 0) {
+         Str8ListPush(scratch.arena, &lines, Str8Lit("No notes on this slide. A line of  @note Say this  adds one."));
+      }
+
+      F32 strip_h = pad + line_h * (F32)lines.node_count + pad * 0.5f + small_h + pad;
+      F32 strip_y = window_dim.y - strip_h;
+
+      F32     y = strip_y + pad;
+      B32     has_notes = (slide->notes.node_count != 0);
+      Vec4F32 color = UI_ThemeColor(has_notes ? Str8Lit("notes") : Str8Lit("notes none"), UI_ColorSlot_Text);
+      U64     line_idx = 0;
+      for (String8Node* line = lines.first; line != 0; line = line->next, line_idx += 1) {
+         _FR_BuildWords(fonts->regular, px, V2F32(pad, y), color, line->string, "###present note %llu", (unsigned long long)line_idx);
+         y += line_h;
+      }
+      y += pad * 0.5f;
+      _FR_BuildWords(fonts->regular, small_px, V2F32(pad, y), UI_ThemeColor(Str8Lit("notes next"), UI_ColorSlot_Text), next,
+                     "###present next");
+      _FR_BuildPanel(Str8Lit("notes"), R2F32P(0, strip_y, window_dim.x, window_dim.y), 0, "###present notes");
    }
+
+   //- bgz: the slide's number, and the name of the file it is from
+   if (app_state->show_info && deck->slide_count != 0) {
+      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+      String8     name = Str8SkipLastSlash(deck->file.size != 0 ? deck->file
+                                                                    : (slide->picture_count != 0 ? slide->pictures[0].path : Str8Lit("")));
+      String8     text = PushStr8F(UI_BuildArena(), "%llu / %llu   %S", (unsigned long long)(app_state->slide_idx + 1),
+                                   (unsigned long long)deck->slide_count, name);
+
+      F32 px = 18.0f * scale;
+      F32 pad = 8.0f * scale;
+      F32 w = TXT_Width(fonts->regular, px, text);
+      F32 h = TXT_LineHeight(fonts->regular, px);
+      F32 x = window_dim.x - w - pad * 3.0f;
+      F32 y = window_dim.y - h - pad * 3.0f;
+
+      _FR_BuildWords(fonts->regular, px, V2F32(x, y), UI_ThemeColor(Str8Lit("info"), UI_ColorSlot_Text), text, "###present info");
+      _FR_BuildPanel(Str8Lit("info"), R2F32P(x - pad, y - pad * 0.5f, x + w + pad, y + h + pad * 0.5f), 0, "###present info panel");
+   }
+
+   //- bgz: playing: a thin bar along the bottom that fills as the slide's
+   // turn runs out - which is also what shows that it is playing at all
+   if (app_state->playing && deck->slide_count > 1) {
+      F32 play_seconds = (F32)(NowTimeUS() - app_state->play_from_us) / 1000000.0f;
+      F32 play_t = Clamp(0, play_seconds / FR_PLAY_SECONDS, 1);
+      F32 bar_h = 3.0f;
+      UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("present play"), UI_ColorSlot_Background));
+      FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(0, window_dim.y - bar_h, window_dim.x * play_t, window_dim.y), "###present play");
+   }
+
+   //- bgz: no slides
+   if (deck->slide_count == 0) {
+      String8 lines[] = {
+          Str8Lit("No slides"),
+          Str8Lit("Ctrl+O opens a deck or starts a new one"),
+      };
+      F32     sizes[] = {40.0f * scale, 22.0f * scale};
+      Vec4F32 colors[] = {UI_ThemeColor(Str8Lit("present"), UI_ColorSlot_Text), UI_ThemeColor(Str8Lit("present hint"), UI_ColorSlot_Text)};
+
+      F32 y = window_dim.y * 0.5f - TXT_LineHeight(fonts->bold, sizes[0]);
+      for (U64 i = 0; i < ArrayCount(lines); i += 1) {
+         FNT_Tag font = (i == 0) ? fonts->bold : fonts->regular;
+         F32     w = TXT_Width(font, sizes[i], lines[i]);
+         _FR_BuildWords(font, sizes[i], V2F32((window_dim.x - w) * 0.5f, y), colors[i], lines[i], "###present empty %llu", (unsigned long long)i);
+         y += TXT_LineHeight(font, sizes[i]) * 1.2f;
+      }
+   }
+
+   //- bgz: the slide's video has its strip of controls along the bottom of
+   // the slide for a moment after one of its keys, and while it is paused -
+   // once it has been started: not in the frame or two before it is. Not
+   // clicked: a click is the next slide. Lit where the mouse is.
+   VID_Video* video = DECK_VideoFromSlide(deck, app_state->slide_idx);
+   if (video != 0 && app_state->video_auto_slide == app_state->slide_idx + 1) {
+      U64 strip_us = (U64)(FR_VIDEO_STRIP_SECONDS * 1000000.0f);
+      B32 key_was_recent = (app_state->video_key_us != 0 && NowTimeUS() - app_state->video_key_us < strip_us);
+      // Paused: all of the slide's videos, not only the first, which may be
+      // a short one that has ended while the others play on.
+      if (!FR_VideoSlideIsPlaying(deck, app_state->slide_idx) || key_was_recent) {
+         FR_VideoBuildStripLook(app_state, video, VIEW_PageRectFromRect(R2F32P(0, 0, window_dim.x, window_dim.y)), FR_UIScale(window_dim), 0, 0);
+      }
+   }
+
+   //- bgz: the slide, under all of it
+   UI_Box* slide_box = FR_BuildRectBox(0, R2F32P(0, 0, window_dim.x, window_dim.y), "###present slide");
+   UI_BoxEquipCustomDraw(slide_box, _FR_DrawSlide, app_state);
 
    ScratchEnd(scratch);
 }
@@ -840,7 +892,8 @@ _FR_DrawOverlays(App_State* app_state, Vec2F32 window_dim) {
 // editor), the Format panel, list of pictures, status line, and the preview -
 // the slide (drawn by its box, with the view), what is over it (the caret,
 // the boxes of its pieces and their corners, scroll bars, videos' controls),
-// the caption, the small slides and the +. The presentation is drawn by hand.
+// the caption, the small slides and the + - and the presentation
+// (_FR_BuildPresentation): its slide, drawn by its box, and what is over it.
 //
 // The UI's events are what the screens' own input (EDIT_Input, OPEN_Input)
 // left: a click that took is eaten there. The hand-drawn parts that take
@@ -1037,6 +1090,22 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
        {"add", UI_ColorSlot_Text, {{0.84f, 0.86f, 0.90f, 0.55f}}},
        {"add hot", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.16f}}},
        {"add hot", UI_ColorSlot_Text, {{0.84f, 0.86f, 0.90f, 1.00f}}},
+
+       //- bgz: the presentation's overlays (_FR_BuildPresentation): white on
+       // dark panels, since they may be over a bright picture
+       {"present", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.90f}}},        // "No slides"
+       {"present hint", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.55f}}},
+       {"present play", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.50f}}}, // the bar that fills as a slide's turn runs out
+       {"info", UI_ColorSlot_Background, {{0.00f, 0.00f, 0.00f, 0.55f}}},     // the slide's number
+       {"info", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.85f}}},
+       {"notes", UI_ColorSlot_Background, {{0.02f, 0.02f, 0.03f, 0.86f}}},
+       {"notes", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.95f}}},
+       {"notes none", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.50f}}},     // a slide with no notes says how to add one
+       {"notes next", UI_ColorSlot_Text, {{1.00f, 0.85f, 0.50f, 0.90f}}},     // what comes next
+       {"keys", UI_ColorSlot_Background, {{0.02f, 0.02f, 0.03f, 0.88f}}},     // the list of keys
+       {"keys", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.95f}}},
+       {"keys what", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.70f}}},
+       {"notice", UI_ColorSlot_Background, {{0.00f, 0.00f, 0.00f, 0.75f}}},
    };
    static UI_Theme theme = {theme_patterns, ArrayCount(theme_patterns)};
 
@@ -1266,6 +1335,8 @@ FrameWork(App_State* app_state) {
          // Asked after: a deck opened from the open screen is up already.
          if (app_state->is_editing) {
             EDIT_Build(app_state, window_dim, !app_state->show_open);
+         } else {
+            _FR_BuildPresentation(app_state, window_dim);
          }
       }
 
@@ -1279,14 +1350,8 @@ FrameWork(App_State* app_state) {
       Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1),
                   VIEW_ColorsFromTheme(app_state->deck->theme).background);
 
-      // The edit screen is all the UI's.
-      if (!app_state->is_editing) {
-         _FR_DrawSlide(app_state, window_dim);
-         _FR_DrawOverlays(app_state, window_dim);
-      }
-
-      // Last, over everything drawn by hand: the open screen, and the edit
-      // screen.
+      // Over it, all there is: the open screen, and the edit screen or the
+      // presentation, the slide among it.
       _FR_DrawUITree(app_state);
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);
