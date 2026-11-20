@@ -269,12 +269,20 @@ _EDIT_AddSlideAfter(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
    Temp    scratch = ScratchBegin(0, 0);
 
    // On a line of its own: the slide before may end without a line ending,
-   // and the slide after has to start on its own line too.
-   B32     needs_line_before = (at > 0 && text.str[at - 1] != '\n');
-   String8 added = PushStr8F(scratch.arena, "%s# Title\n", needs_line_before ? "\n" : "");
+   // and the slide after has to start on its own line too. And with an
+   // empty line between it and each of its neighbours, as slides are
+   // written: the one before, at the end of the text, often ends with no
+   // empty line after it, and the one after starts right at the end of
+   // what is added - "# Title" and "# Next" on lines one under the other
+   // read as one block.
+   B32         needs_line_before = (at > 0 && text.str[at - 1] != '\n');
+   B32         needs_empty_before = (at > 0 && !(at > 1 && text.str[at - 1] == '\n' && text.str[at - 2] == '\n'));
+   B32         needs_empty_after = (at < text.size);
+   String8     before = needs_line_before ? Str8Lit("\n\n") : needs_empty_before ? Str8Lit("\n") : Str8Lit("");
+   String8     added = PushStr8F(scratch.arena, "%S# Title\n%s", before, needs_empty_after ? "\n" : "");
    ED_ReplaceRange(editor, at, at, added);
 
-   U64 title_start = at + (needs_line_before ? 1 : 0) + 2;
+   U64 title_start = at + before.size + 2;
    ED_SetCursor(editor, title_start + 5);
    editor->mark = title_start;
 
@@ -323,16 +331,39 @@ _EDIT_MoveSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx, B32 to_later)
          first_starts_itself = 1;
       }
 
-      // The second can be the text's last line, with no line ending.
-      B32     second_needs_line_end = (second.size != 0 && second.str[second.size - 1] != '\n');
-      String8 middle = PushStr8F(scratch.arena, "%s%s", second_needs_line_end ? "\n" : "",
-                                 first_starts_itself ? "" : "---\n");
-      String8 swapped = PushStr8F(scratch.arena, "%S%S%S", second, middle, first);
+      // What the two say change places, and the empty lines after each stay
+      // where they were: the room between the slides is the text's, not
+      // either slide's. Moved whole, the last slide - which usually ends
+      // with no empty line, at the end of the text - would come up hard
+      // under the one it moves above, and take that one's empty lines down
+      // to the end of the text with it.
+      U64 first_words = first.size;
+      while (first_words > 0 && (first.str[first_words - 1] == '\n' || first.str[first_words - 1] == '\r' ||
+                                 first.str[first_words - 1] == ' ' || first.str[first_words - 1] == '\t')) {
+         first_words -= 1;
+      }
+      U64 second_words = second.size;
+      while (second_words > 0 && (second.str[second_words - 1] == '\n' || second.str[second_words - 1] == '\r' ||
+                                  second.str[second_words - 1] == ' ' || second.str[second_words - 1] == '\t')) {
+         second_words -= 1;
+      }
+      String8 first_gap = Str8Skip(first, first_words);
+      String8 second_gap = Str8Skip(second, second_words);
+      // A slide that had nothing after it - the last, with no line ending -
+      // is followed by one now.
+      if (first_gap.size == 0 || first_gap.str[0] != '\n') {
+         first_gap = PushStr8F(scratch.arena, "\n%S", first_gap);
+      }
+      String8 middle = PushStr8F(scratch.arena, "%S%s", first_gap, first_starts_itself ? "" : "---\n");
+      String8 swapped = PushStr8F(scratch.arena, "%S%S%S%S", Str8Prefix(second, second_words), middle, Str8Prefix(first, first_words),
+                                  second_gap);
 
-      // Where the cursor was in the slide that was asked to be moved.
+      // Where the cursor was in the slide that was asked to be moved: in
+      // what it says, at most at the end of that.
       Rng1U64 moved_range = to_later ? first_range : second_range;
-      U64     in_slide = Clamp(moved_range.min, editor->cursor, moved_range.max) - moved_range.min;
-      U64     moved_start = to_later ? first_range.min + second.size + middle.size : first_range.min;
+      U64     moved_words = to_later ? first_words : second_words;
+      U64     in_slide = Min(Clamp(moved_range.min, editor->cursor, moved_range.max) - moved_range.min, moved_words);
+      U64     moved_start = to_later ? first_range.min + second_words + middle.size : first_range.min;
 
       ED_ReplaceRange(editor, first_range.min, second_range.max, swapped);
       ED_SetCursor(editor, moved_start + in_slide);
