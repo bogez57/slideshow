@@ -379,12 +379,41 @@ _OPEN_BuildBar(Rng2F32 rect, F32 pad, String8 color_tag, String8 text, char* key
    }
 }
 
+// A path that is wider than room, px tall in font, with its front left off -
+// "...\talks\intro\slides.md" - at a \ , as much of its end as fits. The
+// end is what tells decks apart: the decks opened lately are often in
+// folders deep under the same one, and cut off at the right, every one of
+// their lines reads the same. A path that fits is as it is.
+internal String8
+_OPEN_FitPath(Arena* arena, FNT_Tag font, F32 px, String8 path, F32 room) {
+   String8 result = path;
+   if (TXT_Width(font, px, path) > room) {
+      String8 dots = Str8Lit("...");
+      // The last part alone, if nothing longer fits: cut at the right then,
+      // as any line too long for the panel is.
+      result = PushStr8F(arena, "%S\\%S", dots, Str8SkipLastSlash(path));
+      for (U64 i = 1; i < path.size; i += 1) {
+         if (path.str[i - 1] == '\\' || path.str[i - 1] == '/') {
+            String8 tail = Str8Skip(path, i);
+            String8 fitted = PushStr8F(arena, "%S\\%S", dots, tail);
+            if (TXT_Width(font, px, fitted) <= room) {
+               result = fitted;
+               break;
+            }
+         }
+      }
+   }
+   return result;
+}
+
 internal void
 OPEN_Build(App_State* app_state, Vec2F32 window_dim) {
    _OPEN_Layout layout = _OPEN_LayoutFromWindowDim(window_dim);
    F32          ui = layout.ui;
    F32          pad = 18.0f * ui;
    F32          indent = 22.0f * ui;
+   F32          panel_w = Dim2F32(layout.panel).x;
+   FNT_Tag      regular = app_state->fonts.regular;
    Temp         scratch = ScratchBegin(0, 0);
 
    // The row clicked, if one was. It is acted on once the panel is built:
@@ -447,8 +476,13 @@ OPEN_Build(App_State* app_state, Vec2F32 window_dim) {
                   } break;
                   case OPEN_RowKind_Up: {
                      color_tag = Str8Lit("folder");
-                     what = (row->path.size != 0) ? PushStr8F(scratch.arena, "the folder above: %S", row->path)
-                                                  : Str8Lit("the list of drives");
+                     String8 before = Str8Lit("the folder above: ");
+                     F32     used = pad + indent + TXT_Width(regular, layout.ui_px, row->label) + 18.0f * ui +
+                                TXT_Width(regular, layout.ui_px, before) + pad;
+                     what = (row->path.size != 0)
+                                ? PushStr8F(scratch.arena, "%S%S", before,
+                                            _OPEN_FitPath(scratch.arena, regular, layout.ui_px, row->path, panel_w - used))
+                                : Str8Lit("the list of drives");
                   } break;
                   case OPEN_RowKind_Browse: {
                      color_tag = Str8Lit("action");
@@ -466,9 +500,17 @@ OPEN_Build(App_State* app_state, Vec2F32 window_dim) {
 
                UI_Parent(row_box) UI_PrefHeight(UI_Pct(1, 1)) UI_Font(is_label ? app_state->fonts.bold : UI_TopFont()) {
                   UI_Spacer(UI_Px(is_label ? pad : pad + indent, 1));
+                  // A whole path - a deck opened lately, the folder the rows
+                  // are of - with as much of its end as fits.
+                  String8 label = row->label;
+                  if (row->kind == OPEN_RowKind_Recent) {
+                     label = _OPEN_FitPath(scratch.arena, regular, layout.ui_px, label, panel_w - (pad + indent) - pad);
+                  } else if (is_label) {
+                     label = _OPEN_FitPath(scratch.arena, app_state->fonts.bold, layout.ui_px, label, panel_w - pad * 2.0f);
+                  }
                   UI_SetNextPrefWidth(UI_TextDim(1, 1));
                   UI_SetNextColorTag(color_tag);
-                  UI_Label(row->label);
+                  UI_Label(label);
                   if (what.size != 0) {
                      UI_Spacer(UI_Px(18.0f * ui, 1));
                      UI_SetNextPrefWidth(UI_TextDim(1, 0));
