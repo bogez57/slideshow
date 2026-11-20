@@ -26,23 +26,6 @@ struct OPEN_Row {
    String8      path;  // what a click opens, or goes to
 };
 
-// A thing in the presenter's window that a click does something to.
-typedef enum PRES_HitKind {
-   PRES_HitKind_Null,
-   PRES_HitKind_Slide, // go to slide_idx
-   PRES_HitKind_Clock, // stop the clock, or let it run again
-   PRES_HitKind_ClockReset, // back to 00:00
-   PRES_HitKind_Video, // play the slide's video, or pause it
-} PRES_HitKind;
-
-typedef struct PRES_Hit {
-   PRES_HitKind kind;
-   Rng2F32      rect;
-   U64          slide_idx;
-} PRES_Hit;
-
-#define PRES_MAX_HITS 96
-
 typedef struct COPY_Job COPY_Job;
 
 // A press on one of the preview's pictures, its title or its body, and what
@@ -127,11 +110,10 @@ struct App_State {
    U64       presenter_started_us; // what its clock counts from
    U64       presenter_paused_us; // when its clock was stopped. 0: it runs
 
-   // What can be clicked in it, as PRES_Draw last laid it out. PRES_Input
-   // asks these of a click, a frame later - the window is laid out as it is
-   // drawn, and nothing moves between the two.
-   PRES_Hit presenter_hits[PRES_MAX_HITS];
-   U64      presenter_hit_count;
+   // Its UI layer, a UI_State of its own: built in PRES_Draw, after the
+   // main window's frame, with its own events. Made the first time it opens.
+   UI_State* presenter_ui_state;
+   U64       presenter_ui_last_frame_us;
    // The slide a click in it asked for, plus one. 0: none. Gone to by the
    // presentation's own input, with its other ways of changing slide, so
    // that the change fades as theirs do.

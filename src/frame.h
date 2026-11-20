@@ -71,12 +71,27 @@ internal F32 FR_UIFontSize(F32 px);
 //- bgz: boxes at a place of their own (frame.c)
 //
 // FR_BuildRectBox: a UI box at rect, in window pixels, under the parent
-// pushed - which must be at the window's top left, as the UI's root is. Its
-// signal is from rect, this frame's, and not from where the box was laid out
-// last frame. FR_BuildEdge: a box that draws only an outline thick pixels
-// wide, around rect exactly, in color.
+// pushed - the UI's root, or a box built with FR_BuildRectBox. Its signal is
+// from rect, this frame's, and not from where the box was laid out last
+// frame. FR_BuildEdge: a box that draws only an outline thick pixels wide,
+// around rect exactly, in color.
 internal UI_Box* FR_BuildRectBox(UI_BoxFlags flags, Rng2F32 rect, char* fmt, ...);
 internal UI_Box* FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...);
+
+//- bgz: a window's UI build (frame.c)
+//
+// Each window has a UI_State of its own: the main window's is
+// app_state->ui_state, the presenter's app_state->presenter_ui_state.
+// FR_BeginUIBuild selects ui_state and begins its build with this frame's
+// events of that window - the slideshow's theme, icons and fonts, and
+// last_frame_us for its animations - until UI_EndBuild. FR_DrawUITree draws
+// a state's laid-out tree into the draw bucket that is open.
+internal void FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64* last_frame_us);
+internal void FR_DrawUITree(UI_State* ui_state);
+
+// A line of words at top_left, as TXT_Draw would put it, px tall, in color
+// (frame.c).
+internal void FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 words, char* fmt, ...);
 
 //- bgz: the edit screen (frame_edit.c)
 //
@@ -216,11 +231,12 @@ internal void CARET_AfterDrawOf(App_State* app_state, U64 slide_idx);
 internal void PRES_Toggle(App_State* app_state);
 
 // Takes the window's events off this frame's: its close, and its keys, which
-// become the main window's so that either window drives the slides.
+// become the main window's so that either window drives the slides. Its
+// mouse is left for its own UI (PRES_Draw).
 internal void PRES_Input(App_State* app_state);
 
-// Draws the window. Inside its own Core_R_WindowBeginFrame and
-// Core_R_WindowEndFrame, after FrameWork.
+// Builds the window's UI, with its own UI_State, and draws it. Inside its own
+// Core_R_WindowBeginFrame and Core_R_WindowEndFrame, after FrameWork.
 internal void PRES_Draw(App_State* app_state);
 
 #endif // FRAME_H

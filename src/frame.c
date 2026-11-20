@@ -642,9 +642,8 @@ _FR_DrawSlide(UI_Box* box, void* user_data) {
    }
 }
 
-// A line of words at top_left, as TXT_Draw would put it, px tall, in color.
 internal void
-_FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 words, char* fmt, ...) {
+FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 words, char* fmt, ...) {
    Temp    scratch = ScratchBegin(0, 0);
    va_list args;
    va_start(args, fmt);
@@ -698,7 +697,7 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       F32 h = TXT_LineHeight(fonts->regular, px);
       F32 x = (window_dim.x - w) * 0.5f;
       F32 y = pad * 2.0f;
-      _FR_BuildWords(fonts->regular, px, V2F32(x, y), UI_ThemeColor(Str8Lit("notice"), UI_ColorSlot_Text), notice, "###present notice");
+      FR_BuildWords(fonts->regular, px, V2F32(x, y), UI_ThemeColor(Str8Lit("notice"), UI_ColorSlot_Text), notice, "###present notice");
       _FR_BuildPanel(Str8Lit("notice"), R2F32P(x - pad * 1.5f, y - pad * 0.5f, x + w + pad * 1.5f, y + h + pad * 0.5f), 0,
                      "###present notice panel");
    }
@@ -748,8 +747,8 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       Vec4F32 what_color = UI_ThemeColor(Str8Lit("keys what"), UI_ColorSlot_Text);
       F32     y = panel_y + pad;
       for (U64 i = 0; i < ArrayCount(rows); i += 1) {
-         _FR_BuildWords(fonts->bold, px, V2F32(panel_x + pad, y), key_color, rows[i][0], "###present key %llu", (unsigned long long)i);
-         _FR_BuildWords(fonts->regular, px, V2F32(panel_x + pad + key_w + column_gap, y), what_color, rows[i][1], "###present what %llu",
+         FR_BuildWords(fonts->bold, px, V2F32(panel_x + pad, y), key_color, rows[i][0], "###present key %llu", (unsigned long long)i);
+         FR_BuildWords(fonts->regular, px, V2F32(panel_x + pad + key_w + column_gap, y), what_color, rows[i][1], "###present what %llu",
                         (unsigned long long)i);
          y += row_h;
       }
@@ -800,11 +799,11 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       Vec4F32 color = UI_ThemeColor(has_notes ? Str8Lit("notes") : Str8Lit("notes none"), UI_ColorSlot_Text);
       U64     line_idx = 0;
       for (String8Node* line = lines.first; line != 0; line = line->next, line_idx += 1) {
-         _FR_BuildWords(fonts->regular, px, V2F32(pad, y), color, line->string, "###present note %llu", (unsigned long long)line_idx);
+         FR_BuildWords(fonts->regular, px, V2F32(pad, y), color, line->string, "###present note %llu", (unsigned long long)line_idx);
          y += line_h;
       }
       y += pad * 0.5f;
-      _FR_BuildWords(fonts->regular, small_px, V2F32(pad, y), UI_ThemeColor(Str8Lit("notes next"), UI_ColorSlot_Text), next,
+      FR_BuildWords(fonts->regular, small_px, V2F32(pad, y), UI_ThemeColor(Str8Lit("notes next"), UI_ColorSlot_Text), next,
                      "###present next");
       _FR_BuildPanel(Str8Lit("notes"), R2F32P(0, strip_y, window_dim.x, window_dim.y), 0, "###present notes");
    }
@@ -824,7 +823,7 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       F32 x = window_dim.x - w - pad * 3.0f;
       F32 y = window_dim.y - h - pad * 3.0f;
 
-      _FR_BuildWords(fonts->regular, px, V2F32(x, y), UI_ThemeColor(Str8Lit("info"), UI_ColorSlot_Text), text, "###present info");
+      FR_BuildWords(fonts->regular, px, V2F32(x, y), UI_ThemeColor(Str8Lit("info"), UI_ColorSlot_Text), text, "###present info");
       _FR_BuildPanel(Str8Lit("info"), R2F32P(x - pad, y - pad * 0.5f, x + w + pad, y + h + pad * 0.5f), 0, "###present info panel");
    }
 
@@ -851,7 +850,7 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       for (U64 i = 0; i < ArrayCount(lines); i += 1) {
          FNT_Tag font = (i == 0) ? fonts->bold : fonts->regular;
          F32     w = TXT_Width(font, sizes[i], lines[i]);
-         _FR_BuildWords(font, sizes[i], V2F32((window_dim.x - w) * 0.5f, y), colors[i], lines[i], "###present empty %llu", (unsigned long long)i);
+         FR_BuildWords(font, sizes[i], V2F32((window_dim.x - w) * 0.5f, y), colors[i], lines[i], "###present empty %llu", (unsigned long long)i);
          y += TXT_LineHeight(font, sizes[i]) * 1.2f;
       }
    }
@@ -882,10 +881,11 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
 //~ bgz: the UI layer
 //
 // The editor project's UI library (src\ui), built once a frame in FrameWork:
-// _FR_BeginUI, then the boxes, then UI_EndBuild, which lays them out. The
-// tree is drawn by _FR_DrawUITree, last, over everything the screens drew by
-// hand. Ported from the editor's frame.c (_FR_ProcessEvents,
-// _FR_BeginUIBuild, _FR_DrawUITree).
+// FR_BeginUIBuild, then the boxes, then UI_EndBuild, which lays them out.
+// The tree is drawn by FR_DrawUITree, over the window's background. Ported
+// from the editor's frame.c (_FR_ProcessEvents, _FR_BeginUIBuild,
+// _FR_DrawUITree). The presenter's window is built the same way, with a
+// UI_State of its own (PRES_Draw, frame_presenter.c).
 //
 // Built with it: the open screen (OPEN_Build, frame_open.c) and the whole
 // edit screen (EDIT_Build, frame_edit.c): the text (drawn by its box, with the
@@ -901,15 +901,19 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
 // clicks; while the open screen is up, the edit screen's input does not run
 // at all, and its UI boxes are built only to be seen.
 
-// This frame's window events as the UI's. Selects the UI's state first: the
-// list is on UI_BuildArena, which is the selected state's, and lasts until
-// the next UI_EndBuild.
+// This frame's events of window as the UI's. Selects the UI's state first:
+// the list is on UI_BuildArena, which is the selected state's, and lasts
+// until the next UI_EndBuild. Another window's events are not this one's: a
+// press in the presenter's window is at a place in that window.
 internal UI_EventList
-_FR_UIEventsFromEvents(App_State* app_state) {
-   UI_SelectState(app_state->ui_state);
+_FR_UIEventsFromEvents(App_State* app_state, UI_State* ui_state, WM_Window window) {
+   UI_SelectState(ui_state);
 
    UI_EventList ui_events = {0};
    for (WM_Event* event = app_state->events.first; event != 0; event = event->next) {
+      if (event->window.u64[0] != window.u64[0] && event->window.u64[0] != 0) {
+         continue;
+      }
       UI_EventKind kind = UI_EventKind_Null;
       switch (event->kind) {
          default: {
@@ -953,7 +957,10 @@ internal UI_Box*
 _FR_BuildRectBoxV(UI_BoxFlags flags, Rng2F32 rect, char* fmt, va_list args) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 key = PushStr8FV(scratch.arena, fmt, args);
-   UI_SetNextRect(rect);
+   // A box's fixed place is from its parent's top left: the parent's rect is
+   // this frame's if it was built here too, and the root's is the window's.
+   Vec2F32 origin = UI_TopParent()->rect.p0;
+   UI_SetNextRect(R2F32P(rect.min.x - origin.x, rect.min.y - origin.y, rect.max.x - origin.x, rect.max.y - origin.y));
    UI_Box* box = UI_BuildBoxFromString(flags, key);
    // The layout puts it at rect too, from its fixed place, but only at
    // UI_EndBuild: its signal would be asked of where it was last frame - a
@@ -1020,10 +1027,10 @@ FR_UIFontSize(F32 px) {
    return Max((F32)(S32)(px * 0.75f), 1.0f);
 }
 
-// Starts the frame's UI build: the theme, the icons, and the fonts every box
-// starts from.
 internal void
-_FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
+FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64* last_frame_us) {
+   Vec2F32      window_dim = Dim2F32(Core_WM_ClientRectFromWindow(window));
+   UI_EventList ui_events = _FR_UIEventsFromEvents(app_state, ui_state, window);
    // The colours, by tag. A box asks under the tags pushed with UI_ColorTag,
    // and the pattern with the most of them wins; a pattern counts only if
    // the box has all of its tags. The first part is the editor's palette
@@ -1106,6 +1113,21 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
        {"keys", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.95f}}},
        {"keys what", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.70f}}},
        {"notice", UI_ColorSlot_Background, {{0.00f, 0.00f, 0.00f, 0.75f}}},
+
+       //- bgz: the presenter's window (frame_presenter.c), all of it under
+       // this tag
+       {"presenter", UI_ColorSlot_Background, {{0.09f, 0.095f, 0.11f, 1.00f}}},
+       {"presenter", UI_ColorSlot_Text, {{0.92f, 0.93f, 0.95f, 1.00f}}},
+       {"presenter dim", UI_ColorSlot_Text, {{0.92f, 0.93f, 0.95f, 0.55f}}},
+       {"presenter clock", UI_ColorSlot_Text, {{1.00f, 0.85f, 0.50f, 1.00f}}},
+       {"presenter button", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.10f}}},
+       {"presenter button hot", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.22f}}},
+       {"presenter button off", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.04f}}},
+       {"presenter button off", UI_ColorSlot_Text, {{0.92f, 0.93f, 0.95f, 0.35f}}},
+       {"presenter end", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.04f}}}, // where the next slide would be, after the last
+       {"presenter hot", UI_ColorSlot_Border, {{1.00f, 1.00f, 1.00f, 0.45f}}},     // the next slide's frame under the mouse
+       {"presenter now", UI_ColorSlot_Border, {{1.00f, 0.85f, 0.50f, 1.00f}}},     // the bar under the small slide showing
+       {"presenter thumb hot", UI_ColorSlot_Border, {{1.00f, 1.00f, 1.00f, 0.60f}}}, // and under one under the mouse
    };
    static UI_Theme theme = {theme_patterns, ArrayCount(theme_patterns)};
 
@@ -1136,10 +1158,10 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
    // counts as one frame at 60 a second, so nothing jumps.
    U64 now_us = NowTimeUS();
    F32 dt = 1.0f / 60.0f;
-   if (app_state->ui_last_frame_us != 0 && now_us - app_state->ui_last_frame_us < 250000) {
-      dt = (F32)(now_us - app_state->ui_last_frame_us) / 1000000.0f;
+   if (*last_frame_us != 0 && now_us - *last_frame_us < 250000) {
+      dt = (F32)(now_us - *last_frame_us) / 1000000.0f;
    }
-   app_state->ui_last_frame_us = now_us;
+   *last_frame_us = now_us;
 
    // Hover and press come in fast, as raddebugger's do: the scroll bar's thumb
    // widens under the mouse by them (_UI_DrawScrollThumb). The rest is not
@@ -1147,7 +1169,11 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
    UI_AnimationInfo animation_info = {0};
    animation_info.hot_animation_rate = 1.0f - PowF32(2.0f, -60.0f * dt);
    animation_info.active_animation_rate = animation_info.hot_animation_rate;
-   UI_BeginBuild(app_state->window, ui_events, &icon_info, &theme, &animation_info, dt, dt);
+   // The events live on the build arena until UI_EndBuild: a copy of the list
+   // head there too, which UI_BeginBuild keeps.
+   UI_EventList* events = PushArray(UI_BuildArena(), UI_EventList, 1);
+   *events = ui_events;
+   UI_BeginBuild(window, events, &icon_info, &theme, &animation_info, dt, dt);
 
    // The slideshow's regular font, at the hand-drawn screens' text size
    // (15 pixels at FR_UIScale 1, as the edit screen's), and drawn as they
@@ -1167,14 +1193,9 @@ _FR_BeginUI(App_State* app_state, UI_EventList* ui_events, Vec2F32 window_dim) {
    UI_PushPrefHeight(UI_TopPrefHeight());
 }
 
-// Draws the UI's box tree into the draw bucket that is open, over whatever
-// is already in it. The one place a box becomes draw commands, so a new
-// UI_BoxFlag is handled once, here. The editor's _FR_DrawUITree, less its
-// own Core_D_BeginFrame and bucket: the slideshow's frame has one bucket for
-// everything (FrameWork).
 internal void
-_FR_DrawUITree(App_State* app_state) {
-   for (UI_Box* box = UI_RootFromState(app_state->ui_state); !UI_BoxIsNil(box);) {
+FR_DrawUITree(UI_State* ui_state) {
+   for (UI_Box* box = UI_RootFromState(ui_state); !UI_BoxIsNil(box);) {
       UI_BoxRec rec = UI_BoxRecDfPost(box, &ui_nil_box);
 
       // Under the box, down and right of it, soft. raddebugger's sizes. Not
@@ -1323,8 +1344,7 @@ FrameWork(App_State* app_state) {
    // wheel that misses its panel. Under it, the edit screen's panels are
    // built only to be seen.
    {
-      UI_EventList ui_events = _FR_UIEventsFromEvents(app_state);
-      _FR_BeginUI(app_state, &ui_events, window_dim);
+      FR_BeginUIBuild(app_state, app_state->ui_state, app_state->window, &app_state->ui_last_frame_us);
 
       // What the panels show is text as it is - paths, names, "## Heading" -
       // never a box's key: the UI would show only what is before a ##.
@@ -1352,7 +1372,7 @@ FrameWork(App_State* app_state) {
 
       // Over it, all there is: the open screen, and the edit screen or the
       // presentation, the slide among it.
-      _FR_DrawUITree(app_state);
+      FR_DrawUITree(app_state->ui_state);
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);
 
