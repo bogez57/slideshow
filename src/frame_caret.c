@@ -244,11 +244,33 @@ _CARET_ScrollOf(App_State* app_state, DECK_Slide* slide, U64 block_idx) {
    return result;
 }
 
+// The box among boxes whose scroll bar pos is on: a little wider than it is
+// drawn, as it is thin. 0 for none. scale is pixels to a page unit.
+internal VIEW_Box*
+_CARET_BarAt(VIEW_Box* boxes, U64 box_count, Vec2F32 pos, F32 scale) {
+   VIEW_Box* result = 0;
+   for (U64 i = 0; i < box_count && result == 0; i += 1) {
+      VIEW_Box* box = &boxes[i];
+      Rng2F32   reach = box->bar_track;
+      reach.min.x -= 5.0f * scale;
+      reach.max.x += 5.0f * scale;
+      if (box->kind == DECK_PlaceKind_Text && box->words_height > 0 && Contains2F32(reach, pos)) {
+         result = box;
+      }
+   }
+   return result;
+}
+
 internal B32
 CARET_Wheel(App_State* app_state, Vec2F32 pos, F32 delta) {
    B32 result = 0;
    if (_CARET_RunsAreGood(app_state) && Contains2F32(app_state->preview_page, pos)) {
       VIEW_Box* box = _CARET_WordsBoxAt(app_state, pos);
+      if (box == 0) {
+         // Over a block's scroll bar, beside it, as well.
+         box = _CARET_BarAt(app_state->preview_boxes, app_state->preview_box_count, pos,
+                            VIEW_ScaleFromDim(Dim2F32(app_state->preview_page)));
+      }
       if (box != 0 && box->kind == DECK_PlaceKind_Text) {
          // Some three lines of the body a notch (delta is in notches, down
          // the words when over 0). Kept to the words there are when the
@@ -287,21 +309,14 @@ CARET_BarInput(App_State* app_state) {
       if (event->kind != WM_EventKind_Press || event->key != WM_Key_LeftMouseButton) {
          continue;
       }
-      for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
-         VIEW_Box* box = &app_state->preview_boxes[i];
-         // A little wider than it is drawn: it is thin.
-         Rng2F32 reach = box->bar_track;
-         reach.min.x -= 5.0f * scale;
-         reach.max.x += 5.0f * scale;
-         if (box->kind == DECK_PlaceKind_Text && box->words_height > 0 && Contains2F32(reach, event->pos)) {
-            app_state->caret_bar_drag = 1;
-            app_state->caret_bar_block = box->idx;
-            app_state->caret_bar_grab = (event->pos.y >= box->bar_thumb.min.y && event->pos.y <= box->bar_thumb.max.y)
-                                            ? event->pos.y - box->bar_thumb.min.y
-                                            : (box->bar_thumb.max.y - box->bar_thumb.min.y) * 0.5f;
-            Core_WM_EatEvent(&app_state->events, event);
-            break;
-         }
+      VIEW_Box* box = _CARET_BarAt(app_state->preview_boxes, app_state->preview_box_count, event->pos, scale);
+      if (box != 0) {
+         app_state->caret_bar_drag = 1;
+         app_state->caret_bar_block = box->idx;
+         app_state->caret_bar_grab = (event->pos.y >= box->bar_thumb.min.y && event->pos.y <= box->bar_thumb.max.y)
+                                         ? event->pos.y - box->bar_thumb.min.y
+                                         : (box->bar_thumb.max.y - box->bar_thumb.min.y) * 0.5f;
+         Core_WM_EatEvent(&app_state->events, event);
       }
    }
 
@@ -327,11 +342,7 @@ CARET_BarInput(App_State* app_state) {
 
 internal void
 CARET_PresentAfterDraw(App_State* app_state, VIEW_HitList* hits) {
-   DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
-   slide->body_scroll = 0;
-   for (U64 i = 0; i < slide->box_count; i += 1) {
-      slide->boxes[i].scroll = 0;
-   }
+   CARET_AfterDrawOf(app_state, app_state->slide_idx);
    MemoryCopyArray(app_state->present_boxes, hits->boxes);
    app_state->present_box_count = hits->box_count;
    app_state->present_page = hits->page;
@@ -362,18 +373,49 @@ CARET_PresentWheel(App_State* app_state, Vec2F32 pos, F32 delta) {
    return result;
 }
 
+// Scrolls put on a slide's blocks: the shared one, and one for each placed
+// block. 0 for scrolls takes them all off.
+internal void
+_CARET_PutScroll(DECK_Slide* slide, F32 body_scroll, F32* scrolls) {
+   slide->body_scroll = (scrolls != 0) ? body_scroll : 0;
+   for (U64 i = 0; i < slide->box_count; i += 1) {
+      slide->boxes[i].scroll = (scrolls != 0 && slide->boxes[i].place.is_set) ? scrolls[i] : 0;
+   }
+}
+
 internal void
 CARET_BeforeDraw(App_State* app_state) {
    DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
-   // Another slide starts from its top.
+   // Another slide starts from its top. The one left keeps how far down it
+   // was, for as long as it fades out (CARET_BeforeDrawOf).
    if (app_state->caret_scroll_slide != app_state->slide_idx) {
+      app_state->caret_left_slide = app_state->caret_scroll_slide;
+      MemoryCopyArray(app_state->caret_left_scroll, app_state->caret_scroll);
+      app_state->caret_left_body_scroll = app_state->caret_body_scroll;
       app_state->caret_scroll_slide = app_state->slide_idx;
       MemoryZeroArray(app_state->caret_scroll);
       app_state->caret_body_scroll = 0;
    }
-   slide->body_scroll = app_state->caret_body_scroll;
-   for (U64 i = 0; i < slide->box_count; i += 1) {
-      slide->boxes[i].scroll = slide->boxes[i].place.is_set ? app_state->caret_scroll[i] : 0;
+   _CARET_PutScroll(slide, app_state->caret_body_scroll, app_state->caret_scroll);
+}
+
+internal void
+CARET_BeforeDrawOf(App_State* app_state, U64 slide_idx) {
+   if (slide_idx < app_state->deck->slide_count) {
+      DECK_Slide* slide = &app_state->deck->slides[slide_idx];
+      if (slide_idx == app_state->caret_scroll_slide) {
+         _CARET_PutScroll(slide, app_state->caret_body_scroll, app_state->caret_scroll);
+      } else if (slide_idx == app_state->caret_left_slide && slide_idx != app_state->slide_idx) {
+         // Not if it has just been come back to: that starts from its top.
+         _CARET_PutScroll(slide, app_state->caret_left_body_scroll, app_state->caret_left_scroll);
+      }
+   }
+}
+
+internal void
+CARET_AfterDrawOf(App_State* app_state, U64 slide_idx) {
+   if (slide_idx < app_state->deck->slide_count) {
+      _CARET_PutScroll(&app_state->deck->slides[slide_idx], 0, 0);
    }
 }
 
@@ -504,10 +546,7 @@ CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui) {
    ED_Editor*  editor = app_state->editor;
 
    //- bgz: the scroll is the preview's, not the deck's
-   slide->body_scroll = 0;
-   for (U64 i = 0; i < slide->box_count; i += 1) {
-      slide->boxes[i].scroll = 0;
-   }
+   _CARET_PutScroll(slide, 0, 0);
 
    //- bgz: the runs, kept for the next frame's clicks
    // On the arena the hits are on, which EDIT_Draw has just cleared.

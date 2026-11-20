@@ -156,6 +156,11 @@ internal void CARET_BarInput(App_State* app_state);
 // over such a block.
 internal void CARET_PresentAfterDraw(App_State* app_state, VIEW_HitList* hits);
 internal B32  CARET_PresentWheel(App_State* app_state, Vec2F32 pos, F32 delta);
+// Another drawing of a slide - the one fading out, the presenter window's -
+// with its blocks as far down their words as where it is shown, or was
+// when it was left; CARET_AfterDrawOf takes that off again.
+internal void CARET_BeforeDrawOf(App_State* app_state, U64 slide_idx);
+internal void CARET_AfterDrawOf(App_State* app_state, U64 slide_idx);
 
 internal void PRES_Toggle(App_State* app_state);
 

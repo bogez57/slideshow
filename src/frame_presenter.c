@@ -228,8 +228,11 @@ PRES_Draw(App_State* app_state) {
          Rng2F32 slide_rect = VIEW_PageRectFromRect(R2F32P(left.min.x, left.min.y, left.max.x, left.min.y + slide_h));
          slide_rect = R2F32P(left.min.x, left.min.y, left.min.x + Dim2F32(slide_rect).x, left.min.y + Dim2F32(slide_rect).y);
          Core_D_Rect(slide_rect, R2F32P(0, 0, 1, 1), colors.background);
+         // As far down its blocks' words as the wheel has them on the screen.
+         CARET_BeforeDrawOf(app_state, slide_idx);
          VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, slide,
                         slide_rect, 1.0f, 0);
+         CARET_AfterDrawOf(app_state, slide_idx);
 
          //- bgz: its notes, under it
          {

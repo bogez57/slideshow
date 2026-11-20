@@ -587,8 +587,13 @@ _VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 p
                 F32 alpha) {
    F32 room_h = room.max.y - room.min.y;
    if (room_h > 0 && words_height > room_h + 0.5f) {
-      F32     width = Max(5.0f * scale, 2.0f);
-      F32     gap = 5.0f * scale;
+      // A few pixels each at least, on a slide the size of the edit
+      // screen's preview, where a page unit is under half a pixel: the box
+      // around the block the caret is in, with its corner handles, reaches
+      // some pixels past the room, and a bar any nearer is hidden by them.
+      // Not on the small slides, where that would be most of the page.
+      F32     width = Max(5.0f * scale, Min(3.0f, 12.0f * scale));
+      F32     gap = Max(8.0f * scale, Min(8.0f, 30.0f * scale));
       Rng2F32 track = R2F32P(room.max.x + gap, room.min.y, room.max.x + gap + width, room.max.y);
       // On the page: a room at the page's right edge has it inside.
       if (track.max.x > page.max.x) {
@@ -600,7 +605,7 @@ _VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 p
       F32 thumb_y = track.min.y + part * (room_h - thumb_h);
       Rng2F32 thumb = R2F32P(track.min.x, thumb_y, track.max.x, thumb_y + thumb_h);
 
-      R_Rect2DInst* track_inst = Core_D_Rect(track, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.14f * alpha));
+      R_Rect2DInst* track_inst = Core_D_Rect(track, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.2f * alpha));
       R_Rect2DInst* thumb_inst = Core_D_Rect(thumb, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.55f * alpha));
       for (U64 i = 0; i < ArrayCount(thumb_inst->corner_radii); i += 1) {
          track_inst->corner_radii[i] = width * 0.5f;

@@ -613,8 +613,11 @@ _FR_DrawSlide(App_State* app_state, Vec2F32 window_dim) {
    // it has been released, and the slide goes without it. fade_from_idx past
    // the last slide is no slide: the new one fades in over the background.
    if (app_state->fade_active && app_state->fade_from_idx < deck->slide_count) {
+      // As far down its blocks' words as it was: not back at their top.
+      CARET_BeforeDrawOf(app_state, app_state->fade_from_idx);
       VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->fade_from_idx],
                      window_rect, 1.0f - fade_t, 0);
+      CARET_AfterDrawOf(app_state, app_state->fade_from_idx);
    }
    if (app_state->slide_idx < deck->slide_count) {
       // With its blocks as far down their words as the wheel has them

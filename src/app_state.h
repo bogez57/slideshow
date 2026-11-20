@@ -225,6 +225,11 @@ struct App_State {
    U64 caret_scroll_slide;
    U64 caret_seen_cursor;
    U64 caret_seen_edit_count;
+   // The same of the slide shown before caret_scroll_slide, as it was left:
+   // drawn so while it fades out.
+   F32 caret_left_scroll[DECK_MAX_BOXES];
+   F32 caret_left_body_scroll;
+   U64 caret_left_slide;
 
    // A scroll bar of the preview's slide with the mouse's button down on
    // it (frame_caret.c): the block whose it is, and how far under the top
