@@ -20,6 +20,8 @@
 // layout has for them, as a grid. An @place line puts one picture, the
 // title or a block of the body where it says instead. The body's blocks
 // (@box) that are not placed are one under another, where the body is.
+// Words are never made smaller to fit: a block's that do not fit its room
+// are not shown, and DECK_Box's scroll says how far down them it shows.
 // @size and @color lines (DECK_Look) give the title's words, or a block's,
 // a size and a colour of their own.
 
@@ -71,9 +73,33 @@ struct VIEW_Box {
    U64            idx; // which of the slide's pictures, or blocks of its body (DECK_Box). 0 for the title
    Rng2F32        rect;
    // The part of their usual size its words were drawn at: an @size line's,
-   // or what a body too long for its room was made smaller by. 0 for a
-   // picture.
+   // or 1. 0 for a picture.
    F32 text_size;
+   // The room its words have: they wrap at its width, and those under its
+   // bottom are not shown. A placed block's or title's is its place. A
+   // block's that is not placed is the body's width, down to where the
+   // next block starts - or, for the last of them, the body's bottom. A
+   // picture's is rect.
+   Rng2F32 room;
+   // The y under its last word, as drawn: under room's bottom when there
+   // are more words than room. 0 for a picture.
+   F32 words_max_y;
+};
+
+// A run of letters as drawn: one line of a wrapped title or heading, or
+// one piece of a line of the body (a word, or a part of one drawn alike).
+// With these, a letter of the deck's text can be found on the slide, and a
+// point on the slide in the text (frame_caret.c). Runs of words that are
+// not shown - under the bottom of their block's room - are here too.
+typedef struct VIEW_Run VIEW_Run;
+struct VIEW_Run {
+   VIEW_Run*      next;
+   Rng2F32        rect;       // the letters across, the line they are on down
+   Rng1U64        text_range; // where they are in the deck's text. Empty for a line with no words yet
+   FNT_Tag        font;       // what they were drawn with: TXT_Width with these
+   F32            px;         // measures them as drawn
+   DECK_PlaceKind kind;       // whose they are: the title's, or a block's
+   U64            idx;        // which block
 };
 
 typedef struct VIEW_HitList VIEW_HitList;
@@ -81,6 +107,10 @@ struct VIEW_HitList {
    VIEW_Hit* first;
    VIEW_Hit* last;
    U64       count;
+
+   VIEW_Run* first_run;
+   VIEW_Run* last_run;
+   U64       run_count;
 
    // Where the slide's title, each block of its body and each of its
    // pictures were put: what an @place line would move. None for a picture
@@ -99,7 +129,8 @@ struct VIEW_HitList {
 // with its file's name in it.
 //
 // hits, if not 0, is given a hit for the title, for each line of the body
-// and for each picture, on arena, and the boxes of what can be moved.
+// and for each picture, on arena, the boxes of what can be moved, and the
+// runs of letters.
 //
 // theme is the deck's, for the colours. The slide's own layout
 // (slide->layout) says where its picture and words go, and its @place lines

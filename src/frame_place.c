@@ -9,7 +9,7 @@
 //    move it          press inside the box and drag
 //    resize it        drag a corner. A picture keeps its shape. A block of
 //                     words takes any shape: its words wrap at the width, and
-//                     are made smaller if they do not fit the height
+//                     those that do not fit the height are not shown
 //    line it up       hold Shift while dragging: an edge or the middle of
 //                     it jumps to the page's edges, margins and middle, and
 //                     to the edges and middles of the slide's other boxes,

@@ -15,10 +15,6 @@
 #define _VIEW_BULLET_INDENT  38.0f // per level, and from the bullet to its text
 #define _VIEW_PICTURE_GUTTER 48.0f // between the body and a picture beside it
 
-// The smallest the body is shrunk to, as a part of its full size, to get a
-// long slide onto the page. Past that it runs off the bottom.
-#define _VIEW_MIN_BODY_SHRINK 0.5f
-
 // How much of the theme's background is laid over a picture that is behind
 // the words, so they can be read on it.
 #define _VIEW_BEHIND_SCRIM 0.62f
@@ -158,23 +154,54 @@ _VIEW_PushHit(Arena* arena, VIEW_HitList* hits, Rng2F32 rect, Rng1U64 text_range
    }
 }
 
+// Whose runs of letters are being drawn, for VIEW_HitList's runs: the
+// title's or a block's, and where in the deck's text the first letter of
+// the text being drawn is.
+typedef struct _VIEW_RunsOf _VIEW_RunsOf;
+struct _VIEW_RunsOf {
+   VIEW_HitList*  hits;
+   DECK_PlaceKind kind;
+   U64            idx;
+   U64            text_pos;
+};
+
+// letters is a part of text, drawn at x, y in font at px. Nothing with
+// runs_of 0, or no hits to add to.
+internal void
+_VIEW_PushRun(Arena* arena, _VIEW_RunsOf* runs_of, FNT_Tag font, F32 px, String8 text, String8 letters, F32 x, F32 y, F32 width) {
+   if (runs_of != 0 && runs_of->hits != 0) {
+      VIEW_Run* run = PushArray(arena, VIEW_Run, 1);
+      U64       start = runs_of->text_pos + ((letters.size != 0) ? (U64)(letters.str - text.str) : 0);
+      run->rect = R2F32P(x, y, x + width, y + TXT_LineHeight(font, px));
+      run->text_range = R1U64(start, start + letters.size);
+      run->font = font;
+      run->px = px;
+      run->kind = runs_of->kind;
+      run->idx = runs_of->idx;
+      SLLQueuePush(runs_of->hits->first_run, runs_of->hits->last_run, run);
+      runs_of->hits->run_count += 1;
+   }
+}
+
 // Lines of wrapped text from top down, each starting at x. Returns the y
 // under the last. With do_draw 0 nothing is drawn: it only measures.
 // centered puts each line in the middle of max_width. widest_out, if not 0,
-// gets the width of the widest line drawn.
+// gets the width of the widest line drawn. runs_of, if not 0, is given a
+// run for each line drawn.
 internal F32
 _VIEW_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 max_width, Vec4F32 color, B32 do_draw,
-            B32 centered, F32* widest_out) {
+            B32 centered, F32* widest_out, _VIEW_RunsOf* runs_of) {
    F32         line_height = TXT_LineHeight(font, px);
    String8List lines = TXT_Wrap(arena, font, px, text, max_width);
    F32         widest = 0;
 
    for (String8Node* node = lines.first; node != 0; node = node->next) {
       if (do_draw) {
-         F32 line_w = (centered || widest_out != 0) ? TXT_Width(font, px, node->string) : 0;
+         F32 line_w = (centered || widest_out != 0 || runs_of != 0) ? TXT_Width(font, px, node->string) : 0;
          // Centered: each line in the middle of the width it could have had.
          F32 line_x = centered ? x + (max_width - line_w) * 0.5f : x;
          TXT_Draw(font, px, V2F32(line_x, y), color, node->string);
+         _VIEW_PushRun(arena, runs_of, font, px, text, node->string, line_x, y, line_w);
          widest = Max(widest, line_w);
       }
       y += line_height;
@@ -340,10 +367,11 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
    return result;
 }
 
-// As _VIEW_Lines, for text that may have words in bold and in code.
+// As _VIEW_Lines, for text that may have words in bold and in code. A run
+// is given for each piece: every one as tall as the line, whatever its font.
 internal F32
 _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, String8 text, F32 x, F32 y, F32 max_width,
-                Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out) {
+                Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out, _VIEW_RunsOf* runs_of) {
    F32             line_height = TXT_LineHeight(fonts->regular, px);
    F32             space_width = TXT_Width(fonts->regular, px, Str8Lit(" "));
    _VIEW_PieceList pieces = _VIEW_PiecesFromText(arena, fonts, px, text);
@@ -400,6 +428,12 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
                Core_D_Rect(R2F32P(box_x, box_top, piece_x + piece->width, box_bottom), R2F32P(0, 0, 1, 1), box_color);
             }
             TXT_Draw(font, piece_px, V2F32(piece_x + piece->pad_before, piece_y), color, piece->text);
+            if (runs_of != 0 && runs_of->hits != 0) {
+               F32 letters_w = TXT_Width(font, piece_px, piece->text);
+               _VIEW_PushRun(arena, runs_of, font, piece_px, text, piece->text, piece_x + piece->pad_before, y, letters_w);
+               // As tall as the line, not as its own font.
+               runs_of->hits->last_run->rect.max.y = y + line_height;
+            }
             piece_x += piece->width;
          }
          widest = Max(widest, line_w);
@@ -415,18 +449,18 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
    return y;
 }
 
-// The items of one block of the slide's body, from rect's top left down, no
-// wider than rect. shrink is the part of full size to draw them at - unless
-// the block has a size of its own (@size), which it is then drawn at.
-// Returns the y under the last.
+// The items of one block of the slide's body - its box_idx-th - from rect's
+// top left down, no wider than rect, at the block's own size if it has one
+// (@size). Returns the y under the last. The caller clips: the hits given
+// are only of what is inside shown, and the runs of everything.
 internal F32
-_VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, DECK_Box* box, Rng2F32 rect, F32 scale,
-           F32 shrink, F32 alpha, B32 do_draw, VIEW_HitList* hits) {
+_VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, DECK_Box* box, U64 box_idx, Rng2F32 rect,
+           Rng2F32 shown, F32 scale, F32 alpha, VIEW_HitList* hits) {
    B32 centered = (slide->layout == DECK_Layout_Center);
-   // Words given a size (@size) are drawn at it: they are not made smaller
-   // to fit.
-   F32 unit = scale * (box->look.has_size ? box->look.size : shrink);
+   F32 unit = scale * (box->look.has_size ? box->look.size : 1.0f);
    F32 y = rect.min.y;
+
+   _VIEW_RunsOf runs_of = {hits, DECK_PlaceKind_Text, box_idx, 0};
 
    // A colour of the block's own (@color) is the colour of all its words,
    // headings too - and of what is drawn from the words' colour, a code
@@ -460,12 +494,13 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
       F32  item_y = y;
       F32  text_x = rect.min.x;
       F32  widest = 0;
-      F32* widest_out = (do_draw && hits != 0) ? &widest : 0;
+      F32* widest_out = (hits != 0) ? &widest : 0;
+      runs_of.text_pos = item->text_range.min;
 
       switch (item->kind) {
       case DECK_ItemKind_Heading: {
          y = _VIEW_Lines(arena, fonts->bold, _VIEW_HEADING_PX * unit, item->text, rect.min.x, y, Dim2F32(rect).x,
-                         _VIEW_Faded(heading_color, alpha), do_draw, centered, widest_out);
+                         _VIEW_Faded(heading_color, alpha), 1, centered, widest_out, &runs_of);
       } break;
 
       case DECK_ItemKind_Bullet: {
@@ -481,7 +516,7 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
             item_x = rect.min.x;
          }
 
-         if (do_draw && !centered) {
+         if (!centered) {
             // A round dot, level with the middle of the first line. Not under
             // 4 pixels across, or in the small preview it all but vanishes.
             F32 dot = Max(px * 0.28f, 4.0f);
@@ -498,30 +533,33 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
             inst->edge_softness = Min(1.0f, dot * 0.1f);
          }
 
-         // A bullet with no text yet still takes up its line.
+         // A bullet with no text yet still takes up its line, and has a
+         // run with no letters: where the first will go.
          if (item->text.size == 0) {
+            F32 empty_x = centered ? (rect.min.x + rect.max.x) * 0.5f : text_x;
+            _VIEW_PushRun(arena, &runs_of, fonts->regular, px, item->text, item->text, empty_x, y, 0);
             y += TXT_LineHeight(fonts->regular, px);
          }
          y = _VIEW_RichLines(arena, fonts, colors, px, item->text, text_x, y, rect.max.x - text_x,
-                             _VIEW_Faded(colors->body, alpha), alpha, do_draw, centered, widest_out);
+                             _VIEW_Faded(colors->body, alpha), alpha, 1, centered, widest_out, &runs_of);
       } break;
 
       default: {
          y = _VIEW_RichLines(arena, fonts, colors, body_px, item->text, rect.min.x, y, Dim2F32(rect).x,
-                             _VIEW_Faded(colors->body, alpha), alpha, do_draw, centered, widest_out);
+                             _VIEW_Faded(colors->body, alpha), alpha, 1, centered, widest_out, &runs_of);
       } break;
       }
 
-      if (do_draw) {
+      {
          // A bullet with no words yet is still something to click: as wide
          // as a few letters.
-         F32 hit_w = Max(widest, body_px * 3.0f);
+         F32     hit_w = Max(widest, body_px * 3.0f);
+         Rng2F32 hit_rect = R2F32P(item_x, item_y, text_x + hit_w, y);
          if (centered) {
             F32 middle = (rect.min.x + rect.max.x) * 0.5f;
-            _VIEW_PushHit(arena, hits, R2F32P(middle - hit_w * 0.5f, item_y, middle + hit_w * 0.5f, y), item->text_range);
-         } else {
-            _VIEW_PushHit(arena, hits, R2F32P(item_x, item_y, text_x + hit_w, y), item->text_range);
+            hit_rect = R2F32P(middle - hit_w * 0.5f, item_y, middle + hit_w * 0.5f, y);
          }
+         _VIEW_PushHit(arena, hits, Intersect2F32(hit_rect, shown), item->text_range);
       }
    }
 
@@ -529,7 +567,7 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
 }
 
 // The room between two blocks of the body that share the body's room, at
-// unit (scale times shrink): a line of the body's words. More than the most
+// unit (the scale): a line of the body's words. More than the most
 // _VIEW_Body leaves between two of its lines - three quarters of one, at an
 // empty line or a heading - so that where one block ends and the next
 // begins can be seen, and not so much that they stop reading as one body.
@@ -539,7 +577,7 @@ _VIEW_BlockGap(TXT_Fonts* fonts, F32 unit) {
 }
 
 internal void
-_VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F32 text_size) {
+_VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F32 text_size, Rng2F32 room, F32 words_max_y) {
    if (hits != 0 && hits->box_count < ArrayCount(hits->boxes) && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
       VIEW_Box* box = &hits->boxes[hits->box_count];
       hits->box_count += 1;
@@ -547,6 +585,8 @@ _VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F3
       box->idx = idx;
       box->rect = rect;
       box->text_size = text_size;
+      box->room = room;
+      box->words_max_y = words_max_y;
    }
 }
 
@@ -666,8 +706,14 @@ _VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* sli
    F32        width = Dim2F32(rect).x;
    F32 line_height = TXT_LineHeight(fonts->bold, px);
    F32 widest = 0;
+   _VIEW_RunsOf runs_of = {measure ? 0 : hits, DECK_PlaceKind_Title, 0, slide->title_range.min};
    F32 y = _VIEW_Lines(arena, fonts->bold, px, slide->title, rect.min.x, rect.min.y, width, _VIEW_Faded(color, alpha),
-                       !measure, centered, &widest);
+                       !measure, centered, &widest, &runs_of);
+   if (slide->title.size == 0) {
+      // No words yet: a run with no letters, where the first will go.
+      _VIEW_PushRun(arena, &runs_of, fonts->bold, px, slide->title, slide->title, centered ? rect.min.x + width * 0.5f : rect.min.x,
+                    rect.min.y, 0);
+   }
    y = Max(y, rect.min.y + line_height); // a title with no words yet still has its line
 
    F32 bar_w = (is_big ? 96.0f : 72.0f) * scale;
@@ -688,7 +734,9 @@ _VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* sli
          box.min.x = Max(title_x - (centered ? slack : 0), rect.min.x);
          box.max.x = Min(title_x + widest + slack, rect.max.x);
       }
-      _VIEW_PushBox(hits, DECK_PlaceKind_Title, 0, box, size);
+      // Its room: the width its words wrap at. Its height is theirs: a
+      // title is all shown, however long.
+      _VIEW_PushBox(hits, DECK_PlaceKind_Title, 0, box, size, R2F32P(rect.min.x, rect.min.y, rect.max.x, y), y);
 
       // The bar under it is under its start - or its middle, when centered.
       F32 bar_x = centered ? rect.min.x + (width - bar_w) * 0.5f : rect.min.x;
@@ -862,7 +910,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
       // placed keeps all of its room, as before there were places - which,
       // in a grid, is the picture as drawn too.
       _VIEW_PushHit(arena, hits, is_placed ? drawn : room, picture->range);
-      _VIEW_PushBox(hits, DECK_PlaceKind_Picture, i, drawn, 0);
+      _VIEW_PushBox(hits, DECK_PlaceKind_Picture, i, drawn, 0, drawn, 0);
    }
 
    //- bgz: the title
@@ -875,60 +923,57 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    // A block with an @place line is where that says. The rest are one under
    // another in the body's room, as one body would be: the pictures stay
    // where the layout has them, and moving a block does not move them.
+   //
+   // The words stay the size they are. What does not fit a block's room -
+   // its place, or the body's room for those that share it - is not shown,
+   // and the block's scroll (DECK_Box's, or the slide's body_scroll for the
+   // ones that share) says how far down its words the room shows.
    if (slide->item_count != 0) {
-      // The blocks that share the room: full size if they fit above the
-      // bottom margin, else the largest of a few smaller sizes that does -
-      // or the smallest, if none do.
-      F32 shared_shrink = 1.0f;
-      for (;;) {
-         F32 y_at = body_rect.min.y;
-         F32 end_y = y_at;
-         for (U64 i = 0; i < slide->box_count; i += 1) {
-            DECK_Box* block = &slide->boxes[i];
-            if (block->item_count != 0 && !block->place.is_set) {
-               Rng2F32 block_rect = R2F32P(body_rect.min.x, y_at, body_rect.max.x, body_rect.max.y);
-               end_y = _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shared_shrink, alpha, 0, 0);
-               y_at = end_y + _VIEW_BlockGap(fonts, scale * shared_shrink);
-            }
+      U64 last_shared = max_U64; // the last block that is not placed
+      for (U64 i = 0; i < slide->box_count; i += 1) {
+         if (slide->boxes[i].item_count != 0 && !slide->boxes[i].place.is_set) {
+            last_shared = i;
          }
-         if (end_y <= body_rect.max.y || shared_shrink <= _VIEW_MIN_BODY_SHRINK) {
-            break;
-         }
-         shared_shrink = Max(shared_shrink * 0.88f, _VIEW_MIN_BODY_SHRINK);
       }
 
-      F32 y_at = body_rect.min.y;
+      F32 y_at = body_rect.min.y - slide->body_scroll * scale;
       for (U64 i = 0; i < slide->box_count; i += 1) {
          DECK_Box* block = &slide->boxes[i];
          if (block->item_count == 0) {
             continue;
          }
+         F32 text_size = block->look.has_size ? block->look.size : 1.0f;
          if (block->place.is_set) {
-            // In its place, at the largest size that fits it.
-            Rng2F32 block_rect = _VIEW_PlacedRect(page, &block->place);
-            F32     shrink = 1.0f;
-            for (;;) {
-               F32 end_y = _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shrink, alpha, 0, 0);
-               if (end_y <= block_rect.max.y || shrink <= _VIEW_MIN_BODY_SHRINK) {
-                  break;
-               }
-               shrink = Max(shrink * 0.88f, _VIEW_MIN_BODY_SHRINK);
-            }
-            _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shrink, alpha, 1, hits);
-            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, block_rect, block->look.has_size ? block->look.size : shrink);
+            Rng2F32 room = _VIEW_PlacedRect(page, &block->place);
+            Rng2F32 shown = Intersect2F32(room, rect);
+            Rng2F32 block_rect = room;
+            block_rect.min.y -= block->scroll * scale;
+            Core_D_PushClip(shown);
+            F32 end_y = _VIEW_Body(arena, fonts, &colors, slide, block, i, block_rect, shown, scale, alpha, hits);
+            Core_D_PopClip();
+            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, room, text_size, room, end_y);
          } else {
+            Rng2F32 shown = Intersect2F32(body_rect, rect);
             Rng2F32 block_rect = R2F32P(body_rect.min.x, y_at, body_rect.max.x, body_rect.max.y);
-            F32     end_y = _VIEW_Body(arena, fonts, &colors, slide, block, block_rect, scale, shared_shrink, alpha, 1, hits);
-            y_at = end_y + _VIEW_BlockGap(fonts, scale * shared_shrink);
+            Core_D_PushClip(shown);
+            F32 end_y = _VIEW_Body(arena, fonts, &colors, slide, block, i, block_rect, shown, scale, alpha, hits);
+            Core_D_PopClip();
+            y_at = end_y + _VIEW_BlockGap(fonts, scale);
 
             // The box to move it by: as tall as the words, not all the room
             // down to the bottom margin - that box would be mostly empty,
             // and would already touch the page's bottom, so it could hardly
             // be dragged down at all. A little over, so that the words
-            // still fit at the same size once it is placed.
+            // still fit once it is placed. And only what of it is in the
+            // body's room.
             Rng2F32 box = block_rect;
-            box.max.y = Clamp(block_rect.min.y + 1.0f, end_y + 8.0f * scale, Max(body_rect.max.y, block_rect.min.y + 1.0f));
-            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, box, block->look.has_size ? block->look.size : shared_shrink);
+            box.min.y = Clamp(body_rect.min.y, block_rect.min.y, body_rect.max.y);
+            box.max.y = Clamp(box.min.y + 1.0f, end_y + 8.0f * scale, Max(body_rect.max.y, box.min.y + 1.0f));
+            Rng2F32 room = box;
+            if (i == last_shared) {
+               room.max.y = Max(body_rect.max.y, box.max.y);
+            }
+            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, box, text_size, room, end_y);
          }
       }
    }

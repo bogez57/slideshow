@@ -23,7 +23,8 @@ The Format panel under the text lists all of this. Click a line there to write i
 A paragraph that is too long for the page is broken at spaces into as many lines as it needs, and the lines stay inside the margins whatever size the window is, because the page is laid out again every frame.
 
 - Bullets wrap as well, and the lines after the first start under the text of the first, not under the dot
-- A slide with more on it than fits is drawn smaller until it does
+- Click in the words in the preview and type: they wrap at the edge of their box
+- Words stay the size they are. With more than its box has room for, the box moves down them as you type
 
 ## A heading inside a slide
 

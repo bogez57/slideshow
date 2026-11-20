@@ -20,10 +20,7 @@
 // take the line out again.
 //
 // Larger and smaller go from the size the words are drawn at, which the
-// preview knows (VIEW_Box's text_size): a body too long for its room is
-// drawn smaller than its usual size, and one step from there is what a key
-// should do - not a jump to a tenth off the usual size. Once a block has a
-// size it is drawn at it, and no longer made smaller to fit (view.c).
+// preview knows (VIEW_Box's text_size).
 
 // How much one step of larger or smaller is.
 #define _LOOK_STEP 1.1f

@@ -207,6 +207,25 @@ struct App_State {
    B32 preview_focus_hidden;
    U64 preview_focus_hidden_cursor;
 
+   // Edit screen: the runs of letters of the preview's slide, as drawn last
+   // frame (VIEW_HitList's runs), on preview_hits_arena: what a click on a
+   // word is a click on the letter of, and where the caret goes
+   // (frame_caret.c). Good for the same text as preview_hits.
+   VIEW_Run* preview_runs;
+   U64       preview_run_count;
+
+   // Edit screen: how far down its words each block of the slide showing
+   // shows, in page units (DECK_Box's scroll): by block for the ones with
+   // an @place line, and one for the rest, which share the body's room.
+   // caret_scroll_slide is the slide they are of: another starts from 0.
+   // The caret_seen two are the cursor and the text the room last followed
+   // the caret for.
+   F32 caret_scroll[DECK_MAX_BOXES];
+   F32 caret_body_scroll;
+   U64 caret_scroll_slide;
+   U64 caret_seen_cursor;
+   U64 caret_seen_edit_count;
+
    // Edit screen: where the preview's slide had its pictures, its title and
    // its body last frame (VIEW_HitList's boxes), and its page: what the mouse moves
    // and resizes. Good for the same text as preview_hits.

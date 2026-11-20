@@ -54,7 +54,8 @@
 //                       the same for the slide's body: every line under the
 //                       title - or, on a slide with @box lines, the block
 //                       of it the line is in. The words wrap at its width,
-//                       and are made smaller if they do not fit its height
+//                       and stay the size they are: those that do not fit
+//                       its height are not shown
 //    @box               the lines of the body under it, on this slide, are
 //                       another block of words: one that @place text, under
 //                       it, puts somewhere of its own. Up to DECK_MAX_BOXES
@@ -66,8 +67,7 @@
 //    @size title 1.5    how large the title's words are, as so many times
 //                       their usual size (0.5 is half)
 //    @size text 0.8     the same for the body's words - on a slide with
-//                       @box lines, those of the block the line is in.
-//                       Words given a size are not made smaller to fit
+//                       @box lines, those of the block the line is in
 //    @color title red   the colour of the title's words: one of the names
 //                       in deck.c (DECK_NamedColorFromIdx) - white, black,
 //                       gray, red, orange, yellow, green, blue, purple,
@@ -197,6 +197,12 @@ struct DECK_Box {
    // Where in the deck's text the block begins: the start of its @box line
    // - or, for a slide's first block, where the slide begins.
    U64 text_pos;
+   // How far up its words are moved in its place, in page units: a block
+   // with more words than its place has room for shows this far down them.
+   // Not from the text: the edit screen's, while it is typed in
+   // (frame_caret.c), and 0 when presenting. For a block with an @place
+   // line: the others move together, by the slide's body_scroll.
+   F32 scroll;
 };
 
 // One of a slide's pictures.
@@ -260,6 +266,9 @@ struct DECK_Slide {
    // images.
    DECK_Box boxes[DECK_MAX_BOXES];
    U64      box_count;
+   // As DECK_Box's scroll, for the blocks without an @place line, which
+   // share the body's room.
+   F32 body_scroll;
 
    // From the slide's @video line: how its video plays (frame_video.c).
    B32 video_loop;   // starts over when it reaches its end

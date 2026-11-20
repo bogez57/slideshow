@@ -129,6 +129,20 @@ internal String8 LOOK_Describe(Arena* arena, App_State* app_state, B32 is_color)
 internal B32     LOOK_ColorIsNow(App_State* app_state, U64 named_idx);
 internal B32     LOOK_SizeIsUsual(App_State* app_state);
 
+// The edit screen's words, typed into on the slide: frame_caret.c.
+// CARET_Click: a press at pos in the preview - 1 if it was in the title's
+// words or a block's, and the cursor has gone to the letter there
+// (keeps_mark: selecting from where it was). CARET_Wheel: the wheel at pos,
+// delta notches down - 1 if it was over a block, whose words it has moved.
+// CARET_BeforeDraw and CARET_AfterDraw go around the preview's
+// VIEW_DrawSlide: the first puts on the slide how far down each block's
+// words it shows, the second keeps the runs, follows the caret, and draws
+// the caret and the box of the piece it is in - 1 if it drew that box.
+internal B32  CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark);
+internal B32  CARET_Wheel(App_State* app_state, Vec2F32 pos, F32 delta);
+internal void CARET_BeforeDraw(App_State* app_state);
+internal B32  CARET_AfterDraw(App_State* app_state, VIEW_HitList* hits, F32 ui);
+
 internal void PRES_Toggle(App_State* app_state);
 
 // Takes the window's events off this frame's: its close, and its keys, which

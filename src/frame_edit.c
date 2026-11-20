@@ -34,10 +34,12 @@
 // own clicks and wheel there. The text, the preview, the small slides and
 // the + are drawn by hand (EDIT_Draw), and their clicks are EDIT_Input's.
 //
-// The slide in the preview can be clicked: on its title, a line of its body
-// or its picture, and the cursor goes to that line of the text, with the
-// words selected, to be typed over. What the mouse is over is lit, and what
-// the cursor is in has a thin blue box around it.
+// The slide in the preview is typed into: a click on its title or on a
+// block of its words puts the cursor at the letter clicked, with a caret
+// there on the slide, and a thin blue box around the room the words have
+// (frame_caret.c). A click on a picture puts the cursor on its line, with
+// the file's name selected, to be typed over, and a box around the picture.
+// What the mouse is over is lit.
 //
 // The row of small slides under the preview is the whole deck: clicking one
 // moves the cursor to that slide's first line, and the + at its end starts a
@@ -51,7 +53,8 @@
 //    deselect         Esc: nothing selected, and no box in the preview
 //    pictures         click the picture line under Format. Esc closes the list,
 //                     the wheel or the scroll bar moves through it
-//    edit a piece     click it in the preview
+//    edit a piece     click it in the preview, and type: the caret is on
+//                     the slide, at the letter clicked (frame_caret.c)
 //    move a piece     drag the picture or the body in the preview, or a
 //                     corner of it to resize it. Right-click puts it back
 //                     (frame_place.c)
@@ -857,6 +860,11 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
          if (event->kind != WM_EventKind_Press || event->key != WM_Key_LeftMouseButton) {
             continue;
          }
+         // On words: the cursor to the letter (frame_caret.c).
+         if (CARET_Click(app_state, event->pos, !!(event->modifiers & WM_Modifier_Shift))) {
+            Core_WM_EatEvent(events, event);
+            break;
+         }
          S64 hit_idx = _EDIT_PreviewHitAt(app_state, event->pos);
          if (hit_idx >= 0 && app_state->preview_hits[hit_idx].text_range.max <= editor->size) {
             VIEW_Hit* hit = &app_state->preview_hits[hit_idx];
@@ -867,6 +875,15 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
             editor->last_input_us = NowTimeUS();
             break;
          }
+      }
+   }
+
+   //- bgz: the wheel over a block of words in the preview moves its words
+   for (WM_Event *event = events->first, *next = 0; event != 0; event = next) {
+      next = event->next;
+      if (event->kind == WM_EventKind_Scroll && event->delta.y != 0 &&
+          CARET_Wheel(app_state, Core_WM_MouseFromWindow(window), event->delta.y / 120.0f)) {
+         Core_WM_EatEvent(events, event);
       }
    }
 
@@ -1359,6 +1376,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
 
    //- bgz: the preview
    app_state->preview_hit_count = 0; // made again below, if a slide is drawn
+   app_state->preview_run_count = 0;
    app_state->preview_box_count = 0;
    Core_D_Rect(layout.preview, R2F32P(0, 0, 1, 1), V4F32(0.125f, 0.13f, 0.15f, 1.0f));
    // A line where the text ends and the preview begins.
@@ -1374,6 +1392,7 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          // releases the pictures of slides far from this one.
          DECK_LoadSlide(deck, app_state->slide_idx);
          VIEW_HitList hits = {0};
+         CARET_BeforeDraw(app_state);
          VIEW_DrawSlide(app_state->frame_arena, fonts, deck->theme, &deck->slides[app_state->slide_idx], layout.page, 1.0f, &hits);
 
          //- bgz: the slide's pieces, kept for the next frame's clicks
@@ -1388,6 +1407,10 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
          MemoryCopyArray(app_state->preview_boxes, hits.boxes);
          app_state->preview_box_count = hits.box_count;
          app_state->preview_page = hits.page;
+
+         // The words: the caret, and the box of the piece it is in
+         // (frame_caret.c). The box drawn below is then a picture's.
+         B32 words_have_box = CARET_AfterDraw(app_state, &hits, ui);
 
          F32 grow = 4.0f * ui;
          for (VIEW_Hit* hit = hits.first; hit != 0; hit = hit->next) {
@@ -1405,13 +1428,13 @@ EDIT_Draw(App_State* app_state, Vec2F32 window_dim) {
             kept->rect = rect;
             kept->text_range = hit->text_range;
 
-            // A box around the piece the cursor is in: where typing goes.
-            // Not after Esc, until the cursor goes somewhere or a piece is
+            // A box around the picture the cursor is on the line of. Not
+            // after Esc, until the cursor goes somewhere or a piece is
             // clicked.
             if (app_state->preview_focus_hidden && editor->cursor != app_state->preview_focus_hidden_cursor) {
                app_state->preview_focus_hidden = 0;
             }
-            if (!app_state->preview_focus_hidden && editor->cursor >= hit->text_range.min &&
+            if (!words_have_box && !app_state->preview_focus_hidden && editor->cursor >= hit->text_range.min &&
                 editor->cursor <= hit->text_range.max) {
                // A thin box around it, in a blue that is the same on every
                // theme: it is the editor's mark, not part of the slide.
