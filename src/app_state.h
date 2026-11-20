@@ -34,6 +34,10 @@ typedef enum EDIT_PlaceDragState {
    EDIT_PlaceDragState_None,
    EDIT_PlaceDragState_Pressed, // the button is down on it, and the mouse has not gone far: a click, so far
    EDIT_PlaceDragState_Dragging,
+   // The button went down right at the words of the title or of a block:
+   // nothing is moved, the words from there to the mouse are selected
+   // (CARET_DragTo, frame_caret.c).
+   EDIT_PlaceDragState_Selecting,
 } EDIT_PlaceDragState;
 
 typedef struct EDIT_PlaceDrag EDIT_PlaceDrag;

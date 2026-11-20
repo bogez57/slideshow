@@ -38,6 +38,11 @@
 // to the words (frame_edit.c). So a press inside a box is a click, and only
 // watched for a drag. A press on a handle is a drag at once.
 //
+// A press right at the words (PLACE_IsAtWords) moves nothing: held and
+// taken across them it selects them, as in the text pane, to be copied, cut
+// or typed over (EDIT_PlaceDragState_Selecting, CARET_DragTo). The rest of
+// a box is where it is taken hold of to be moved.
+//
 // All of it is UI boxes (src\ui), built in the edit screen's UI build after
 // its slide is laid out for the frame (frame_edit.c), so they are where the
 // pieces are now:
@@ -682,6 +687,15 @@ PLACE_BeforeLayout(App_State* app_state, F32 ui) {
 
    B32 is_same = (editor != 0 && editor->edit_count == drag->edit_count && drag->slide_idx == app_state->slide_idx &&
                   drag->slide_idx < deck->slide_count && !app_state->show_open);
+   if (drag->state == EDIT_PlaceDragState_Selecting) {
+      // The box that was pressed says where the mouse has gone while it is
+      // held (_PLACE_Signal). Here only its end, should that box have gone
+      // with the button still down: nothing was moved, nothing is put back.
+      if (!is_same || !Core_WM_KeyIsDown(WM_Key_LeftMouseButton)) {
+         drag->state = EDIT_PlaceDragState_None;
+      }
+      return;
+   }
    if (!is_same) {
       // The text has changed under it, or the slide: given up. A deck made
       // again from the text has the place the text says already.
@@ -780,7 +794,11 @@ internal WM_Cursor
 _PLACE_HoverCursor(App_State* app_state, B32 has_piece, DECK_PlaceKind kind, U64 idx, U32 corner) {
    EDIT_PlaceDrag* drag = &app_state->place_drag;
    WM_Cursor       result = WM_Cursor_Pointer;
-   if (corner >= 5) {
+   if (drag->state == EDIT_PlaceDragState_Selecting) {
+      // Words are being selected: the bar they are typed at, whatever the
+      // mouse is taken across on its way.
+      result = WM_Cursor_IBar;
+   } else if (corner >= 5) {
       result = (_PLACE_HandleSideX(corner) != 0) ? WM_Cursor_LeftRight : WM_Cursor_UpDown;
    } else if (corner != 0) {
       result = (corner == 1 || corner == 4) ? WM_Cursor_DownRight : WM_Cursor_UpRight;
@@ -819,12 +837,36 @@ _PLACE_Signal(App_State* app_state, UI_Box* box, B32 has_piece, DECK_PlaceKind k
       } else {
          // A press is a click until the mouse goes somewhere: to the words,
          // or the picture (frame_edit.c) - and watched, for a drag.
+         //
+         // Right at the words (PLACE_IsAtWords, where the mouse is the bar
+         // that text is typed at) the drag selects them and moves nothing,
+         // as in any editor. A second press there in a moment selects the
+         // word, a third the line. Anywhere else in the box the drag moves
+         // the box.
+         B32 at_words = (piece != 0 && PLACE_IsAtWords(app_state, kind, idx, pos));
          EDIT_PreviewClick(app_state, pos, !!(signal.event_flags & WM_Modifier_Shift));
-         if (piece != 0) {
-            _PLACE_Begin(app_state, piece, 0, pos, EDIT_PlaceDragState_Pressed);
+         if (at_words && (signal.f & UI_SignalFlag_LeftTripleClicked)) {
+            CARET_SelectLine(app_state, kind, idx);
+         } else if (at_words && (signal.f & UI_SignalFlag_LeftDoubleClicked)) {
+            CARET_SelectWord(app_state);
+         } else if (piece != 0) {
+            _PLACE_Begin(app_state, piece, 0, pos, at_words ? EDIT_PlaceDragState_Selecting : EDIT_PlaceDragState_Pressed);
          }
       }
       result = 1;
+   }
+
+   // Held since a press at the words: the box pressed is asked, and it is
+   // the same one for as long as the text is, which a selection leaves be.
+   {
+      EDIT_PlaceDrag* drag = &app_state->place_drag;
+      if (drag->state == EDIT_PlaceDragState_Selecting && !(signal.f & UI_SignalFlag_LeftPressed)) {
+         if (signal.f & UI_SignalFlag_LeftReleased) {
+            drag->state = EDIT_PlaceDragState_None;
+         } else if (signal.f & UI_SignalFlag_LeftDragging) {
+            result |= CARET_DragTo(app_state, drag->kind, drag->idx, UI_Mouse());
+         }
+      }
    }
 
    if ((signal.f & UI_SignalFlag_RightPressed) && piece != 0) {

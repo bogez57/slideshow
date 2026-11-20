@@ -190,13 +190,12 @@ _CARET_WordsBoxAt(App_State* app_state, Vec2F32 pos) {
    return result;
 }
 
+// The cursor to the letter of box's words nearest to pos, which need not be
+// in the box. keeps_mark: the mark stays where it is, so what is between it
+// and the cursor is selected.
 internal B32
-CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
+_CARET_ClickIn(App_State* app_state, VIEW_Box* box, Vec2F32 pos, B32 keeps_mark) {
    B32 result = 0;
-   if (!_CARET_RunsAreGood(app_state) || !Contains2F32(app_state->preview_page, pos)) {
-      return 0;
-   }
-   VIEW_Box* box = _CARET_WordsBoxAt(app_state, pos);
    if (box != 0) {
       // The nearest of its runs that show: first by how far up or down the
       // point is from the run's line, then by how far across.
@@ -231,6 +230,108 @@ CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
       }
    }
    return result;
+}
+
+internal B32
+CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
+   if (!_CARET_RunsAreGood(app_state) || !Contains2F32(app_state->preview_page, pos)) {
+      return 0;
+   }
+   return _CARET_ClickIn(app_state, _CARET_WordsBoxAt(app_state, pos), pos, keeps_mark);
+}
+
+// The mouse held down from a press at the words of the title or of a block
+// (kind, idx), and now at pos: what is between where it went down and here
+// is selected, as in the text pane, to be copied, cut or typed over. It
+// stays with the words it began in, wherever the mouse goes: past the end of
+// a line is the line's end, off the box is the nearest of its lines. Past
+// the top or bottom of a block with more words than room, the words move
+// under the mouse, faster the further it is.
+internal B32
+CARET_DragTo(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos) {
+   B32 result = 0;
+   if (_CARET_RunsAreGood(app_state)) {
+      VIEW_Box* box = 0;
+      for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
+         if (app_state->preview_boxes[i].kind == kind && app_state->preview_boxes[i].idx == idx && kind != DECK_PlaceKind_Picture) {
+            box = &app_state->preview_boxes[i];
+         }
+      }
+      if (box != 0) {
+         if (kind == DECK_PlaceKind_Text) {
+            F32 past = (pos.y < box->room.min.y) ? pos.y - box->room.min.y : (pos.y > box->room.max.y) ? pos.y - box->room.max.y : 0;
+            if (past != 0) {
+               // A twentieth of a notch a frame at the edge, up to a third.
+               F32 step = Clamp(-0.33f, past * 0.01f, 0.33f);
+               step += (past < 0) ? -0.05f : 0.05f;
+               CARET_ScrollBlock(app_state, idx, step);
+               result = 1;
+            }
+         }
+         U64 cursor = app_state->editor->cursor;
+         _CARET_ClickIn(app_state, box, pos, 1);
+         result |= (cursor != app_state->editor->cursor);
+      }
+   }
+   return result;
+}
+
+// 1 for a byte of a word: a letter, a digit, or part of a letter of several
+// bytes. What a double click takes in.
+internal B32
+_CARET_IsWordByte(U8 byte) {
+   return ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') || byte == '_' || byte == '\'' ||
+           byte >= 0x80);
+}
+
+// A double click: the word the cursor is in or beside is selected.
+internal void
+CARET_SelectWord(App_State* app_state) {
+   ED_Editor* editor = app_state->editor;
+   String8    text = ED_Text(editor);
+   U64        min = Min(editor->cursor, text.size);
+   U64        max = min;
+   while (min > 0 && _CARET_IsWordByte(text.str[min - 1])) min -= 1;
+   while (max < text.size && _CARET_IsWordByte(text.str[max])) max += 1;
+   if (max > min) {
+      ED_SetCursor(editor, max);
+      editor->mark = min;
+      editor->last_input_us = NowTimeUS();
+   }
+}
+
+// A triple click: the words of the line of text the cursor is in - a
+// paragraph, an item of a list, the title - as the slide has them, so
+// without the "- " or "# " they start with in the text.
+internal void
+CARET_SelectLine(App_State* app_state, DECK_PlaceKind kind, U64 idx) {
+   ED_Editor* editor = app_state->editor;
+   String8    text = ED_Text(editor);
+   if (!_CARET_RunsAreGood(app_state)) {
+      return;
+   }
+   U64 at = Min(editor->cursor, text.size);
+   U64 line_min = at;
+   U64 line_max = at;
+   while (line_min > 0 && text.str[line_min - 1] != '\n') line_min -= 1;
+   while (line_max < text.size && text.str[line_max] != '\n' && text.str[line_max] != '\r') line_max += 1;
+   B32 has_any = 0;
+   U64 min = 0;
+   U64 max = 0;
+   for (U64 i = 0; i < app_state->preview_run_count; i += 1) {
+      VIEW_Run* run = &app_state->preview_runs[i];
+      if (run->kind != kind || run->idx != idx || run->text_range.min < line_min || run->text_range.max > line_max) {
+         continue;
+      }
+      min = has_any ? Min(min, run->text_range.min) : run->text_range.min;
+      max = has_any ? Max(max, run->text_range.max) : run->text_range.max;
+      has_any = 1;
+   }
+   if (has_any && max > min) {
+      ED_SetCursor(editor, max);
+      editor->mark = min;
+      editor->last_input_us = NowTimeUS();
+   }
 }
 
 // The scroll of the block a box is of: its own if it is placed, the one
