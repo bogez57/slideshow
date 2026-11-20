@@ -1312,7 +1312,7 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
       }
 
       if (can_move) {
-         caption = Str8Lit("Drag to move it      Shift lines it up      A corner resizes it      Right-click puts it back");
+         caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click puts it back");
       } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
          // A picture line typed past the most a slide can have: not on the
          // slide, which should not go unsaid.

@@ -4,7 +4,8 @@
 // In the preview, each of the slide's pictures - or videos - its title and
 // each block of its body (every line under the title, in blocks that @box
 // lines start) have a box: where VIEW_DrawSlide put them. With the mouse
-// over one, its outline and a handle at each corner show.
+// over one, its outline and its handles show: one at each corner, and one in
+// the middle of each side long enough to have it clear of them.
 //
 //    move it          press inside the box and drag
 //    resize it        drag a corner, or the handle in the middle of a side:
@@ -20,9 +21,10 @@
 //    put it back      right-click it: where the layout would have it
 //    give up a drag   Esc - or F5, which presents
 //
-// The mouse says which it would be (_PLACE_HoverCursor): the arrow that
-// resizes over a corner, the four-way arrow while a piece is dragged, and the
-// bar that text is typed at over the title's and blocks' words.
+// The mouse says which it would be (_PLACE_HoverCursor): over a handle the
+// arrow that resizes the way it does, the four-way arrow while a piece is
+// dragged, and the bar that text is typed at over the title's and blocks'
+// words.
 //
 // What comes of it is a line of the deck's text - "@place picture 0.55 0.2
 // 0.4 0.6", in parts of the page (deck.h) - written when the button comes
@@ -33,16 +35,15 @@
 //
 // A press that does not go anywhere is a click, as before: the cursor goes
 // to the words (frame_edit.c). So a press inside a box is a click, and only
-// watched for a drag. A press on a corner is a drag at once.
+// watched for a drag. A press on a handle is a drag at once.
 //
 // All of it is UI boxes (src\ui), built in the edit screen's UI build after
 // its slide is laid out for the frame (frame_edit.c), so they are where the
 // pieces are now:
 //
-//    PLACE_BuildHits   boxes that are clicked and not drawn: every corner's
-//                      handle, every hit of the slide (a line of words, a
-//                      picture) as the piece it is of, and every piece's own
-//                      box. In that order: what is built first is asked first,
+//    PLACE_BuildHits   boxes that are clicked and not drawn: every handle,
+//                      every hit of the slide (a line of words, a picture)
+//                      as the piece it is of, and every piece's own box. In that order: what is built first is asked first,
 //                      so a corner is before everything, a block's words are
 //                      before a picture they are over, and a picture before
 //                      the title's or a block's box under it. Their signals
@@ -57,8 +58,8 @@
 // while the button is down, wherever the mouse is: a block resized wraps its
 // words again, and the box of the line that was pressed on may be gone.
 
-// The side of a corner's handle, and how far the mouse goes with the button
-// down before it is a drag and not a click. In UI units.
+// The side of a handle, and how far the mouse goes with the button down
+// before it is a drag and not a click. In UI units.
 #define _PLACE_HANDLE     10.0f
 #define _PLACE_DRAG_START 4.0f
 
@@ -69,7 +70,7 @@
 // them, and could hardly be put anywhere else.
 #define _PLACE_SNAP 5.0f
 
-// The least the body's box is made by a corner, as parts of the page - or
+// The least the body's box is made by a handle, as parts of the page - or
 // what it was already, if a hand-written line made it less.
 #define _PLACE_TEXT_MIN_W 0.2f
 #define _PLACE_TEXT_MIN_H 0.12f
@@ -235,7 +236,7 @@ _PLACE_RemoveLine(ED_Editor* editor, DECK_Place* place) {
    }
 }
 
-// The least a corner makes the thing dragged, as parts of the page: the
+// The least a handle makes the thing dragged, as parts of the page: the
 // body's and the title's box more than a picture's. Their words wrap at the
 // width and get smaller only so far, so a box much narrower than this has a
 // word a line, running down off the page.
@@ -731,9 +732,9 @@ PLACE_BeforeLayout(App_State* app_state, F32 ui) {
 }
 
 // The mouse over one of the boxes of a piece of the slide - kind and idx,
-// has_piece 0 for one that is of none; corner: of a corner's handle, else 0:
+// has_piece 0 for one that is of none; corner: of a handle, else 0:
 //
-//    a corner's handle      the arrow that resizes from there
+//    a handle               the arrow that resizes the way it does
 //    the piece dragged      the four-way arrow that moves it
 //    the title's or a       the bar that text is typed at: a click puts the
 //    block's words, and     caret at the letter (frame_caret.c)
@@ -756,9 +757,9 @@ _PLACE_HoverCursor(App_State* app_state, B32 has_piece, DECK_PlaceKind kind, U64
 }
 
 // One of the boxes of a piece of the slide - kind and idx, has_piece 0 for
-// one that is of none - asked for its signal. corner: of a corner's handle,
-// else 0. hit_idx: of a hit of the preview, else -1. 1 if what was done to it
-// changed the text, the cursor or a block's scroll.
+// one that is of none - asked for its signal. corner: of a handle, else 0.
+// hit_idx: of a hit of the preview, else -1. 1 if what was done to it changed
+// the text, the cursor or a block's scroll.
 internal B32
 _PLACE_Signal(App_State* app_state, UI_Box* box, B32 has_piece, DECK_PlaceKind kind, U64 idx, U32 corner, S64 hit_idx,
               PLACE_Hover* hover) {
