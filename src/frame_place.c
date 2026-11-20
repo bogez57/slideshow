@@ -726,6 +726,11 @@ PLACE_BuildHits(App_State* app_state, F32 ui, B32 interactive, PLACE_Hover* hove
       U64            idx = 0;
       B32            has_piece = _PLACE_PieceOfHit(slide, hit, &kind, &idx);
       UI_Box*        box = FR_BuildRectBox(flags, hit->rect, "###place hit %llu", (unsigned long long)(i - 1));
+      // Over words the mouse is the bar that text is typed at: a click
+      // there puts the caret at the letter (frame_caret.c).
+      if (has_piece && kind != DECK_PlaceKind_Picture) {
+         box->hover_cursor = WM_Cursor_IBar;
+      }
       result |= _PLACE_Signal(app_state, box, has_piece, kind, idx, 0, (S64)(i - 1), hover);
    }
 

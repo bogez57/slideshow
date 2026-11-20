@@ -1449,6 +1449,7 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
       pane->box = layout.editor_box;
       UI_Box* box = FR_BuildRectBox(interactive ? (UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll) : 0, layout.editor_box.rect, "###edit text");
       UI_BoxEquipCustomDraw(box, _EDIT_DrawPane, pane);
+      box->hover_cursor = WM_Cursor_IBar; // the bar that text is typed at
       if (interactive) {
          UI_Signal signal = UI_SignalFromBox(box);
          if (signal.f & UI_SignalFlag_LeftPressed) {

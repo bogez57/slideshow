@@ -374,6 +374,7 @@ CARET_BuildRooms(App_State* app_state, B32 interactive) {
       }
       UI_Box*   room = FR_BuildRectBox(UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll, Intersect2F32(box->room, app_state->preview_page),
                                        "###caret room %d %llu", (int)box->kind, (unsigned long long)box->idx);
+      room->hover_cursor = WM_Cursor_IBar; // a click here goes to the nearest letter
       UI_Signal signal = UI_SignalFromBox(room);
       if (signal.f & UI_SignalFlag_LeftPressed) {
          CARET_Click(app_state, UI_DragStartMouse(), !!(signal.event_flags & WM_Modifier_Shift));
