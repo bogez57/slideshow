@@ -78,7 +78,7 @@ Two # make a heading, which belongs to the slide it is on.
 @place picture 0.560 0.300 0.380 0.375
 
 - Drag a picture, the title or the words in the preview to move them
-- Drag a corner to resize them
+- Drag a handle to resize them: a corner for both ways, a side for one
 - A line of @place is written for it: right-click to take it away
 
 # Blocks of words
