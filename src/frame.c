@@ -4,7 +4,7 @@
 // FrameWork is everything between the renderer's begin and end of a frame
 // (main.c): read this frame's input and the clock, build the UI layer's tree
 // (the open screen, and the whole of the screen that is up: the edit screen,
-// frame_edit.c, or the presentation, which is in this file), then draw it. It also runs with no events at
+// edit\edit.c, or the presentation, which is in this file), then draw it. It also runs with no events at
 // all, when Windows asks for a repaint during a resize - see
 // _Main_RepaintFrame in main.c.
 
@@ -382,9 +382,9 @@ FR_SyncDeck(App_State* app_state) {
 //    slide number     I
 //    notes            N: the slide's @note lines and what comes next
 //    video            K plays and pauses the slide's video, J and L go back
-//                     and on 5 seconds, M turns sound off and on (frame_video.c)
+//                     and on 5 seconds, M turns sound off and on (slide_video\slide_video.c)
 //    presenter view   V: a second window with the slide, the next one, the
-//                     notes and a clock (frame_presenter.c)
+//                     notes and a clock (presenter\presenter.c)
 //    this list        H or F1
 //    edit             F5 or Esc, for a text deck: back to the edit screen
 //    open             drop a folder, an image or a text deck (.md, .txt) on the
@@ -404,7 +404,7 @@ _FR_PresentInput(App_State* app_state) {
       }
       if (event->kind == WM_EventKind_Scroll) {
          // Over a block with more words than room, the wheel moves through
-         // its words (frame_caret.c). Anywhere else, through the slides.
+         // its words (caret\caret.c). Anywhere else, through the slides.
          //
          // Over the block in this window only: the presenter's window hands
          // its wheel on too (PRES_Input), and where its mouse is says
@@ -439,9 +439,9 @@ _FR_PresentInput(App_State* app_state) {
       app_state->toggle_presenter = 1;
    }
 
-   //- bgz: the slide's video, if it has one (frame_video.c)
+   //- bgz: the slide's video, if it has one (slide_video\slide_video.c)
    {
-      if (FR_VideoKeys(app_state)) {
+      if (SVID_Keys(app_state)) {
          app_state->video_key_us = now_us;
       }
    }
@@ -532,7 +532,7 @@ _FR_PresentInput(App_State* app_state) {
          }
       }
 
-      // A slide clicked in the presenter's window (frame_presenter.c).
+      // A slide clicked in the presenter's window (presenter\presenter.c).
       if (app_state->presenter_goto != 0) {
          app_state->slide_idx = Min(app_state->presenter_goto - 1, last_idx);
       }
@@ -639,7 +639,7 @@ _FR_DrawSlide(UI_Box* box, void* user_data) {
    }
    if (app_state->slide_idx < deck->slide_count) {
       // With its blocks as far down their words as the wheel has them
-      // (frame_caret.c): a block with more words than room has a scroll
+      // (caret\caret.c): a block with more words than room has a scroll
       // bar - the view's own, part of the slide, which fades with it - and
       // the wheel over it moves it.
       VIEW_HitList hits = {0};
@@ -897,8 +897,8 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       B32 key_was_recent = (app_state->video_key_us != 0 && NowTimeUS() - app_state->video_key_us < strip_us);
       // Paused: all of the slide's videos, not only the first, which may be
       // a short one that has ended while the others play on.
-      if (!FR_VideoSlideIsPlaying(deck, app_state->slide_idx) || key_was_recent) {
-         FR_VideoBuildStripLook(app_state, video, VIEW_PageRectFromRect(R2F32P(0, 0, window_dim.x, window_dim.y)), FR_UIScale(window_dim), 0, 0);
+      if (!SVID_SlideIsPlaying(deck, app_state->slide_idx) || key_was_recent) {
+         SVID_BuildStripLook(app_state, video, VIEW_PageRectFromRect(R2F32P(0, 0, window_dim.x, window_dim.y)), FR_UIScale(window_dim), 0, 0);
       }
    }
 
@@ -917,10 +917,10 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
 // The tree is drawn by FR_DrawUITree, over the window's background. Ported
 // from the editor's frame.c (_FR_ProcessEvents, _FR_BeginUIBuild,
 // _FR_DrawUITree). The presenter's window is built the same way, with a
-// UI_State of its own (PRES_Draw, frame_presenter.c).
+// UI_State of its own (PRES_Draw, presenter\presenter.c).
 //
-// Built with it: the open screen (OPEN_Build, frame_open.c) and the whole
-// edit screen (EDIT_Build, frame_edit.c): the text (drawn by its box, with the
+// Built with it: the open screen (OPEN_Build, open\open.c) and the whole
+// edit screen (EDIT_Build, edit\edit.c): the text (drawn by its box, with the
 // editor), the Format panel, list of pictures, status line, and the preview -
 // the slide (drawn by its box, with the view), what is over it (the caret,
 // the boxes of its pieces and their corners, scroll bars, videos' controls),
@@ -1089,8 +1089,8 @@ FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64*
        {"scroll track", UI_ColorSlot_Background, UI_TRANSPARENT},
        {"scroll thumb", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.18f}}},
 
-       //- bgz: the slideshow's panels: the open screen (frame_open.c), the
-       // edit screen's Format panel and status line (frame_edit.c)
+       //- bgz: the slideshow's panels: the open screen (open\open.c), the
+       // edit screen's Format panel and status line (edit\edit.c)
        {"backdrop", UI_ColorSlot_Background, {{0.00f, 0.00f, 0.00f, 0.60f}}}, // over what is behind the open screen
        {"panel", UI_ColorSlot_Background, {{0.11f, 0.115f, 0.135f, 1.00f}}},
        {"panel_bar", UI_ColorSlot_Background, {{0.16f, 0.17f, 0.20f, 1.00f}}}, // title, foot, status line
@@ -1106,8 +1106,8 @@ FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64*
        {"syntax", UI_ColorSlot_Text, {{1.00f, 0.80f, 0.40f, 1.00f}}},          // a Format line, as it is written
        {"picture", UI_ColorSlot_Text, {{0.60f, 0.85f, 0.60f, 1.00f}}},         // a picture's name
 
-       //- bgz: the edit screen's preview (frame_edit.c, frame_caret.c,
-       // frame_place.c, frame_video.c). What is of the slide itself - the
+       //- bgz: the edit screen's preview (edit\edit.c, caret\caret.c,
+       // place\place.c, slide_video\slide_video.c). What is of the slide itself - the
        // caret, a piece's outline, the wash under the mouse, a block's scroll
        // bar - is in the slide's theme's colours instead, to show on it.
        {"focus", UI_ColorSlot_Border, {{0.26f, 0.60f, 1.00f, 1.00f}}},       // the box of the piece the cursor is in
@@ -1146,7 +1146,7 @@ FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64*
        {"keys what", UI_ColorSlot_Text, {{1.00f, 1.00f, 1.00f, 0.70f}}},
        {"notice", UI_ColorSlot_Background, {{0.00f, 0.00f, 0.00f, 0.75f}}},
 
-       //- bgz: the presenter's window (frame_presenter.c), all of it under
+       //- bgz: the presenter's window (presenter\presenter.c), all of it under
        // this tag
        {"presenter", UI_ColorSlot_Background, {{0.09f, 0.095f, 0.11f, 1.00f}}},
        {"presenter", UI_ColorSlot_Text, {{0.92f, 0.93f, 0.95f, 1.00f}}},
@@ -1365,7 +1365,7 @@ FrameWork(App_State* app_state) {
 
    // After the input, which may have changed the slide or the screen.
    COPY_Update(app_state);
-   FR_VideoUpdate(app_state);
+   SVID_Update(app_state);
 
    // The UI tree, built after the screens' own input, against the screen
    // that input left up. UI_EndBuild lays it out; it is drawn below, over

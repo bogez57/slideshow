@@ -36,7 +36,7 @@ typedef enum EDIT_PlaceDragState {
    EDIT_PlaceDragState_Dragging,
    // The button went down right at the words of the title or of a block:
    // nothing is moved, the words from there to the mouse are selected
-   // (CARET_DragTo, frame_caret.c).
+   // (CARET_DragTo, caret\caret.c).
    EDIT_PlaceDragState_Selecting,
 } EDIT_PlaceDragState;
 
@@ -97,18 +97,18 @@ struct App_State {
    B32 show_notes; // the slide's notes and what comes next, along the bottom
    B32 show_help; // the list of keys
 
-   // A slide's video (frame_video.c). video_auto_slide: the slide whose
+   // A slide's video (slide_video\slide_video.c). video_auto_slide: the slide whose
    // video was started because the presentation came to it, plus one. 0:
    // none. video_key_us: when one of the video's keys was last pressed while
    // presenting - its strip of controls shows for a moment after.
    U64 video_auto_slide;
    U64 video_key_us;
 
-   // Files on their way into the deck's folder (frame_copy.c).
+   // Files on their way into the deck's folder (copy\copy.c).
    COPY_Job* first_copy;
    B32       quit_warned_copy; // told once that closing now loses one
 
-   // The presenter's window (frame_presenter.c): a second window, for the
+   // The presenter's window (presenter\presenter.c): a second window, for the
    // screen only whoever presents sees, with the slide, the one after it,
    // the notes and how long it has been. Opened and closed by the main loop
    // between frames, when a frame sets toggle_presenter.
@@ -158,7 +158,7 @@ struct App_State {
    Arena*     watch_arena;
    FileWatch* deck_watch;
 
-   // Which of the two screens is up: the edit screen (frame_edit.c), with the
+   // Which of the two screens is up: the edit screen (edit\edit.c), with the
    // text beside a preview, or the presentation (frame.c). Only a deck with
    // an editor has the edit screen.
    B32 is_editing;
@@ -184,7 +184,7 @@ struct App_State {
    B32 quit_warned;
 
    // Edit screen: where the pieces of the slide in the preview are, as it
-   // was laid out this frame in the UI build (frame_edit.c), and where in the
+   // was laid out this frame in the UI build (edit\edit.c), and where in the
    // text each is from - what the boxes over it are built from. Good for the
    // text as it was then: preview_hits_edit_count is the editor's edit_count
    // they were made at.
@@ -202,7 +202,7 @@ struct App_State {
    // Edit screen: the runs of letters of the preview's slide, as laid out
    // this frame (VIEW_HitList's runs), on preview_hits_arena: what a click on a
    // word is a click on the letter of, and where the caret goes
-   // (frame_caret.c). Good for the same text as preview_hits.
+   // (caret\caret.c). Good for the same text as preview_hits.
    VIEW_Run* preview_runs;
    U64       preview_run_count;
 
@@ -224,7 +224,7 @@ struct App_State {
    U64 caret_left_slide;
 
    // A scroll bar of the preview's slide with the mouse's button down on
-   // it (frame_caret.c): the block whose it is, how far under the top of the
+   // it (caret\caret.c): the block whose it is, how far under the top of the
    // bar's thumb the mouse took hold, and the UI box pressed - the thumb or
    // the track - which is held for as long as the UI has it active.
    B32    caret_bar_drag;
@@ -246,7 +246,7 @@ struct App_State {
    Rng2F32  preview_page;
 
    // Edit screen: the picture, the title or the body being moved or resized with the
-   // mouse (frame_place.c). While it is, the slide is given the place the
+   // mouse (place\place.c). While it is, the slide is given the place the
    // mouse makes without its being in the text: the @place line is written
    // when the button comes up.
    EDIT_PlaceDrag place_drag;
@@ -256,7 +256,7 @@ struct App_State {
    Vec2F32 place_click_mouse;
    U32     place_click_count;
 
-   // The open screen (frame_open.c): over whichever screen is up, the decks
+   // The open screen (open\open.c): over whichever screen is up, the decks
    // opened lately and what is in a folder, to pick a deck from.
    B32           show_open;
    Arena*        open_arena;      // open_folder and the rows

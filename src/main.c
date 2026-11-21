@@ -16,10 +16,10 @@
 //                                 editing, beside a preview. The file need
 //                                 not exist yet
 //
-// Nothing has to be given: Ctrl+O is the open screen (frame_open.c), where a
+// Nothing has to be given: Ctrl+O is the open screen (open\open.c), where a
 // deck is picked or a new one started.
 //
-// Keys are in frame.c (presenting), frame_edit.c and editor\editor.c (editing).
+// Keys are in frame.c (presenting), edit\edit.c and editor\editor.c (editing).
 
 #define _CRT_SECURE_NO_WARNINGS
 
@@ -49,6 +49,16 @@
 #include "editor/editor.h"
 #include "app_state.h"
 #include "frame.h"
+// The program's own layers, each a folder with a header of what the rest
+// calls. They are all about the one App_State, so they come after it.
+#include "slide_video/slide_video.h"
+#include "copy/copy.h"
+#include "edit/edit.h"
+#include "place/place.h"
+#include "look/look.h"
+#include "caret/caret.h"
+#include "open/open.h"
+#include "presenter/presenter.h"
 
 ////////////////////////////////
 //~ bgz: implementations
@@ -74,14 +84,14 @@
 #include "deck/deck.c"
 #include "view/view.c"
 #include "editor/editor.c"
-#include "frame_video.c"
-#include "frame_copy.c"
-#include "frame_edit.c"
-#include "frame_place.c"
-#include "frame_look.c"
-#include "frame_caret.c"
-#include "frame_open.c"
-#include "frame_presenter.c"
+#include "slide_video/slide_video.c"
+#include "copy/copy.c"
+#include "edit/edit.c"
+#include "place/place.c"
+#include "look/look.c"
+#include "caret/caret.c"
+#include "open/open.c"
+#include "presenter/presenter.c"
 #include "frame.c"
 
 ////////////////////////////////

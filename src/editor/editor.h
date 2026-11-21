@@ -3,7 +3,7 @@
 //
 // A plain text editor for one file: the text, the cursor and selection, undo,
 // and the box it is typed into and drawn in. What the text means is not its
-// business - frame_edit.c hands the text to the deck layer.
+// business - edit\edit.c hands the text to the deck layer.
 //
 // The text is UTF-8 with \n line endings and no tabs, whatever the file had:
 // ED_Open converts, and ED_Save writes the file's own line endings back.

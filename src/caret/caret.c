@@ -11,7 +11,7 @@
 //    put the caret    click in the words, or in the room under them: it
 //                     goes to the nearest letter. Shift+click selects from
 //                     where it was
-//    select           drag across the words (frame_place.c). A double
+//    select           drag across the words (place\place.c). A double
 //                     click takes a word, a triple click its line. Past
 //                     the top or bottom of a block with more words than
 //                     room, its words move on under the mouse
@@ -511,7 +511,7 @@ CARET_BuildRooms(App_State* app_state, F32 ui, B32 interactive) {
       UI_Box*   room = FR_BuildRectBox(UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll, Intersect2F32(box->room, app_state->preview_page),
                                        "###caret room %d %llu", (int)box->kind, (unsigned long long)box->idx);
       // A click here goes to the nearest letter, but the mouse is the bar
-      // that text is typed at only right at the words (frame_place.c) - and
+      // that text is typed at only right at the words (place\place.c) - and
       // while words are selected by a drag from there, wherever it goes.
       B32 is_selecting = (app_state->place_drag.state == EDIT_PlaceDragState_Selecting);
       room->hover_cursor = (is_selecting || PLACE_IsAtWords(app_state, box->kind, box->idx, Core_WM_MouseFromWindow(app_state->window)))
@@ -849,7 +849,7 @@ CARET_BuildLook(App_State* app_state, F32 ui) {
          // is the same on every theme: it is the editor's mark, not part of
          // the slide. Just outside the room, where the words wrap - and so
          // beside, not a little way off, the outline the mouse's box has
-         // (frame_place.c), which is just inside it: one line, not two side
+         // (place\place.c), which is just inside it: one line, not two side
          // by side.
          F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
          Rng2F32 rect = Intersect2F32(Pad2F32(box->room, thick), app_state->preview_page);

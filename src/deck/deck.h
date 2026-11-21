@@ -75,7 +75,7 @@
 //                       of the theme's
 //    @color text #ffcc00
 //                       the same for the body's words, or the block's. The
-//                       edit screen writes these four too (frame_look.c)
+//                       edit screen writes these four too (look\look.c)
 //    @note Say this     a note for whoever presents, on the slide it is in: not
 //                       drawn on the slide, shown beside it on request
 //    anything else      a paragraph. Each line is its own
@@ -134,7 +134,7 @@ struct DECK_Place {
    Rng2F32 rect; // in parts of the page: 0,0 its top left, 1,1 its bottom right
    // Where in the deck's text the line is (without its ending) when
    // has_line: is_set without it is a place the edit screen is trying out
-   // (frame_edit.c), not yet written.
+   // (edit\edit.c), not yet written.
    B32     has_line;
    Rng1U64 line;
 };
@@ -200,7 +200,7 @@ struct DECK_Box {
    // How far up its words are moved in its place, in page units: a block
    // with more words than its place has room for shows this far down them.
    // Not from the text: the edit screen's, while it is typed in
-   // (frame_caret.c), and 0 when presenting. For a block with an @place
+   // (caret\caret.c), and 0 when presenting. For a block with an @place
    // line: the others move together, by the slide's body_scroll.
    F32 scroll;
 };
@@ -270,7 +270,7 @@ struct DECK_Slide {
    // share the body's room.
    F32 body_scroll;
 
-   // From the slide's @video line: how its video plays (frame_video.c).
+   // From the slide's @video line: how its video plays (slide_video\slide_video.c).
    B32 video_loop;   // starts over when it reaches its end
    B32 video_mute;   // no sound from it
    B32 video_manual; // does not start when the slide comes up
@@ -397,7 +397,7 @@ internal void DECK_ReopenPicture(DECK_Picture* picture);
 
 // From now on, a slide whose picture is at path is shown the file at
 // stands_for instead - until DECK_ClearPathAlias(path). For a file that is
-// on its way to path and not there yet (frame_copy.c). For every deck: a
+// on its way to path and not there yet (copy\copy.c). For every deck: a
 // deck read again from its text keeps showing the same file. Slides that
 // have the picture loaded already are not changed: DECK_ReopenImage does
 // that.

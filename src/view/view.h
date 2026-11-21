@@ -99,7 +99,7 @@ struct VIEW_Box {
 // A run of letters as drawn: one line of a wrapped title or heading, or
 // one piece of a line of the body (a word, or a part of one drawn alike).
 // With these, a letter of the deck's text can be found on the slide, and a
-// point on the slide in the text (frame_caret.c). Runs of words that are
+// point on the slide in the text (caret\caret.c). Runs of words that are
 // not shown - under the bottom of their block's room - are here too.
 typedef struct VIEW_Run VIEW_Run;
 struct VIEW_Run {

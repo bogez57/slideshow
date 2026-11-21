@@ -13,7 +13,7 @@
 //                     (deck.h) and the theme's
 //
 // What comes of it is a line of the deck's text, as with a piece moved by
-// the mouse (frame_place.c): "@size title 1.21", "@color text orange"
+// the mouse (place\place.c): "@size title 1.21", "@color text orange"
 // (deck.h), over the one the piece has or as a new line beside it. The text
 // is still all there is to a deck: the line can be changed by hand - any
 // size, any #rrggbb - and Ctrl+Z takes a change back. Usual and the theme's

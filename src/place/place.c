@@ -35,7 +35,7 @@
 // makes (DECK_Place's is_set, without a line), and is drawn there.
 //
 // A press that does not go anywhere is a click, as before: the cursor goes
-// to the words (frame_edit.c). So a press inside a box is a click, and only
+// to the words (edit\edit.c). So a press inside a box is a click, and only
 // watched for a drag. A press on a handle is a drag at once.
 //
 // A press right at the words (PLACE_IsAtWords) moves nothing: held and
@@ -44,7 +44,7 @@
 // a box is where it is taken hold of to be moved.
 //
 // All of it is UI boxes (src\ui), built in the edit screen's UI build after
-// its slide is laid out for the frame (frame_edit.c), so they are where the
+// its slide is laid out for the frame (edit\edit.c), so they are where the
 // pieces are now:
 //
 //    PLACE_BuildHits   boxes that are clicked and not drawn: every handle,
@@ -785,7 +785,7 @@ PLACE_IsAtWords(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos)
 //    a handle               the arrow that resizes the way it does
 //    the piece dragged      the four-way arrow that moves it
 //    the title's or a       the bar that text is typed at: a click puts the
-//    block's words          caret at the letter (frame_caret.c)
+//    block's words          caret at the letter (caret\caret.c)
 //    (PLACE_IsAtWords)
 //    the rest of their box, the arrow
 //    and a picture
@@ -889,7 +889,7 @@ _PLACE_Signal(App_State* app_state, UI_Box* box, B32 has_piece, DECK_PlaceKind k
          _PLACE_Begin(app_state, piece, corner, pos, EDIT_PlaceDragState_Dragging);
       } else {
          // A press is a click until the mouse goes somewhere: to the words,
-         // or the picture (frame_edit.c) - and watched, for a drag. Right at
+         // or the picture (edit\edit.c) - and watched, for a drag. Right at
          // the words the drag selects them instead (PLACE_PressWords).
          if (piece == 0 || !PLACE_PressWords(app_state, signal, kind, idx, ui)) {
             app_state->place_click_count = 0;
@@ -915,7 +915,7 @@ _PLACE_Signal(App_State* app_state, UI_Box* box, B32 has_piece, DECK_PlaceKind k
       }
    }
 
-   // The wheel over a block's words moves them (frame_caret.c). Over
+   // The wheel over a block's words moves them (caret\caret.c). Over
    // anything else of the slide it does nothing - not the block under a
    // picture.
    if (signal.scroll.y != 0 && has_piece && kind == DECK_PlaceKind_Text) {

@@ -41,7 +41,7 @@
 // The slide in the preview is typed into: a click on its title or on a
 // block of its words puts the cursor at the letter clicked, with a caret
 // there on the slide, and a thin blue box around the room the words have
-// (frame_caret.c). A click on a picture puts the cursor on its line, with
+// (caret\caret.c). A click on a picture puts the cursor on its line, with
 // the file's name selected, to be typed over, and a box around the picture.
 // What the mouse is over is lit.
 //
@@ -58,10 +58,10 @@
 //    pictures         click the picture line under Format. Esc closes the list,
 //                     the wheel or the scroll bar moves through it
 //    edit a piece     click it in the preview, and type: the caret is on
-//                     the slide, at the letter clicked (frame_caret.c)
+//                     the slide, at the letter clicked (caret\caret.c)
 //    move a piece     drag the picture or the body in the preview, or a
 //                     corner of it to resize it. Right-click puts it back
-//                     (frame_place.c)
+//                     (place\place.c)
 //    add a picture    drop an image or a video on the window: one more on the
 //                     slide. With a picture selected - click it - that one
 //                     is changed for it
@@ -70,8 +70,8 @@
 //    bold, code       Ctrl+B and Ctrl+E: ** or ` around what is selected
 //    size, colour     Ctrl+] and Ctrl+[ make the words the cursor is in
 //                     larger and smaller, and the Format panel's @size and
-//                     @color lines have the rest to click (frame_look.c)
-//    open             Ctrl+O: the open screen (frame_open.c). Or drop a folder
+//                     @color lines have the rest to click (look\look.c)
+//    open             Ctrl+O: the open screen (open\open.c). Or drop a folder
 //                     or a text deck on the window
 //
 // The editor's own keys are in editor.c.
@@ -95,7 +95,7 @@ enum {
    _EDIT_FormatAction_Theme,    // gives the deck the next theme
    _EDIT_FormatAction_Layout,   // gives the slide the next layout
    _EDIT_FormatAction_Wrap,     // puts insert before and after the selection (ED_WrapSelection)
-   _EDIT_FormatAction_Size,     // nothing by itself: the row has smaller, larger and usual to click (frame_look.c)
+   _EDIT_FormatAction_Size,     // nothing by itself: the row has smaller, larger and usual to click (look\look.c)
    _EDIT_FormatAction_Color,    // nothing by itself: the row has the colours to click
 };
 
@@ -637,7 +637,7 @@ _EDIT_DropPicture(App_State* app_state, String8 path) {
    B32 is_there = FilePathExists(in_folder);
    if (!is_there && VID_NameIsVideo(name)) {
       // A video is not waited for: it is copied in the background and
-      // plays from where it is meanwhile (frame_copy.c).
+      // plays from where it is meanwhile (copy\copy.c).
       if (!COPY_IsCopyingTo(app_state, in_folder)) {
          COPY_Start(app_state, path, in_folder);
          app_state->quit_warned_copy = 0;
@@ -775,7 +775,7 @@ EDIT_PreviewClick(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
    if (editor->edit_count != app_state->preview_hits_edit_count) {
       return;
    }
-   // On words: the cursor to the letter (frame_caret.c). On a picture: its
+   // On words: the cursor to the letter (caret\caret.c). On a picture: its
    // file's name selected, to be typed over.
    if (!CARET_Click(app_state, pos, keeps_mark)) {
       S64 hit_idx = _EDIT_PreviewHitAt(app_state, pos);
@@ -817,7 +817,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    ED_Editor*   editor = app_state->editor;
    _EDIT_Layout layout = _EDIT_LayoutFromWindowDim(app_state, window_dim);
 
-   //- bgz: a piece of the slide dragged by the mouse (frame_place.c): Esc
+   //- bgz: a piece of the slide dragged by the mouse (place\place.c): Esc
    // gives it up, before Esc does anything else
    PLACE_Keys(app_state);
 
@@ -862,7 +862,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
       editor->last_input_us = NowTimeUS();
    }
 
-   // The words the cursor is in, larger and smaller (frame_look.c).
+   // The words the cursor is in, larger and smaller (look\look.c).
    LOOK_Input(app_state);
 
    if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_S)) {
@@ -914,7 +914,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    if (present_pressed) {
       if (app_state->deck->slide_count != 0) {
          app_state->is_editing = 0;
-         // Presenting shows every block from its top (frame_caret.c).
+         // Presenting shows every block from its top (caret\caret.c).
          MemoryZeroArray(app_state->caret_scroll);
          app_state->caret_body_scroll = 0;
          app_state->preview_hit_count = 0; // not drawn while presenting, and the window can change
@@ -1063,8 +1063,8 @@ _EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 side, F32 gap, F32 row_h, F32 u
 // it are built from those, so they are where the pieces are this frame, and
 // a signal is of where the box is now (FR_BuildRectBox):
 //
-//    1. what the mouse holds goes with it: a piece dragged (frame_place.c),
-//       a scroll bar (frame_caret.c)
+//    1. what the mouse holds goes with it: a piece dragged (place\place.c),
+//       a scroll bar (caret\caret.c)
 //    2. the slide laid out
 //    3. the boxes that are clicked, which are not drawn - first built, first
 //       asked: the blocks' scroll bars, the corners' handles, the videos'
@@ -1091,7 +1091,7 @@ struct _EDIT_Slide {
 };
 
 // The preview's slide, as it was laid out in the build: the same scroll,
-// and its scroll bars are the UI's (frame_caret.c).
+// and its scroll bars are the UI's (caret\caret.c).
 internal void
 _EDIT_DrawSlide(UI_Box* box, void* user_data) {
    UnusedVariable(box);
@@ -1253,7 +1253,7 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
       Rng2F32    video_rect = {0};
       VID_Video* video = _EDIT_PreviewVideo(app_state, layout->page, picture_idx, &video_rect);
       // Over its strip is over its picture, for its outline.
-      if (video != 0 && FR_VideoBuildStripHits(app_state, video, video_rect, ui, picture_idx) && !hover.is_over) {
+      if (video != 0 && SVID_BuildStripHits(app_state, video, video_rect, ui, picture_idx) && !hover.is_over) {
          hover.is_over = 1;
          hover.has_piece = 1;
          hover.kind = DECK_PlaceKind_Picture;
@@ -1311,7 +1311,7 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
          Rng2F32    video_rect = {0};
          VID_Video* video = _EDIT_PreviewVideo(app_state, layout->page, picture_idx, &video_rect);
          if (video != 0) {
-            FR_VideoBuildStripLook(app_state, video, video_rect, ui, picture_idx, interactive);
+            SVID_BuildStripLook(app_state, video, video_rect, ui, picture_idx, interactive);
          }
       }
 
@@ -1326,7 +1326,7 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
       }
 
       // The words: the caret, and the box of the piece it is in
-      // (frame_caret.c). The box built below is then a picture's.
+      // (caret\caret.c). The box built below is then a picture's.
       B32 words_have_box = CARET_BuildLook(app_state, ui);
 
       // A box around the picture the cursor is on the line of. Not after
@@ -1351,7 +1351,7 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
          }
       }
 
-      // Right at the words a drag selects them (frame_place.c): said there,
+      // Right at the words a drag selects them (place\place.c): said there,
       // and while it does, instead of how the box is moved.
       B32 is_at_words = (app_state->place_drag.state == EDIT_PlaceDragState_Selecting ||
                          (can_move && hover.has_piece && hover.corner == 0 &&
@@ -1761,7 +1761,7 @@ EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
          editor->last_input_us = NowTimeUS();
       }
    }
-   // The words the cursor is in, sized and coloured (frame_look.c).
+   // The words the cursor is in, sized and coloured (look\look.c).
    if (size_picked) {
       LOOK_StepSize(app_state, size_direction);
    }

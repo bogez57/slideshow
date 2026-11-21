@@ -6,7 +6,7 @@ go, with its sound played through the mixer in `src\audio`.
 ## The parts
 
 ```
-the app (deck, frame_video.c, presenter)
+the app (deck, slide_video\slide_video.c, presenter)
         |  uses only video.h
         v
 video.h / video.c          the player: decode thread, frame queue, sound ring, clock, texture
@@ -47,7 +47,7 @@ A slide's picture line with a video file in it, `![](clip.mp4)`, makes the
 slide's picture a video. The deck (`deck.c`) opens a `VID_Video` for it where
 it would decode an image, and gives the slide's `IMG_Image` the player's
 texture, so the view draws a video exactly as it draws a picture. When it
-plays and its controls are in `src\frame_video.c`.
+plays and its controls are in `src\slide_video\slide_video.c`.
 
 ## Sound and the clock
 

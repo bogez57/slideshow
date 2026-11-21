@@ -419,9 +419,9 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
          if (DECK_VideoFromSlide(deck, slide_idx) != 0) {
             if (y + button_h <= right.max.y) {
                if (_PRES_Button(app_state, R2F32P(right.min.x, y, right.max.x, y + button_h),
-                                FR_VideoSlideIsPlaying(deck, slide_idx) ? Str8Lit("Pause video") : Str8Lit("Play video"), button_px, 1,
+                                SVID_SlideIsPlaying(deck, slide_idx) ? Str8Lit("Pause video") : Str8Lit("Play video"), button_px, 1,
                                 "###presenter video")) {
-                  FR_VideoToggleSlide(deck, slide_idx);
+                  SVID_ToggleSlide(deck, slide_idx);
                }
             }
             y += button_h + gap * 1.5f;

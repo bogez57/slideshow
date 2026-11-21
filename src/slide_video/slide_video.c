@@ -21,7 +21,7 @@
 // A click on the first word plays and pauses, a click on the bar goes to
 // that point, a click on the last word turns all sound off and on. The edit
 // screen builds the strip in the preview as UI boxes, which take its clicks
-// (frame_edit.c). The presentation draws it for a moment after one of the
+// (edit\edit.c). The presentation draws it for a moment after one of the
 // video's keys, and while the video is paused (frame.c):
 //
 //    K            play, pause
@@ -34,8 +34,8 @@
 // How long the presentation shows the strip after a key of the video's.
 #define FR_VIDEO_STRIP_SECONDS 2.5f
 
-typedef struct _FR_VideoStrip _FR_VideoStrip;
-struct _FR_VideoStrip {
+typedef struct _SVID_Strip _SVID_Strip;
+struct _SVID_Strip {
    Rng2F32 strip;  // all of it
    Rng2F32 button; // the word that plays and pauses
    Rng2F32 bar;    // the length of the video, left to right
@@ -45,7 +45,7 @@ struct _FR_VideoStrip {
 };
 
 internal String8
-_FR_VideoClock(Arena* arena, F64 time_s) {
+_SVID_Clock(Arena* arena, F64 time_s) {
    U64     seconds = (U64)Max(time_s, 0.0);
    String8 result = PushStr8F(arena, "%llu:%02llu", (unsigned long long)(seconds / 60), (unsigned long long)(seconds % 60));
    return result;
@@ -53,9 +53,9 @@ _FR_VideoClock(Arena* arena, F64 time_s) {
 
 // Where the strip's parts are, for a video drawn at video_rect. ui: how many
 // pixels a unit of the sizes is.
-internal _FR_VideoStrip
-_FR_VideoStripFromRect(App_State* app_state, Rng2F32 video_rect, F32 ui) {
-   _FR_VideoStrip result = {0};
+internal _SVID_Strip
+_SVID_StripFromRect(App_State* app_state, Rng2F32 video_rect, F32 ui) {
+   _SVID_Strip result = {0};
    TXT_Fonts*     fonts = &app_state->fonts;
 
    F32 px = (F32)(S32)Max(14.0f * ui, 11.0f);
@@ -95,29 +95,29 @@ _FR_VideoStripFromRect(App_State* app_state, Rng2F32 video_rect, F32 ui) {
 //
 // Two sets of boxes, as the edit screen's preview has for everything over
 // its slide: ones that are clicked and not drawn, built before the slide's
-// own (frame_place.c) so a press on the strip is not a press on the
+// own (place\place.c) so a press on the strip is not a press on the
 // picture, and ones that are drawn, built after the slide is laid out again
 // for what the clicks did - over it, and under a piece's outline. The parts
 // of the strip are in its own boxes, with whole pixels: as the hand-drawn
 // strip was.
 
 internal String8
-_FR_VideoPartKey(Arena* arena, U64 id, char* part) {
+_SVID_PartKey(Arena* arena, U64 id, char* part) {
    return PushStr8F(arena, "###video %llu %s", (unsigned long long)id, part);
 }
 
 internal B32
-FR_VideoBuildStripHits(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id) {
-   _FR_VideoStrip strip = _FR_VideoStripFromRect(app_state, video_rect, ui);
+SVID_BuildStripHits(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id) {
+   _SVID_Strip strip = _SVID_StripFromRect(app_state, video_rect, ui);
    UI_BoxFlags    flags = UI_BoxFlag_MouseClickable;
    Temp           scratch = ScratchBegin(0, 0);
 
    // The parts first, then the strip under them: a press on the strip that
    // misses them is the strip's, and not the picture's.
-   UI_Box* button = FR_BuildRectBox(flags, strip.button, "%S", _FR_VideoPartKey(scratch.arena, id, "button"));
-   UI_Box* sound = (Dim2F32(strip.sound).x > 0) ? FR_BuildRectBox(flags, strip.sound, "%S", _FR_VideoPartKey(scratch.arena, id, "sound")) : 0;
-   UI_Box* bar = (Dim2F32(strip.bar).x > 0) ? FR_BuildRectBox(flags, strip.bar, "%S", _FR_VideoPartKey(scratch.arena, id, "bar")) : 0;
-   UI_Box* all = FR_BuildRectBox(flags, strip.strip, "%S", _FR_VideoPartKey(scratch.arena, id, "strip"));
+   UI_Box* button = FR_BuildRectBox(flags, strip.button, "%S", _SVID_PartKey(scratch.arena, id, "button"));
+   UI_Box* sound = (Dim2F32(strip.sound).x > 0) ? FR_BuildRectBox(flags, strip.sound, "%S", _SVID_PartKey(scratch.arena, id, "sound")) : 0;
+   UI_Box* bar = (Dim2F32(strip.bar).x > 0) ? FR_BuildRectBox(flags, strip.bar, "%S", _SVID_PartKey(scratch.arena, id, "bar")) : 0;
+   UI_Box* all = FR_BuildRectBox(flags, strip.strip, "%S", _SVID_PartKey(scratch.arena, id, "strip"));
 
    B32       result = 0;
    UI_Signal signal = UI_SignalFromBox(button);
@@ -149,11 +149,11 @@ FR_VideoBuildStripHits(App_State* app_state, VID_Video* video, Rng2F32 video_rec
 // Whether the mouse is on a part of the strip: its click box hovered, or -
 // with no click boxes - under the mouse.
 internal B32
-_FR_VideoPartIsHot(U64 id, char* part, Rng2F32 rect, B32 interactive) {
+_SVID_PartIsHot(U64 id, char* part, Rng2F32 rect, B32 interactive) {
    B32 result = 0;
    if (interactive) {
       Temp scratch = ScratchBegin(0, 0);
-      result = UI_KeyMatch(UI_HotKey(), UI_KeyFromString(UI_ActiveSeedKey(), _FR_VideoPartKey(scratch.arena, id, part)));
+      result = UI_KeyMatch(UI_HotKey(), UI_KeyFromString(UI_ActiveSeedKey(), _SVID_PartKey(scratch.arena, id, part)));
       ScratchEnd(scratch);
    } else {
       // The window's mouse: the UI's is off the window when the window is not
@@ -166,21 +166,21 @@ _FR_VideoPartIsHot(U64 id, char* part, Rng2F32 rect, B32 interactive) {
 // A box of the strip's, at rect in the window, inside the strip's box,
 // which starts at origin.
 internal UI_Box*
-_FR_VideoStripBox(UI_BoxFlags flags, Rng2F32 rect, Vec2F32 origin, U64 id, char* part) {
+_SVID_StripBox(UI_BoxFlags flags, Rng2F32 rect, Vec2F32 origin, U64 id, char* part) {
    UI_SetNextRect(R2F32P(rect.min.x - origin.x, rect.min.y - origin.y, rect.max.x - origin.x, rect.max.y - origin.y));
    return UI_BuildBoxFromStringf(flags, "###video look %llu %s", (unsigned long long)id, part);
 }
 
 internal void
-FR_VideoBuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id, B32 interactive) {
-   _FR_VideoStrip strip = _FR_VideoStripFromRect(app_state, video_rect, ui);
+SVID_BuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id, B32 interactive) {
+   _SVID_Strip strip = _SVID_StripFromRect(app_state, video_rect, ui);
    Temp           scratch = ScratchBegin(0, 0);
 
    // Asked before the strip's box is the parent: the boxes clicked are keyed
    // under the window's root.
-   B32 bar_hot = _FR_VideoPartIsHot(id, "bar", strip.bar, interactive);
-   B32 sound_hot = _FR_VideoPartIsHot(id, "sound", strip.sound, interactive);
-   B32 button_hot = _FR_VideoPartIsHot(id, "button", strip.button, interactive);
+   B32 bar_hot = _SVID_PartIsHot(id, "bar", strip.bar, interactive);
+   B32 sound_hot = _SVID_PartIsHot(id, "sound", strip.sound, interactive);
+   B32 button_hot = _SVID_PartIsHot(id, "button", strip.button, interactive);
 
    // Dark, whatever the video and the theme: the words on it are white.
    // Whole pixels, as it was drawn by hand: the parts are inside it.
@@ -196,12 +196,12 @@ FR_VideoBuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rec
       F64 duration_s = VID_Duration(video);
       F64 position_s = VID_Position(video);
       if (Dim2F32(strip.bar).x > 0) {
-         String8 time = (duration_s > 0) ? PushStr8F(UI_BuildArena(), "%S / %S", _FR_VideoClock(scratch.arena, position_s),
-                                                     _FR_VideoClock(scratch.arena, duration_s))
-                                         : _FR_VideoClock(UI_BuildArena(), position_s);
+         String8 time = (duration_s > 0) ? PushStr8F(UI_BuildArena(), "%S / %S", _SVID_Clock(scratch.arena, position_s),
+                                                     _SVID_Clock(scratch.arena, duration_s))
+                                         : _SVID_Clock(UI_BuildArena(), position_s);
          UI_SetNextTextAlignment(UI_TextAlign_Left);
          UI_SetNextTextPadding(0);
-         UI_Box* time_box = _FR_VideoStripBox(UI_BoxFlag_DrawText, R2F32P(strip.time_x, strip.strip.min.y, strip.sound.min.x, strip.strip.max.y),
+         UI_Box* time_box = _SVID_StripBox(UI_BoxFlag_DrawText, R2F32P(strip.time_x, strip.strip.min.y, strip.sound.min.x, strip.strip.max.y),
                                               origin, id, "time");
          UI_BoxEquipDisplayString(time_box, time);
 
@@ -212,9 +212,9 @@ FR_VideoBuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rec
          F32 played = (duration_s > 0) ? (F32)Clamp(0.0, position_s / duration_s, 1.0) : 0.0f;
          F32 played_x = strip.bar.min.x + Dim2F32(strip.bar).x * played;
          UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("played"), UI_ColorSlot_Background));
-         _FR_VideoStripBox(UI_BoxFlag_DrawBackground, R2F32P(strip.bar.min.x, bar_y, played_x, bar_y + bar_h), origin, id, "played");
+         _SVID_StripBox(UI_BoxFlag_DrawBackground, R2F32P(strip.bar.min.x, bar_y, played_x, bar_y + bar_h), origin, id, "played");
          UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("track"), UI_ColorSlot_Background));
-         _FR_VideoStripBox(UI_BoxFlag_DrawBackground, R2F32P(strip.bar.min.x, bar_y, strip.bar.max.x, bar_y + bar_h), origin, id, "track");
+         _SVID_StripBox(UI_BoxFlag_DrawBackground, R2F32P(strip.bar.min.x, bar_y, strip.bar.max.x, bar_y + bar_h), origin, id, "track");
       }
 
       //- bgz: the last word: dim when sound is off
@@ -224,21 +224,21 @@ FR_VideoBuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rec
          if (is_muted) {
             UI_SetNextTextColor(UI_ThemeColor(Str8Lit("muted"), UI_ColorSlot_Text));
          }
-         UI_Box* sound = _FR_VideoStripBox(UI_BoxFlag_DrawText, strip.sound, origin, id, "sound");
+         UI_Box* sound = _SVID_StripBox(UI_BoxFlag_DrawText, strip.sound, origin, id, "sound");
          UI_BoxEquipDisplayString(sound, is_muted ? Str8Lit("Muted") : Str8Lit("Sound"));
          if (sound_hot) {
             UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Background));
-            _FR_VideoStripBox(UI_BoxFlag_DrawBackground, strip.sound, origin, id, "sound hot");
+            _SVID_StripBox(UI_BoxFlag_DrawBackground, strip.sound, origin, id, "sound hot");
          }
       }
 
       //- bgz: the word that plays and pauses
       UI_SetNextTextAlignment(UI_TextAlign_Center);
-      UI_Box* button = _FR_VideoStripBox(UI_BoxFlag_DrawText, strip.button, origin, id, "button");
+      UI_Box* button = _SVID_StripBox(UI_BoxFlag_DrawText, strip.button, origin, id, "button");
       UI_BoxEquipDisplayString(button, VID_IsPlaying(video) ? Str8Lit("Pause") : Str8Lit("Play"));
       if (button_hot) {
          UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Background));
-         _FR_VideoStripBox(UI_BoxFlag_DrawBackground, strip.button, origin, id, "button hot");
+         _SVID_StripBox(UI_BoxFlag_DrawBackground, strip.button, origin, id, "button hot");
       }
    }
 
@@ -256,7 +256,7 @@ _FR_AnyPlaying(VID_Video** videos, U64 count) {
 }
 
 internal B32
-FR_VideoSlideIsPlaying(DECK_Deck* deck, U64 slide_idx) {
+SVID_SlideIsPlaying(DECK_Deck* deck, U64 slide_idx) {
    VID_Video* videos[DECK_MAX_PICTURES] = {0};
    U64        count = DECK_VideosFromSlide(deck, slide_idx, videos);
    return _FR_AnyPlaying(videos, count);
@@ -267,7 +267,7 @@ FR_VideoSlideIsPlaying(DECK_Deck* deck, U64 slide_idx) {
 // has reached its end while the others go on would have K start it over,
 // and pause nothing.
 internal void
-FR_VideoToggleSlide(DECK_Deck* deck, U64 slide_idx) {
+SVID_ToggleSlide(DECK_Deck* deck, U64 slide_idx) {
    VID_Video* videos[DECK_MAX_PICTURES] = {0};
    U64        count = DECK_VideosFromSlide(deck, slide_idx, videos);
    B32        play = !_FR_AnyPlaying(videos, count);
@@ -279,7 +279,7 @@ FR_VideoToggleSlide(DECK_Deck* deck, U64 slide_idx) {
 // The keys of the videos of the slide showing, while presenting: one key
 // is for all of them. Returns whether one was pressed.
 internal B32
-FR_VideoKeys(App_State* app_state) {
+SVID_Keys(App_State* app_state) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;
    B32           result = 0;
@@ -290,7 +290,7 @@ FR_VideoKeys(App_State* app_state) {
    }
 
    if (Core_WM_KeyPress(events, window, 0, WM_Key_K)) {
-      FR_VideoToggleSlide(app_state->deck, app_state->slide_idx);
+      SVID_ToggleSlide(app_state->deck, app_state->slide_idx);
       result = 1;
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_M)) {
@@ -324,7 +324,7 @@ FR_VideoKeys(App_State* app_state) {
 // has come up in the presentation, stops the one of the slide that has
 // gone, and moves every open video on.
 internal void
-FR_VideoUpdate(App_State* app_state) {
+SVID_Update(App_State* app_state) {
    DECK_Deck* deck = app_state->deck;
 
    // The slide whose video plays of itself: the one presented. None while
