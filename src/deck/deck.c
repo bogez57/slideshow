@@ -6,7 +6,7 @@
 // File names in the order a person expects: letters without regard to case,
 // and a run of digits as the number it spells, so "slide2" is before
 // "slide10". Negative, zero or positive, as strcmp.
-internal S32
+PRIVATE S32
 _DECK_CompareNames(String8 a, String8 b) {
    U64 i = 0;
    U64 j = 0;
@@ -55,8 +55,8 @@ _DECK_CompareNames(String8 a, String8 b) {
 
 // Insertion sort: a folder of slides is small, and the file system mostly
 // hands them over in order already.
-internal void
-_DECK_SortNames(String8Array names) {
+void
+DECK_SortNames(String8Array names) {
    for (U64 i = 1; i < names.count; i += 1) {
       String8 name = names.v[i];
       U64     slot = i;
@@ -68,7 +68,7 @@ _DECK_SortNames(String8Array names) {
    }
 }
 
-internal String8Array
+String8Array
 DECK_PictureNamesFromFolder(Arena* arena, String8 folder) {
    String8List names = {0};
    Temp        scratch = ScratchBegin(&arena, 1);
@@ -104,13 +104,13 @@ DECK_PictureNamesFromFolder(Arena* arena, String8 folder) {
    }
 
    String8Array result = Str8ArrayFromList(arena, &names);
-   _DECK_SortNames(result);
+   DECK_SortNames(result);
 
    ScratchEnd(scratch);
    return result;
 }
 
-internal DECK_Deck*
+DECK_Deck*
 DECK_OpenFolder(String8 folder) {
    Arena*     arena = ArenaAlloc();
    DECK_Deck* deck = PushArray(arena, DECK_Deck, 1);
@@ -138,7 +138,7 @@ DECK_OpenFolder(String8 folder) {
 
       String8Array sorted = Str8ArrayFromList(scratch.arena, &names);
 
-      _DECK_SortNames(sorted);
+      DECK_SortNames(sorted);
 
       deck->slide_count = sorted.count;
       deck->slides = PushArray(arena, DECK_Slide, Max(sorted.count, 1));
@@ -157,8 +157,8 @@ DECK_OpenFolder(String8 folder) {
 ////////////////////////////////
 //~ bgz: decks from text files
 
-internal B32
-_DECK_NameIsTextDeck(String8 name) {
+B32
+DECK_NameIsTextDeck(String8 name) {
    String8 extension = Str8SkipLastDot(name);
    B32     result = (Str8Match(extension, Str8Lit("md"), StringMatchFlag_CaseInsensitive) ||
                  Str8Match(extension, Str8Lit("txt"), StringMatchFlag_CaseInsensitive));
@@ -174,7 +174,7 @@ struct _DECK_SlideNode {
 };
 
 // The string without the spaces and tabs at either end.
-internal String8
+PRIVATE String8
 _DECK_Trim(String8 string) {
    while (string.size > 0 && (string.str[0] == ' ' || string.str[0] == '\t')) {
       string.str += 1;
@@ -186,7 +186,7 @@ _DECK_Trim(String8 string) {
    return string;
 }
 
-internal DECK_Deck*
+DECK_Deck*
 DECK_OpenFile(String8 file) {
    Temp scratch = ScratchBegin(0, 0);
 
@@ -204,26 +204,26 @@ DECK_OpenFile(String8 file) {
    return deck;
 }
 
-internal String8
+String8
 DECK_ThemeName(DECK_Theme theme) {
    String8 names[DECK_Theme_COUNT] = {Str8Lit("dark"), Str8Lit("light"), Str8Lit("blue"), Str8Lit("paper")};
    return names[(theme < DECK_Theme_COUNT) ? theme : 0];
 }
 
-internal String8
+String8
 DECK_LayoutName(DECK_Layout layout) {
    String8 names[DECK_Layout_COUNT] = {Str8Lit("picture-right"), Str8Lit("picture-left"), Str8Lit("picture-behind"),
                                        Str8Lit("center")};
    return names[(layout < DECK_Layout_COUNT) ? layout : 0];
 }
 
-internal String8
+String8
 DECK_PlaceName(DECK_PlaceKind kind) {
    String8 names[DECK_PlaceKind_COUNT] = {Str8Lit("picture"), Str8Lit("text"), Str8Lit("title")};
    return names[(kind < DECK_PlaceKind_COUNT) ? kind : 0];
 }
 
-internal DECK_NamedColor
+DECK_NamedColor
 DECK_NamedColorFromIdx(U64 idx) {
    // Each one readable on a dark theme and on a light one, but for white
    // and black, which are for one of the two.
@@ -243,7 +243,7 @@ DECK_NamedColorFromIdx(U64 idx) {
    return colors[(idx < DECK_NAMED_COLOR_COUNT) ? idx : 0];
 }
 
-internal B32
+B32
 DECK_ColorFromString(String8 string, Vec4F32* color_out) {
    B32 result = 0;
    if (string.size != 0 && string.str[0] == '#' && (string.size == 4 || string.size == 7)) {
@@ -291,7 +291,7 @@ DECK_ColorFromString(String8 string, Vec4F32* color_out) {
 
 // The number at the start of *string - 0.25, .5, 1 - which is then moved past
 // it and the spaces before it. 0 if there is none there.
-internal B32
+PRIVATE B32
 _DECK_TakeNumber(String8* string, F32* number_out) {
    U64 i = 0;
    while (i < string->size && (string->str[i] == ' ' || string->str[i] == '\t' || string->str[i] == ',')) i += 1;
@@ -329,7 +329,7 @@ _DECK_TakeNumber(String8* string, F32* number_out) {
    return result;
 }
 
-internal DECK_Deck*
+DECK_Deck*
 DECK_OpenText(String8 text_to_copy, String8 file) {
    Arena*     arena = ArenaAlloc();
    DECK_Deck* deck = PushArray(arena, DECK_Deck, 1);
@@ -728,7 +728,7 @@ DECK_OpenText(String8 text_to_copy, String8 file) {
    return deck;
 }
 
-internal U64
+U64
 DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos) {
    U64 result = 0;
 
@@ -745,7 +745,7 @@ DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos) {
 
 // A picture's image goes from src to dst, with its video if it is one: a
 // video goes on playing from where it is.
-internal void
+PRIVATE void
 _DECK_MovePictureImage(DECK_Picture* dst, DECK_Picture* src) {
    dst->image = src->image;
    dst->video = src->video;
@@ -754,7 +754,7 @@ _DECK_MovePictureImage(DECK_Picture* dst, DECK_Picture* src) {
 }
 
 // dst_picture is src_picture, as the deck was before: it gets what that had.
-internal void
+PRIVATE void
 _DECK_TakeFromCounterpart(DECK_Picture* dst_picture, DECK_Picture* src_picture) {
    if (IMG_IsLoaded(&src_picture->image)) {
       _DECK_MovePictureImage(dst_picture, src_picture);
@@ -772,7 +772,7 @@ struct _DECK_PictureRef {
    U32           matched; // 0 not, 1 by title, 2 by order
 };
 
-internal _DECK_PictureRef*
+PRIVATE _DECK_PictureRef*
 _DECK_PictureRefs(Arena* arena, DECK_Deck* deck, U64* count_out) {
    U64 count = 0;
    for (U64 i = 0; i < deck->slide_count; i += 1) {
@@ -791,7 +791,7 @@ _DECK_PictureRefs(Arena* arena, DECK_Deck* deck, U64* count_out) {
    return refs;
 }
 
-internal void
+void
 DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
    Temp scratch = ScratchBegin(0, 0);
 
@@ -909,7 +909,7 @@ DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src) {
    ScratchEnd(scratch);
 }
 
-internal B32
+B32
 DECK_SlideHasText(DECK_Slide* slide) {
    B32 result = (slide->title.size != 0 || slide->item_count != 0);
    return result;
@@ -918,7 +918,7 @@ DECK_SlideHasText(DECK_Slide* slide) {
 ////////////////////////////////
 //~ bgz: decks of either kind
 
-internal DECK_Deck*
+DECK_Deck*
 DECK_OpenPath(String8 path, U64* first_slide_out) {
    DECK_Deck* deck = 0;
    U64        first_slide = 0;
@@ -940,7 +940,7 @@ DECK_OpenPath(String8 path, U64* first_slide_out) {
          deck = DECK_OpenFolder(path);
       }
       ScratchEnd(scratch);
-   } else if (_DECK_NameIsTextDeck(path)) {
+   } else if (DECK_NameIsTextDeck(path)) {
       deck = DECK_OpenFile(path);
    } else if (IMG_NameIsImage(path)) {
       // A file with nothing before its name is in the folder the program was
@@ -983,10 +983,10 @@ struct _DECK_Alias {
    U64          stands_for_size;
 };
 
-global Arena*       _deck_alias_arena = 0;
-global _DECK_Alias* _deck_first_alias = 0;
+PRIVATE Arena*       _deck_alias_arena = 0;
+PRIVATE _DECK_Alias* _deck_first_alias = 0;
 
-internal void
+void
 DECK_ClearPathAlias(String8 path) {
    for (_DECK_Alias* alias = _deck_first_alias; alias != 0; alias = alias->next) {
       if (alias->path_size != 0 && Str8Match(Str8(alias->path, alias->path_size), path, StringMatchFlag_CaseInsensitive)) {
@@ -995,7 +995,7 @@ DECK_ClearPathAlias(String8 path) {
    }
 }
 
-internal void
+void
 DECK_SetPathAlias(String8 path, String8 stands_for) {
    DECK_ClearPathAlias(path);
    if (path.size == 0 || path.size > sizeof(((_DECK_Alias*)0)->path) ||
@@ -1025,7 +1025,7 @@ DECK_SetPathAlias(String8 path, String8 stands_for) {
 }
 
 // The file to read for a picture at path: path itself, or what it stands for.
-internal String8
+PRIVATE String8
 _DECK_FileFromPath(String8 path) {
    String8 result = path;
    for (_DECK_Alias* alias = _deck_first_alias; alias != 0; alias = alias->next) {
@@ -1039,7 +1039,7 @@ _DECK_FileFromPath(String8 path) {
 
 // The picture, loaded if it is not and can be: an image decoded, a video
 // opened, paused at its start.
-internal void
+PRIVATE void
 _DECK_LoadPicture(DECK_Picture* picture) {
    if (!IMG_IsLoaded(&picture->image) && !picture->load_failed && picture->path.size != 0) {
       if (VID_NameIsVideo(picture->path)) {
@@ -1055,7 +1055,7 @@ _DECK_LoadPicture(DECK_Picture* picture) {
    }
 }
 
-internal void
+PRIVATE void
 _DECK_ReleasePicture(DECK_Picture* picture) {
    if (picture->video != 0) {
       // The texture is the player's, and goes with it.
@@ -1067,14 +1067,14 @@ _DECK_ReleasePicture(DECK_Picture* picture) {
    }
 }
 
-internal void
+void
 DECK_ReopenPicture(DECK_Picture* picture) {
    _DECK_ReleasePicture(picture);
    picture->load_failed = 0;
    _DECK_LoadPicture(picture);
 }
 
-internal U64
+U64
 DECK_VideosFromSlide(DECK_Deck* deck, U64 slide_idx, VID_Video** videos) {
    U64 count = 0;
    if (slide_idx < deck->slide_count) {
@@ -1089,14 +1089,14 @@ DECK_VideosFromSlide(DECK_Deck* deck, U64 slide_idx, VID_Video** videos) {
    return count;
 }
 
-internal VID_Video*
+VID_Video*
 DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx) {
    VID_Video* videos[DECK_MAX_PICTURES] = {0};
    VID_Video* result = (DECK_VideosFromSlide(deck, slide_idx, videos) != 0) ? videos[0] : 0;
    return result;
 }
 
-internal B32
+B32
 DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx) {
    B32 result = 0;
    if (slide_idx < deck->slide_count) {
@@ -1108,7 +1108,7 @@ DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx) {
    return result;
 }
 
-internal B32
+B32
 DECK_SlideVideosAreOpen(DECK_Deck* deck, U64 slide_idx) {
    B32 result = 1;
    if (slide_idx < deck->slide_count) {
@@ -1123,7 +1123,7 @@ DECK_SlideVideosAreOpen(DECK_Deck* deck, U64 slide_idx) {
    return result;
 }
 
-internal void
+void
 DECK_UpdateVideos(DECK_Deck* deck) {
    for (U64 i = 0; i < deck->slide_count; i += 1) {
       for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
@@ -1146,7 +1146,7 @@ DECK_UpdateVideos(DECK_Deck* deck) {
    }
 }
 
-internal void
+void
 DECK_Close(DECK_Deck* deck) {
    for (U64 i = 0; i < deck->slide_count; i += 1) {
       for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
@@ -1159,7 +1159,7 @@ DECK_Close(DECK_Deck* deck) {
    ArenaRelease(deck->arena);
 }
 
-internal void
+void
 DECK_LoadSlideOnly(DECK_Deck* deck, U64 slide_idx) {
    if (slide_idx < deck->slide_count) {
       DECK_Slide* slide = &deck->slides[slide_idx];
@@ -1169,7 +1169,7 @@ DECK_LoadSlideOnly(DECK_Deck* deck, U64 slide_idx) {
    }
 }
 
-internal void
+void
 DECK_LoadSlide(DECK_Deck* deck, U64 slide_idx) {
    if (slide_idx < deck->slide_count) {
       // Everything but this slide and its two neighbours goes. The neighbours

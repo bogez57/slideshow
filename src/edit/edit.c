@@ -99,7 +99,7 @@ enum {
    _EDIT_FormatAction_Color,    // nothing by itself: the row has the colours to click
 };
 
-global _EDIT_FormatRow _edit_format_rows[] = {
+PRIVATE _EDIT_FormatRow _edit_format_rows[] = {
     {Str8LitComp("# Title"), Str8LitComp("starts a new slide, with a title"), Str8LitComp("# Title"), 2, 7},
     {Str8LitComp("---"), Str8LitComp("starts a new slide with no title"), Str8LitComp("---\n"), 4, 4},
     {Str8LitComp("## Heading"), Str8LitComp("a heading inside the slide"), Str8LitComp("## Heading"), 3, 10},
@@ -145,7 +145,7 @@ struct _EDIT_Layout {
    F32 mono_px; // the editor's
 };
 
-internal _EDIT_Layout
+PRIVATE _EDIT_Layout
 _EDIT_LayoutFromWindowDim(App_State* app_state, Vec2F32 window_dim) {
    _EDIT_Layout result = {0};
 
@@ -216,7 +216,7 @@ _EDIT_LayoutFromWindowDim(App_State* app_state, Vec2F32 window_dim) {
 // row shows the ones around the slide showing - as far as the ends of the
 // deck allow - and always whole ones. A slide that is not in the row gets a
 // zero rect.
-internal Rng2F32
+PRIVATE Rng2F32
 _EDIT_ThumbRect(_EDIT_Layout* layout, U64 slide_count, U64 slide_showing, U64 slide_idx) {
    Rng2F32 result = {0};
 
@@ -248,7 +248,7 @@ _EDIT_ThumbRect(_EDIT_Layout* layout, U64 slide_count, U64 slide_showing, U64 sl
 // no slide's, and stays where it is when slides move. The deck has to be of
 // the text as it is: FR_SyncDeck first.
 
-internal Rng1U64
+PRIVATE Rng1U64
 _EDIT_TextRangeFromSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
    Rng1U64 result = R1U64(0, editor->size);
    if (slide_idx < deck->slide_count) {
@@ -262,7 +262,7 @@ _EDIT_TextRangeFromSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
 
 // Starts a slide after slide_idx - or the deck's first, if it has none -
 // with its title selected, to be typed over.
-internal void
+PRIVATE void
 _EDIT_AddSlideAfter(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
    U64     at = _EDIT_TextRangeFromSlide(editor, deck, slide_idx).max;
    String8 text = ED_Text(editor);
@@ -292,7 +292,7 @@ _EDIT_AddSlideAfter(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
 // Moves slide_idx a place later in the deck, or earlier: its piece of the
 // text and its neighbour's change places, as one step to undo. The cursor
 // stays where it was in the slide. 0 if there is no place to move it to.
-internal B32
+PRIVATE B32
 _EDIT_MoveSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx, B32 to_later) {
    B32 result = 0;
 
@@ -382,7 +382,7 @@ _EDIT_MoveSlide(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx, B32 to_later)
 
 // Puts string where [start, end) of the text was, and leaves the cursor in
 // the words it was in - not at the change, which may be on another slide.
-internal void
+PRIVATE void
 _EDIT_ReplaceKeepingCursor(ED_Editor* editor, U64 start, U64 end, String8 string) {
    U64 cursor = editor->cursor;
    if (cursor >= end) {
@@ -398,9 +398,9 @@ _EDIT_ReplaceKeepingCursor(ED_Editor* editor, U64 start, U64 end, String8 string
 // @color line, for the idx-th picture or block of the body, or the title:
 // over the one there is (old_line, with has_line), or as a new line under
 // the picture's line, under the title's, or above the block's first.
-internal void
-_EDIT_PutLineFor(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 idx, B32 has_line, Rng1U64 old_line,
-                 String8 line) {
+void
+EDIT_PutLineFor(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 idx, B32 has_line, Rng1U64 old_line,
+                String8 line) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 text = ED_Text(editor);
 
@@ -440,8 +440,8 @@ _EDIT_PutLineFor(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 
 }
 
 // Takes such a line out of the text, with its line ending.
-internal void
-_EDIT_TakeOutLine(ED_Editor* editor, Rng1U64 line) {
+void
+EDIT_TakeOutLine(ED_Editor* editor, Rng1U64 line) {
    String8 text = ED_Text(editor);
    if (line.max <= text.size) {
       U64 start = line.min;
@@ -460,7 +460,7 @@ _EDIT_TakeOutLine(ED_Editor* editor, Rng1U64 line) {
 
 // Gives the deck the theme after the one it has: its @theme line is
 // written again, or a new one is put at the top of the text.
-internal void
+PRIVATE void
 _EDIT_NextTheme(ED_Editor* editor, DECK_Deck* deck) {
    Temp       scratch = ScratchBegin(0, 0);
    DECK_Theme theme = (DECK_Theme)((deck->theme + 1) % DECK_Theme_COUNT);
@@ -477,7 +477,7 @@ _EDIT_NextTheme(ED_Editor* editor, DECK_Deck* deck) {
 
 // Gives slide_idx the layout after the one it has: its @layout line is
 // written again, or a new one is put under the line the slide starts with.
-internal void
+PRIVATE void
 _EDIT_NextLayout(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
    if (slide_idx >= deck->slide_count) {
       return;
@@ -517,7 +517,7 @@ _EDIT_NextLayout(ED_Editor* editor, DECK_Deck* deck, U64 slide_idx) {
 // How often the folder is looked in again while the list is open.
 #define _EDIT_PICTURES_SCAN_SECONDS 1.0f
 
-internal void
+PRIVATE void
 _EDIT_ScanPictures(App_State* app_state) {
    if (app_state->pictures_arena == 0) {
       app_state->pictures_arena = ArenaAlloc();
@@ -537,7 +537,7 @@ _EDIT_ScanPictures(App_State* app_state) {
 // done either way: whether there is room is all that is found out - for a
 // file not to be copied into the deck's folder for a slide that cannot
 // have it.
-internal B32
+PRIVATE B32
 _EDIT_PutPicture(App_State* app_state, String8 name, B32 only_ask) {
    ED_Editor* editor = app_state->editor;
    DECK_Deck* deck = app_state->deck;
@@ -622,7 +622,7 @@ _EDIT_PutPicture(App_State* app_state, String8 name, B32 only_ask) {
 // the deck and its pictures stay together - unless a file of that name is
 // there already, and then that one is used. An image is copied first. A
 // video, which can be very large, is copied while it already shows.
-internal void
+PRIVATE void
 _EDIT_DropPicture(App_State* app_state, String8 path) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 name = Str8SkipLastSlash(path);
@@ -673,8 +673,8 @@ _EDIT_DropPicture(App_State* app_state, String8 path) {
 // are drawn first, in the order of their lines, then the title, then the
 // body - so words on a picture are the words, and of pictures over each
 // other the one on top is the one seen.
-internal S64
-_EDIT_PreviewHitAt(App_State* app_state, Vec2F32 pos) {
+S64
+EDIT_PreviewHitAt(App_State* app_state, Vec2F32 pos) {
    S64 result = -1;
    for (U64 i = app_state->preview_hit_count; i > 0; i -= 1) {
       if (Contains2F32(app_state->preview_hits[i - 1].rect, pos)) {
@@ -688,7 +688,7 @@ _EDIT_PreviewHitAt(App_State* app_state, Vec2F32 pos) {
 // Bold and code are for words: 0, with a notice, when the cursor is on a
 // picture's line or an @ line, where the marks would be part of a file's
 // name or of a setting - a picture that can no longer be found.
-internal B32
+PRIVATE B32
 _EDIT_CanWrap(App_State* app_state) {
    ED_Editor* editor = app_state->editor;
    String8    text = ED_Text(editor);
@@ -707,7 +707,7 @@ _EDIT_CanWrap(App_State* app_state) {
 
 // F1, or a click on the Format panel's header: closes the list of pictures
 // if that is what is open, else opens and closes the panel.
-internal void
+PRIVATE void
 _EDIT_ToggleFormat(App_State* app_state) {
    if (app_state->show_pictures) {
       app_state->show_pictures = 0;
@@ -721,7 +721,7 @@ _EDIT_ToggleFormat(App_State* app_state) {
 // a video that is open. 0 if not, or if the text has changed since the
 // preview was drawn. A picture behind the words has no place of its own to
 // click (view.c): it is all of page, as the presentation has it.
-internal VID_Video*
+PRIVATE VID_Video*
 _EDIT_PreviewVideo(App_State* app_state, Rng2F32 page, U64 picture_idx, Rng2F32* rect_out) {
    VID_Video* result = 0;
    DECK_Deck* deck = app_state->deck;
@@ -753,7 +753,7 @@ _EDIT_PreviewVideo(App_State* app_state, Rng2F32 page, U64 picture_idx, Rng2F32*
 
 // A slide added after the one the cursor is on (add), or that one moved a
 // place later or earlier, and the deck made again from the text.
-internal void
+PRIVATE void
 _EDIT_ChangeSlides(App_State* app_state, B32 add, B32 to_later) {
    ED_Editor* editor = app_state->editor;
    // The deck as the text is now: something this frame may have changed it.
@@ -769,7 +769,7 @@ _EDIT_ChangeSlides(App_State* app_state, B32 add, B32 to_later) {
    app_state->slide_idx = DECK_SlideFromTextPos(app_state->deck, editor->cursor);
 }
 
-internal void
+void
 EDIT_PreviewClick(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
    ED_Editor* editor = app_state->editor;
    if (editor->edit_count != app_state->preview_hits_edit_count) {
@@ -778,7 +778,7 @@ EDIT_PreviewClick(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
    // On words: the cursor to the letter (caret\caret.c). On a picture: its
    // file's name selected, to be typed over.
    if (!CARET_Click(app_state, pos, keeps_mark)) {
-      S64 hit_idx = _EDIT_PreviewHitAt(app_state, pos);
+      S64 hit_idx = EDIT_PreviewHitAt(app_state, pos);
       if (hit_idx >= 0 && app_state->preview_hits[hit_idx].text_range.max <= editor->size) {
          VIEW_Hit* hit = &app_state->preview_hits[hit_idx];
          ED_SetCursor(editor, hit->text_range.max);
@@ -789,7 +789,7 @@ EDIT_PreviewClick(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
    }
 }
 
-internal void
+void
 EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;
@@ -939,7 +939,7 @@ EDIT_Input(App_State* app_state, Vec2F32 window_dim) {
 //       status   a notice if one is up, else the file's name and the keys
 
 // A line of text across a box, at the left, with optional text at the right.
-internal void
+PRIVATE void
 _EDIT_BuildBarText(F32 pad, String8 left_tag, String8 left, FNT_Tag left_font, String8 right) {
    UI_PrefHeight(UI_Pct(1, 1)) {
       UI_Spacer(UI_Px(pad, 1));
@@ -959,7 +959,7 @@ _EDIT_BuildBarText(F32 pad, String8 left_tag, String8 left, FNT_Tag left_font, S
 // A word to click, in a row of the Format panel: as tall as the row leaves
 // it, with a little room around it, and a white edge when it is what there
 // is now, as a colour's square has. 1 when it is clicked.
-internal B32
+PRIVATE B32
 _EDIT_BuildRowButton(String8 name, B32 is_now, F32 row_h, F32 ui, B32 interactive, char* fmt, ...) {
    Temp    scratch = ScratchBegin(0, 0);
    va_list args;
@@ -1012,7 +1012,7 @@ _EDIT_BuildRowButton(String8 name, B32 is_now, F32 row_h, F32 ui, B32 interactiv
 // A square of a colour to click, side wide and gap before the next, in a
 // row of the Format panel, with a white edge when it is the colour there is
 // now. 1 when it is clicked.
-internal B32
+PRIVATE B32
 _EDIT_BuildSwatch(Vec4F32 color, B32 is_now, F32 side, F32 gap, F32 row_h, F32 ui, B32 interactive, char* fmt, ...) {
    Temp    scratch = ScratchBegin(0, 0);
    va_list args;
@@ -1092,7 +1092,7 @@ struct _EDIT_Slide {
 
 // The preview's slide, as it was laid out in the build: the same scroll,
 // and its scroll bars are the UI's (caret\caret.c).
-internal void
+PRIVATE void
 _EDIT_DrawSlide(UI_Box* box, void* user_data) {
    UnusedVariable(box);
    _EDIT_Slide* slide = (_EDIT_Slide*)user_data;
@@ -1120,7 +1120,7 @@ struct _EDIT_Thumb {
 // A small slide. Only a picture that is loaded already is drawn: the slide
 // showing and the ones next to it. Loading every picture of a long deck for
 // its small slides would take the memory DECK_LoadSlide saves.
-internal void
+PRIVATE void
 _EDIT_DrawThumb(UI_Box* box, void* user_data) {
    _EDIT_Thumb* thumb = (_EDIT_Thumb*)user_data;
    App_State*   app_state = thumb->app_state;
@@ -1146,7 +1146,7 @@ struct _EDIT_Plus {
 // The + that adds a slide: its background, and a + of two bars in the
 // middle, in the box's text colour - drawn, not written, to be in the
 // middle whatever the font.
-internal void
+PRIVATE void
 _EDIT_DrawPlus(UI_Box* box, void* user_data) {
    _EDIT_Plus* plus = (_EDIT_Plus*)user_data;
    F32         half = plus->half;
@@ -1163,7 +1163,7 @@ _EDIT_DrawPlus(UI_Box* box, void* user_data) {
 // The preview's slide laid out at page, and its pieces kept. The caret's
 // scroll follows the caret (CARET_Follow), and the slide is laid out again
 // if it moved.
-internal void
+PRIVATE void
 _EDIT_LayoutPreview(App_State* app_state, Rng2F32 page, F32 ui) {
    DECK_Deck* deck = app_state->deck;
    app_state->preview_hit_count = 0;
@@ -1226,7 +1226,7 @@ _EDIT_LayoutPreview(App_State* app_state, Rng2F32 page, F32 ui) {
    CARET_KeepRuns(app_state, &hits);
 }
 
-internal void
+PRIVATE void
 _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) {
    ED_Editor* editor = app_state->editor;
    DECK_Deck* deck = app_state->deck;
@@ -1353,7 +1353,7 @@ _EDIT_BuildPreview(App_State* app_state, _EDIT_Layout* layout, B32 interactive) 
 
       // Right at the words a drag selects them (place\place.c): said there,
       // and while it does, instead of how the box is moved.
-      B32 is_at_words = (app_state->place_drag.state == EDIT_PlaceDragState_Selecting ||
+      B32 is_at_words = (app_state->place_drag.state == PLACE_DragState_Selecting ||
                          (can_move && hover.has_piece && hover.corner == 0 &&
                           PLACE_IsAtWords(app_state, hover.kind, hover.idx, Core_WM_MouseFromWindow(app_state->window))));
       if (is_at_words) {
@@ -1458,14 +1458,14 @@ struct _EDIT_Pane {
 };
 
 // The text, as the editor draws it.
-internal void
+PRIVATE void
 _EDIT_DrawPane(UI_Box* box, void* user_data) {
    UnusedVariable(box);
    _EDIT_Pane* pane = (_EDIT_Pane*)user_data;
    ED_Draw(pane->editor, pane->arena, pane->box);
 }
 
-internal void
+void
 EDIT_Build(App_State* app_state, Vec2F32 window_dim, B32 interactive) {
    ED_Editor*   editor = app_state->editor;
    TXT_Fonts*   fonts = &app_state->fonts;

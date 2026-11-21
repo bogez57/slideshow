@@ -27,5 +27,5 @@
 *.vob
 !/data/example/clip.mp4
 
-# A video on its way into a deck's folder (src/frame_copy.c)
+# A video on its way into a deck's folder (src/copy/copy.c)
 *.copying

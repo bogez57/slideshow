@@ -1,11 +1,10 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: frame
 //
 // One frame's work, for both screens: the presentation (frame.c) and the edit
 // screen (edit\edit.c). What the two share is declared here.
-
-#ifndef FRAME_H
-#define FRAME_H
 
 #define FR_FADE_SECONDS 0.25f
 #define FR_PLAY_SECONDS 4.0f
@@ -15,58 +14,58 @@
 
 // Everything between the renderer's begin and end of a frame (main.c): this
 // frame's input, then the screen that is up.
-internal void FrameWork(App_State* app_state);
+void FrameWork(App_State* app_state);
 
 // Opens the deck at path - a folder, an image or a text file - in place of
 // the one that is open, and remembers it as the deck opened last. Refused,
 // with a notice, when the open deck has unsaved changes, or when path has
 // nothing to show and a deck is open: 0 then.
-internal B32 FR_OpenPath(App_State* app_state, String8 path);
+B32 FR_OpenPath(App_State* app_state, String8 path);
 
 // path as a whole path, from the drive, with \ between its parts: one that
 // is not whole already is taken from the folder the program was started in.
-internal String8 FR_WholePath(Arena* arena, String8 path);
+String8 FR_WholePath(Arena* arena, String8 path);
 
 // The program's own folder for what it keeps from run to run - the log, the
 // decks opened lately: local\ beside the program. Made if it is not there.
-internal String8 FR_LocalFolder(Arena* arena);
+String8 FR_LocalFolder(Arena* arena);
 
 // Starts the log's file for this run, keeping the last run's beside it.
-internal void FR_OpenLogFile(App_State* app_state);
+void FR_OpenLogFile(App_State* app_state);
 
 // Writes what a log scope gathered to the log's file and the console: what
 // went wrong marked !!!, warnings ???, the rest >>>.
-internal void FR_WriteLogs(App_State* app_state, LogScopeResult logs);
+void FR_WriteLogs(App_State* app_state, LogScopeResult logs);
 
 // Reads the decks opened lately from their file beside the program. Once,
 // at the start.
-internal void FR_LoadRecents(App_State* app_state);
+void FR_LoadRecents(App_State* app_state);
 
 // Makes the deck again from the editor's text if that has changed, and reads
 // the file again if something else has written it. Nothing for a folder of
 // images.
-internal void FR_SyncDeck(App_State* app_state);
+void FR_SyncDeck(App_State* app_state);
 
 // notice must last: a literal.
-internal void FR_Notice(App_State* app_state, String8 notice);
+void FR_Notice(App_State* app_state, String8 notice);
 
 // The notice, if one is up now, else an empty string.
-internal String8 FR_CurrentNotice(App_State* app_state);
+String8 FR_CurrentNotice(App_State* app_state);
 
 // Quits - unless there are unsaved changes that have not been warned about,
 // which it warns about instead.
-internal void FR_RequestQuit(App_State* app_state);
+void FR_RequestQuit(App_State* app_state);
 
 //- bgz: sizes of what is not a slide
 //
 // The screens' sizes are for a window 900 pixels tall, and grow with a taller
 // one - a large or dense screen - up to twice, but do not shrink with a
 // shorter: how many pixels a unit is.
-internal F32 FR_UIScale(Vec2F32 window_dim);
+F32 FR_UIScale(Vec2F32 window_dim);
 
 // The UI layer's font size for text px pixels tall, as the hand-drawn text
 // of that size (TXT_Draw) is drawn: the font cache's points, whole ones.
-internal F32 FR_UIFontSize(F32 px);
+F32 FR_UIFontSize(F32 px);
 
 //- bgz: boxes at a place of their own (frame.c)
 //
@@ -75,8 +74,8 @@ internal F32 FR_UIFontSize(F32 px);
 // from rect, this frame's, and not from where the box was laid out last
 // frame. FR_BuildEdge: a box that draws only an outline thick pixels wide,
 // around rect exactly, in color.
-internal UI_Box* FR_BuildRectBox(UI_BoxFlags flags, Rng2F32 rect, char* fmt, ...);
-internal UI_Box* FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...);
+UI_Box* FR_BuildRectBox(UI_BoxFlags flags, Rng2F32 rect, char* fmt, ...);
+UI_Box* FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...);
 
 //- bgz: a window's UI build (frame.c)
 //
@@ -86,15 +85,13 @@ internal UI_Box* FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt,
 // events of that window - the slideshow's theme, icons and fonts, and
 // last_frame_us for its animations - until UI_EndBuild. FR_DrawUITree draws
 // a state's laid-out tree into the draw bucket that is open.
-internal void FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64* last_frame_us);
-internal void FR_DrawUITree(UI_State* ui_state);
+void FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64* last_frame_us);
+void FR_DrawUITree(UI_State* ui_state);
 
 // A line of words at top_left, as TXT_Draw would put it, px tall, in color
 // (frame.c).
-internal void FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 words, char* fmt, ...);
+void FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 words, char* fmt, ...);
 
 // What the UI's signal counts for a notch of the wheel (UI_SignalFromBox's
 // scroll, with the slideshow's UI_AnimationInfo).
 #define FR_UI_SCROLL_PER_NOTCH 4.0f
-
-#endif // FRAME_H

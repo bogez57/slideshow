@@ -3,11 +3,7 @@
 //
 // See text.h.
 
-// Smooth: antialiased, and not snapped to the pixel grid as small interface
-// text is - slide text is large.
-#define _TXT_RASTER_FLAGS FNT_RasterFlag_Smooth
-
-internal B32
+PRIVATE B32
 _TXT_FontIsValid(FNT_Tag font) {
    B32 result = !Core_FNT_TagMatch(font, Core_FNT_TagZero());
    return result;
@@ -15,14 +11,14 @@ _TXT_FontIsValid(FNT_Tag font) {
 
 // The font cache's size for a size in pixels: points, 72 to an inch where
 // pixels are 96, and no less than one - it rasterizes nothing at zero.
-internal F32
+PRIVATE F32
 _TXT_PointsFromPx(F32 px) {
    F32 points = (F32)(S32)(px * 0.75f);
    return Max(points, 1.0f);
 }
 
 // The first of the paths that is a file, as a font. The zero tag if none is.
-internal FNT_Tag
+PRIVATE FNT_Tag
 _TXT_FontFromFirstPath(String8* paths, U64 path_count) {
    FNT_Tag result = Core_FNT_TagZero();
 
@@ -38,7 +34,7 @@ _TXT_FontFromFirstPath(String8* paths, U64 path_count) {
    return result;
 }
 
-internal TXT_Fonts
+TXT_Fonts
 TXT_OpenFonts(void) {
    TXT_Fonts result = {0};
    Temp      scratch = ScratchBegin(0, 0);
@@ -93,7 +89,7 @@ TXT_OpenFonts(void) {
 // The font cache's metrics are in points, though what it rasterizes is 96/72
 // of that, in pixels (rad\font_provider\dwrite\font_provider_dwrite.c). A
 // glyph's bitmap is ascent + descent + line gap tall, in those pixels.
-internal F32
+F32
 TXT_LineHeight(FNT_Tag font, F32 px) {
    F32 result = 0;
 
@@ -105,14 +101,14 @@ TXT_LineHeight(FNT_Tag font, F32 px) {
    return result;
 }
 
-internal F32
+F32
 TXT_Width(FNT_Tag font, F32 px, String8 string) {
    F32 result = 0;
 
    if (_TXT_FontIsValid(font) && string.size != 0) {
       // Measured as it is drawn, with the same flags: the font cache keeps
       // glyphs apart by flags, and would rasterize every one twice.
-      FNT_Run run = Core_FNT_RunFromString(font, _TXT_PointsFromPx(px), 0, 0, _TXT_RASTER_FLAGS, string);
+      FNT_Run run = Core_FNT_RunFromString(font, _TXT_PointsFromPx(px), 0, 0, TXT_RASTER_FLAGS, string);
       result = run.dim.x;
    }
 
@@ -123,7 +119,7 @@ TXT_Width(FNT_Tag font, F32 px, String8 string) {
 // + 1 pixels tall, with the baseline round(descent) + round(line gap) above
 // its bottom (rad\font_provider\dwrite\font_provider_dwrite.c, fp_raster).
 // TXT_Draw puts the top of that bitmap at the position it is given.
-internal F32
+F32
 TXT_Baseline(FNT_Tag font, F32 px) {
    F32 result = 0;
 
@@ -137,7 +133,7 @@ TXT_Baseline(FNT_Tag font, F32 px) {
    return result;
 }
 
-internal F32
+F32
 TXT_CapHeight(FNT_Tag font, F32 px) {
    F32 result = 0;
 
@@ -149,12 +145,12 @@ TXT_CapHeight(FNT_Tag font, F32 px) {
    return result;
 }
 
-internal void
+void
 TXT_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string) {
    if (_TXT_FontIsValid(font) && string.size != 0) {
       F32         points = _TXT_PointsFromPx(px);
       FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, points);
-      FNT_Run     run = Core_FNT_RunFromString(font, points, 0, 0, _TXT_RASTER_FLAGS, string);
+      FNT_Run     run = Core_FNT_RunFromString(font, points, 0, 0, TXT_RASTER_FLAGS, string);
 
       // Core_D_Text puts the top of each glyph's bitmap a whole number of
       // pixels above the position it is given: ascent + descent, cut to a
@@ -167,7 +163,7 @@ TXT_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string) 
    }
 }
 
-internal String8List
+String8List
 TXT_Wrap(Arena* arena, FNT_Tag font, F32 px, String8 string, F32 max_width) {
    String8List result = {0};
 

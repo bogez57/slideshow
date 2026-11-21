@@ -1,3 +1,5 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: text
 //
@@ -15,8 +17,9 @@
 // A font that could not be opened is the zero tag. Text in it measures as
 // nothing and draws nothing.
 
-#ifndef TEXT_H
-#define TEXT_H
+// How the font cache draws the letters. Smooth: antialiased, and not snapped
+// to the pixel grid as small interface text is - slide text is large.
+#define TXT_RASTER_FLAGS FNT_RasterFlag_Smooth
 
 typedef struct TXT_Fonts TXT_Fonts;
 struct TXT_Fonts {
@@ -27,22 +30,20 @@ struct TXT_Fonts {
 
 // data\fonts\regular.ttf, bold.ttf and mono.ttf if the program has them, else
 // Segoe UI and Consolas from Windows' own fonts, else Arial and Courier New.
-internal TXT_Fonts TXT_OpenFonts(void);
+TXT_Fonts TXT_OpenFonts(void);
 
-internal F32 TXT_LineHeight(FNT_Tag font, F32 px);
-internal F32 TXT_Width(FNT_Tag font, F32 px, String8 string);
+F32 TXT_LineHeight(FNT_Tag font, F32 px);
+F32 TXT_Width(FNT_Tag font, F32 px, String8 string);
 // How far below the position TXT_Draw is given the letters stand: their
 // baseline, in whole pixels, as the font cache rasterizes them. Two fonts or
 // sizes on one line line up when their positions differ by the difference of
 // this.
-internal F32 TXT_Baseline(FNT_Tag font, F32 px);
+F32 TXT_Baseline(FNT_Tag font, F32 px);
 // The height of a capital letter above the baseline.
-internal F32 TXT_CapHeight(FNT_Tag font, F32 px);
-internal void TXT_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string);
+F32 TXT_CapHeight(FNT_Tag font, F32 px);
+void TXT_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string);
 
 // The string cut into lines no wider than max_width, broken at spaces. Each
 // line is a piece of the string itself, not a copy. A single word wider than
 // max_width gets a line to itself and sticks out. An empty string is no lines.
-internal String8List TXT_Wrap(Arena* arena, FNT_Tag font, F32 px, String8 string, F32 max_width);
-
-#endif // TEXT_H
+String8List TXT_Wrap(Arena* arena, FNT_Tag font, F32 px, String8 string, F32 max_width);

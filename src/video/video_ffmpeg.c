@@ -4,7 +4,7 @@
 // The functions of video_decoder.h. This is the only file in the
 // program that includes FFmpeg's headers or calls it: to decode with
 // something else, write another file with the same functions and
-// include that one in main.c instead.
+// include that one at the end of video.c instead.
 //
 // FFmpeg is src\third_party\ffmpeg: its headers, the import libraries the
 // program links against, and the DLLs, which build.bat copies next to the
@@ -158,7 +158,7 @@ struct VID_Decoder {
    F64  sound_pending_time_s; // of the first not given out
 };
 
-internal void
+PRIVATE void
 _VID_PacketQueueClear(_VID_PacketQueue* queue) {
    for (_VID_PacketNode* node = queue->first, *next = 0; node != 0; node = next) {
       next = node->next;
@@ -172,7 +172,7 @@ _VID_PacketQueueClear(_VID_PacketQueue* queue) {
 // The next packet of the video (want_sound 0) or of the sound, into
 // decoder->packet, which the caller unrefs. 0 when there are no more.
 // Packets of the other stream met on the way are kept for when it asks.
-internal B32
+PRIVATE B32
 _VID_NextPacket(VID_Decoder* decoder, B32 want_sound) {
    B32               result = 0;
    _VID_PacketQueue* mine = want_sound ? &decoder->sound_packets : &decoder->video_packets;
@@ -229,7 +229,7 @@ _VID_NextPacket(VID_Decoder* decoder, B32 want_sound) {
 
 // After the file has been sought in: what was read and decoded from where
 // it was is let go of, for the video and the sound both.
-internal void
+PRIVATE void
 _VID_AfterSeek(VID_Decoder* decoder) {
    _VID_PacketQueueClear(&decoder->video_packets);
    _VID_PacketQueueClear(&decoder->sound_packets);
@@ -258,7 +258,7 @@ _VID_AfterSeek(VID_Decoder* decoder) {
 // Else to the first frame's time: a format with an index of its own - .mkv
 // - takes a seek to a byte without saying no, and then reads from wherever
 // it was.
-internal void
+PRIVATE void
 _VID_SeekToStart(VID_Decoder* decoder) {
    int error = -1;
    int format_flags = decoder->format->iformat->flags;
@@ -274,7 +274,7 @@ _VID_SeekToStart(VID_Decoder* decoder) {
 }
 
 // What FFmpeg has to say about one of its error codes.
-internal String8
+PRIVATE String8
 _VID_FFmpegError(Arena* arena, int code) {
    char text[AV_ERROR_MAX_STRING_SIZE] = {0};
    av_strerror(code, text, sizeof(text));
@@ -286,7 +286,7 @@ _VID_FFmpegError(Arena* arena, int code) {
 // wanted: the card's, if it is among them. If it is not - the card has no
 // circuit for this stream after all - FFmpeg's own choice, which is the
 // processor.
-internal enum AVPixelFormat
+PRIVATE enum AVPixelFormat
 _VID_PickFormat(AVCodecContext* codec, const enum AVPixelFormat* formats) {
    VID_Decoder* decoder = (VID_Decoder*)codec->opaque;
    for (const enum AVPixelFormat* format = formats; *format != AV_PIX_FMT_NONE; format += 1) {
@@ -301,7 +301,7 @@ _VID_PickFormat(AVCodecContext* codec, const enum AVPixelFormat* formats) {
 // card if use_card and the card has a decoder for the stream, else on the
 // processor. Returns FFmpeg's error, under 0, if it could not be started;
 // decoder->codec is then 0.
-internal int
+PRIVATE int
 _VID_OpenVideoCodec(VID_Decoder* decoder, const AVCodec* codec, B32 use_card) {
    AVStream* stream = decoder->format->streams[decoder->stream_idx];
    int       error = 0;
@@ -363,7 +363,7 @@ _VID_OpenVideoCodec(VID_Decoder* decoder, const AVCodec* codec, B32 use_card) {
 // The card is let go of, and the video stream's codec is made again on the
 // processor. Where the file is read from is not changed: the caller seeks.
 // Returns FFmpeg's error, under 0, if the processor can't either.
-internal int
+PRIVATE int
 _VID_ReopenOnProcessor(VID_Decoder* decoder) {
    const AVCodec* codec = decoder->codec->codec;
    avcodec_free_context(&decoder->codec);
@@ -383,7 +383,7 @@ _VID_ReopenOnProcessor(VID_Decoder* decoder) {
 // is fed the next packet of the video stream and asked again - several
 // packets can go in before a frame comes out, and several frames can come
 // out of one.
-internal int
+PRIVATE int
 _VID_ReceiveFrame(VID_Decoder* decoder) {
    if (decoder->has_first_frame) {
       decoder->has_first_frame = 0;
@@ -421,7 +421,7 @@ _VID_ReceiveFrame(VID_Decoder* decoder) {
    return error;
 }
 
-internal void
+void
 VID_DecoderClose(VID_Decoder* decoder) {
    if (decoder == 0) {
       return;
@@ -442,7 +442,7 @@ VID_DecoderClose(VID_Decoder* decoder) {
    avformat_close_input(&decoder->format);
 }
 
-internal VID_Decoder*
+VID_Decoder*
 VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_DecoderInfo* info_out) {
    VID_Decoder* decoder = PushArray(arena, VID_Decoder, 1);
    decoder->path = PushStr8Copy(arena, path);
@@ -629,7 +629,7 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
 //
 // What is logged here is lost - this is the player's thread, and the log is
 // the main thread's.
-internal B32
+PRIVATE B32
 _VID_FallBackToProcessor(VID_Decoder* decoder) {
    if (decoder->card == 0) {
       return 0;
@@ -651,7 +651,7 @@ _VID_FallBackToProcessor(VID_Decoder* decoder) {
 
 // What the next frame of the file is, and when: 1 and the frame, 0 if there
 // is none. *card_failed_out: the card failed at it, and nothing was given.
-internal B32
+PRIVATE B32
 _VID_NextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out, B32* card_failed_out) {
    *card_failed_out = 0;
 
@@ -767,7 +767,7 @@ _VID_NextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out, B32* card_fail
    return result;
 }
 
-internal B32
+B32
 VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
    for (;;) {
       B32 card_failed = 0;
@@ -789,7 +789,7 @@ VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
 
 // A frame of the file's sound, just decoded, into sound_pending as two
 // channels of F32 at the rate given out.
-internal void
+PRIVATE void
 _VID_ConvertSound(VID_Decoder* decoder) {
    AVFrame* frame = decoder->sound_frame;
    int      channels = frame->ch_layout.nb_channels;
@@ -860,7 +860,7 @@ _VID_ConvertSound(VID_Decoder* decoder) {
    }
 }
 
-internal U64
+U64
 VID_DecoderNextSound(VID_Decoder* decoder, F32* samples, U64 frame_cap, F64* time_s_out) {
    if (decoder->sound_codec == 0 || frame_cap == 0) {
       return 0;
@@ -912,7 +912,7 @@ VID_DecoderNextSound(VID_Decoder* decoder, F32* samples, U64 frame_cap, F64* tim
    return count;
 }
 
-internal void
+void
 VID_DecoderSeek(VID_Decoder* decoder, F64 time_s) {
    decoder->last_time_s = time_s;
    decoder->skip_until_s = 0;

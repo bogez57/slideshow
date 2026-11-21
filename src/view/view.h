@@ -1,3 +1,5 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: view
 //
@@ -26,11 +28,14 @@
 // @size and @color lines (DECK_Look) give the title's words, or a block's,
 // a size and a colour of their own.
 
-#ifndef VIEW_H
-#define VIEW_H
-
 #define VIEW_PAGE_W 1280.0f
 #define VIEW_PAGE_H 720.0f
+
+// The page's margins, in its units: what is inside them is where a slide's
+// words go, unless an @place line puts them elsewhere.
+#define VIEW_MARGIN_X      90.0f
+#define VIEW_MARGIN_TOP    64.0f
+#define VIEW_MARGIN_BOTTOM 56.0f
 
 // A theme's colours. The background is the caller's to draw, behind the
 // slide and around it: a slide is drawn over it, at any alpha.
@@ -42,17 +47,17 @@ struct VIEW_Colors {
    Vec4F32 accent; // the bar under the title, headings, bullets' dots
 };
 
-internal VIEW_Colors VIEW_ColorsFromTheme(DECK_Theme theme);
+VIEW_Colors VIEW_ColorsFromTheme(DECK_Theme theme);
 
 // How many pixels a page unit is in a rect of this size.
-internal F32 VIEW_ScaleFromDim(Vec2F32 dim);
+F32 VIEW_ScaleFromDim(Vec2F32 dim);
 
 // The largest rect of the page's shape that fits in rect, in the middle.
-internal Rng2F32 VIEW_PageRectFromRect(Rng2F32 rect);
+Rng2F32 VIEW_PageRectFromRect(Rng2F32 rect);
 
 // The image as large as fits in rect with its shape kept, in the middle of
 // it. alpha is how much of it shows over what is already drawn.
-internal void VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha);
+void VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha);
 
 // Where a piece of a slide was drawn, and where in the deck's text it is
 // from: what a click on the slide is a click on.
@@ -151,7 +156,5 @@ struct VIEW_HitList {
 // (slide->layout) says where its picture and words go, and its @place lines
 // (slide->places, and the pictures' and blocks' own) put any of them
 // somewhere else.
-internal void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, Rng2F32 rect, F32 alpha,
+void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, Rng2F32 rect, F32 alpha,
                              VIEW_HitList* hits);
-
-#endif // VIEW_H

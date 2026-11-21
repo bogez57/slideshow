@@ -30,7 +30,7 @@ audio_wasapi.c             the device there is, done with Windows' audio
 ## Changing the device
 
 1. Write `audio_<other>.c` that defines the two functions in `audio_device.h`.
-2. In `src\main.c`, include it in place of `audio/audio_wasapi.c`.
+2. At the end of `audio.c`, include it in place of `audio_wasapi.c`.
 
 Nothing else changes.
 

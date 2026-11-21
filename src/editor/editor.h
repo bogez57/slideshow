@@ -1,3 +1,5 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: editor
 //
@@ -17,9 +19,6 @@
 // of are left where they are until they add up, and then the ones still
 // wanted are copied to a fresh arena and the old one is cleared
 // (_ED_HistoryTidy in editor.c).
-
-#ifndef EDITOR_H
-#define EDITOR_H
 
 // How many changes can be undone. Each is a whole copy of the text, which for
 // a deck is small.
@@ -101,55 +100,53 @@ struct ED_Box {
 
 // Never 0. A file that does not exist gives an empty editor, and ED_Save
 // makes the file.
-internal ED_Editor* ED_Open(String8 file);
-internal void       ED_Close(ED_Editor* editor);
+ED_Editor* ED_Open(String8 file);
+void       ED_Close(ED_Editor* editor);
 
 // The text as it is now. Good until the next change.
-internal String8 ED_Text(ED_Editor* editor);
+String8 ED_Text(ED_Editor* editor);
 
-internal B32 ED_HasUnsavedChanges(ED_Editor* editor);
-internal B32 ED_Save(ED_Editor* editor);
+B32 ED_HasUnsavedChanges(ED_Editor* editor);
+B32 ED_Save(ED_Editor* editor);
 
 // Whether the file has been written by something else since it was read or
 // saved here.
-internal B32 ED_FileHasChanged(ED_Editor* editor);
+B32 ED_FileHasChanged(ED_Editor* editor);
 
 // Reads the file again, dropping the text here and its undo history.
-internal void ED_Reload(ED_Editor* editor);
+void ED_Reload(ED_Editor* editor);
 
 // Puts string where the selection is, or at the cursor if there is none.
-internal void ED_Insert(ED_Editor* editor, String8 string, ED_EditKind kind);
+void ED_Insert(ED_Editor* editor, String8 string, ED_EditKind kind);
 
 // Puts string on a line of its own: straight in if the cursor's line is
 // empty, else on a new line under it. The part of string from select_start to
 // select_end is left selected, to be typed over - both the same for a plain
 // cursor there.
-internal void ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start, U64 select_end);
+void ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start, U64 select_end);
 
 // Puts string in place of the text from start to end, and the cursor after it.
-internal void ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string);
+void ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string);
 
 // Puts mark before and after the selection, which stays selected - or takes
 // them away, if they are there already. With no selection, writes
 // placeholder between two marks and selects it, to be typed over.
-internal void ED_WrapSelection(ED_Editor* editor, String8 mark, String8 placeholder);
+void ED_WrapSelection(ED_Editor* editor, String8 mark, String8 placeholder);
 
-internal void ED_SetCursor(ED_Editor* editor, U64 pos);
+void ED_SetCursor(ED_Editor* editor, U64 pos);
 
 // Keys and typing. Events it uses are eaten, so what the caller wants for
 // itself (its own shortcuts) it takes first. arena is for the frame: the row
 // layout and the clipboard's text go on it.
-internal void ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, ED_Box box);
+void ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, ED_Box box);
 
 // The mouse, as the caller's box over the text has it (the edit screen's UI
 // box): a press at pos puts the cursor at the nearest gap between letters
 // there - selecting from where it was, with is_selecting; a drag, while the
 // button that went down in the text stays down, over the box or not, takes
 // the cursor along and leaves the mark; the wheel scrolls notches down.
-internal void ED_Press(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos, B32 is_selecting);
-internal void ED_Drag(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos);
-internal void ED_Wheel(ED_Editor* editor, ED_Box box, F32 notches);
+void ED_Press(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos, B32 is_selecting);
+void ED_Drag(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos);
+void ED_Wheel(ED_Editor* editor, ED_Box box, F32 notches);
 
-internal void ED_Draw(ED_Editor* editor, Arena* arena, ED_Box box);
-
-#endif // EDITOR_H
+void ED_Draw(ED_Editor* editor, Arena* arena, ED_Box box);

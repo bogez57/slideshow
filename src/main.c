@@ -2,8 +2,8 @@
 //~ bgz: slideshow
 //
 // The program's one unit: bgz's headers, then each layer's header, then each
-// layer's .c, in dependency order. bgz itself is not compiled here - it is
-// bgz.dll (src\bgz\build.bat), linked through bin\bgz.lib.
+// layer's .c. bgz itself is not compiled here - it is bgz.dll
+// (src\bgz\build.bat), linked through bin\bgz.lib.
 //
 //    bin\slideshow.exe            opens the deck that was open last. The
 //                                 first time, the open screen, to pick one
@@ -28,11 +28,15 @@
 // bgz lib
 #include "bgz_inc.h"
 
-// The UI library - the editor project's own (src\editor\ui there), copied in
-// as app code and built on bgz's draw and font cache. Its file-private
-// functions are marked PRIVATE, which the editor defines in its state_ops.h;
-// the slideshow has no state ops, so it is defined here, ahead of the UI.
+// A layer's own functions and variables, which no other layer uses, are
+// PRIVATE and start with _: PRIVATE String8 _DECK_Trim(...). What other
+// layers use has no _ and is declared in the layer's header. The editor
+// project defines PRIVATE in its state_ops.h; the slideshow has no state ops,
+// so it is here, ahead of everything that uses it.
 #define PRIVATE static
+
+// The UI library - the editor project's own (src\editor\ui there), copied in
+// as app code and built on bgz's draw and font cache.
 #include "ui/ui_inc.h"
 
 ////////////////////////////////
@@ -47,22 +51,24 @@
 #include "deck/deck.h"
 #include "view/view.h"
 #include "editor/editor.h"
-#include "app_state.h"
-#include "frame.h"
-// The program's own layers, each a folder with a header of what the rest
-// calls. They are all about the one App_State, so they come after it.
-#include "slide_video/slide_video.h"
+#include "caret/caret.h"
 #include "copy/copy.h"
 #include "edit/edit.h"
-#include "place/place.h"
 #include "look/look.h"
-#include "caret/caret.h"
 #include "open/open.h"
+#include "place/place.h"
 #include "presenter/presenter.h"
+#include "slide_video/slide_video.h"
+#include "app_state.h" // after the layers' headers: it holds their types
+#include "frame.h"
 
 ////////////////////////////////
-//~ bgz: implementations
-
+//~ bgz: the UI library
+//
+// Ahead of the layers, not among them: caret.c draws its scroll bars' thumbs
+// with the UI's own _UI_DrawScrollThumb, which is private to the UI and in
+// none of its headers. The UI's files are the editor's, kept as they are.
+//
 // The UI times its passes with raddebugger's ProfScope. With no profiler
 // built in - the slideshow has none - that is DeferLoop((0), ProfEnd()), and
 // the (0) is an unused value. The editor builds with Spall, so it never sees
@@ -75,23 +81,32 @@
 #if defined(__clang__)
 # pragma clang diagnostic pop
 #endif
-#include "image/image.c"
+
+////////////////////////////////
+//~ bgz: layers
+//
+// Every layer, alphabetically. A layer uses another only through its header,
+// so the order never matters. A layer in more than one .c includes the others
+// from its own (audio.c, video.c). A new layer: a folder, its .c here, and
+// its .h above if other layers call it.
+
 #include "audio/audio.c"
-#include "audio/audio_wasapi.c" // the device: the one file to change for another (audio_device.h)
-#include "video/video.c"
-#include "video/video_ffmpeg.c" // the decoder: the one file to change for another (video_decoder.h)
-#include "text/text.c"
-#include "deck/deck.c"
-#include "view/view.c"
-#include "editor/editor.c"
-#include "slide_video/slide_video.c"
-#include "copy/copy.c"
-#include "edit/edit.c"
-#include "place/place.c"
-#include "look/look.c"
 #include "caret/caret.c"
+#include "copy/copy.c"
+#include "deck/deck.c"
+#include "edit/edit.c"
+#include "editor/editor.c"
+#include "image/image.c"
+#include "look/look.c"
 #include "open/open.c"
+#include "place/place.c"
 #include "presenter/presenter.c"
+#include "slide_video/slide_video.c"
+#include "text/text.c"
+#include "video/video.c"
+#include "view/view.c"
+
+// The top: both screens' frame, which uses all of the above.
 #include "frame.c"
 
 ////////////////////////////////
@@ -107,15 +122,15 @@
 
 // What _Main_RepaintFrame draws: it is called by bgz with no arguments. 0
 // until the window is ready to be drawn into.
-global App_State* g_repaint_app_state = 0;
+PRIVATE App_State* _repaint_app_state = 0;
 
 // Set while a frame is being drawn, so a repaint asked for from inside one
 // does nothing - see _Main_RepaintFrame.
-global B32 g_frame_running = 0;
+PRIVATE B32 _frame_running = 0;
 
-internal void
+PRIVATE void
 _Main_RunFrame(App_State* app_state) {
-   g_frame_running = 1;
+   _frame_running = 1;
 
    Core_R_BeginFrame();
    Core_R_WindowBeginFrame(app_state->window, app_state->window_eqp);
@@ -133,7 +148,7 @@ _Main_RunFrame(App_State* app_state) {
    }
    Core_R_EndFrame();
 
-   g_frame_running = 0;
+   _frame_running = 0;
 }
 
 // A frame with no input, at the window's new size. Called from inside
@@ -148,11 +163,11 @@ _Main_RunFrame(App_State* app_state) {
 //
 // Returns what raddebugger's frame() returns - whether to quit - which only
 // raddebugger's own main loops read. Ours is below, so: never.
-internal B32
+PRIVATE B32
 _Main_RepaintFrame(void) {
-   App_State* app_state = g_repaint_app_state;
+   App_State* app_state = _repaint_app_state;
 
-   if (app_state != 0 && !g_frame_running) {
+   if (app_state != 0 && !_frame_running) {
       // The swap chain takes no frame it was not waited for.
       Core_R_WaitForFrame();
 
@@ -172,7 +187,7 @@ _Main_RepaintFrame(void) {
 ////////////////////////////////
 //~ bgz: entry point
 
-internal void
+PRIVATE void
 _EntryPoint(CmdLine* cmdline) {
    SetThreadName(Str8Lit("MainThread"));
 
@@ -235,7 +250,7 @@ _EntryPoint(CmdLine* cmdline) {
       TempEnd(temp);
    }
 
-   g_repaint_app_state = &app_state;
+   _repaint_app_state = &app_state;
    _Main_RunFrame(&app_state);
 
    Core_WM_WindowFirstPaint(app_state.window);
@@ -266,7 +281,7 @@ _EntryPoint(CmdLine* cmdline) {
       ArenaClear(app_state.frame_arena);
    }
 
-   g_repaint_app_state = 0;
+   _repaint_app_state = 0;
 
    if (app_state.presenter_open) {
       PRES_Toggle(&app_state);

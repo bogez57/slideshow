@@ -4,10 +4,7 @@
 // See view.h. Sizes are in page units until multiplied by the scale.
 
 //- bgz: the page's measurements
-#define _VIEW_MARGIN_X      90.0f
-#define _VIEW_MARGIN_TOP    64.0f
-#define _VIEW_MARGIN_BOTTOM 56.0f
-
+// The margins are in view.h.
 #define _VIEW_TITLE_PX       54.0f
 #define _VIEW_BIG_TITLE_PX   76.0f // a slide that is only a title
 #define _VIEW_BODY_PX        31.0f
@@ -20,7 +17,7 @@
 #define _VIEW_BEHIND_SCRIM 0.62f
 
 //- bgz: colors
-internal VIEW_Colors
+VIEW_Colors
 VIEW_ColorsFromTheme(DECK_Theme theme) {
    VIEW_Colors result = {0};
    switch (theme) {
@@ -54,19 +51,19 @@ VIEW_ColorsFromTheme(DECK_Theme theme) {
 }
 
 // color, showing through by alpha as well as by its own.
-internal Vec4F32
+PRIVATE Vec4F32
 _VIEW_Faded(Vec4F32 color, F32 alpha) {
    color.w *= alpha;
    return color;
 }
 
-internal F32
+F32
 VIEW_ScaleFromDim(Vec2F32 dim) {
    F32 result = Min(dim.x / VIEW_PAGE_W, dim.y / VIEW_PAGE_H);
    return result;
 }
 
-internal Rng2F32
+Rng2F32
 VIEW_PageRectFromRect(Rng2F32 rect) {
    Vec2F32 dim = Dim2F32(rect);
    F32     scale = VIEW_ScaleFromDim(dim);
@@ -77,7 +74,7 @@ VIEW_PageRectFromRect(Rng2F32 rect) {
 
 // Where a picture that could not be loaded would have been: a box, with the
 // file's name, so a wrong path can be seen and read.
-internal void
+PRIVATE void
 _VIEW_DrawMissingPicture(TXT_Fonts* fonts, VIEW_Colors* colors, String8 path, Rng2F32 rect, F32 scale, F32 alpha) {
    Vec2F32 dim = Dim2F32(rect);
    if (dim.x > 0 && dim.y > 0) {
@@ -97,7 +94,7 @@ _VIEW_DrawMissingPicture(TXT_Fonts* fonts, VIEW_Colors* colors, String8 path, Rn
 
 // Where VIEW_DrawImageFit draws the image in rect. Nothing of a rect - all
 // zero - for an image or a rect with no size.
-internal Rng2F32
+PRIVATE Rng2F32
 _VIEW_FitRect(IMG_Image* image, Rng2F32 rect) {
    Rng2F32 result = {0};
    Vec2F32 rect_dim = Dim2F32(rect);
@@ -115,7 +112,7 @@ _VIEW_FitRect(IMG_Image* image, Rng2F32 rect) {
    return result;
 }
 
-internal void
+void
 VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha) {
    Rng2F32 fit = _VIEW_FitRect(image, rect);
    if (fit.max.x > fit.min.x) {
@@ -126,7 +123,7 @@ VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha) {
 
 // The image filling rect with its shape kept: what does not fit, at the
 // sides or at the top and bottom, is left out.
-internal void
+PRIVATE void
 _VIEW_DrawImageFill(IMG_Image* image, Rng2F32 rect, F32 alpha) {
    Vec2F32 rect_dim = Dim2F32(rect);
    F32     image_w = (F32)image->size.x;
@@ -143,7 +140,7 @@ _VIEW_DrawImageFill(IMG_Image* image, Rng2F32 rect, F32 alpha) {
    }
 }
 
-internal void
+PRIVATE void
 _VIEW_PushHit(Arena* arena, VIEW_HitList* hits, Rng2F32 rect, Rng1U64 text_range) {
    if (hits != 0 && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
       VIEW_Hit* hit = PushArray(arena, VIEW_Hit, 1);
@@ -167,7 +164,7 @@ struct _VIEW_RunsOf {
 
 // letters is a part of text, drawn at x, y in font at px. Nothing with
 // runs_of 0, or no hits to add to.
-internal void
+PRIVATE void
 _VIEW_PushRun(Arena* arena, _VIEW_RunsOf* runs_of, FNT_Tag font, F32 px, String8 text, String8 letters, F32 x, F32 y, F32 width) {
    if (runs_of != 0 && runs_of->hits != 0) {
       VIEW_Run* run = PushArray(arena, VIEW_Run, 1);
@@ -188,7 +185,7 @@ _VIEW_PushRun(Arena* arena, _VIEW_RunsOf* runs_of, FNT_Tag font, F32 px, String8
 // centered puts each line in the middle of max_width. widest_out, if not 0,
 // gets the width of the widest line drawn. runs_of, if not 0, is given a
 // run for each line drawn.
-internal F32
+PRIVATE F32
 _VIEW_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 max_width, Vec4F32 color, B32 do_draw,
             B32 centered, F32* widest_out, _VIEW_RunsOf* runs_of) {
    F32         line_height = TXT_LineHeight(font, px);
@@ -249,7 +246,7 @@ struct _VIEW_PieceList {
    _VIEW_Piece* last;
 };
 
-internal B32
+PRIVATE B32
 _VIEW_HasLater(String8 text, U64 from, String8 mark) {
    B32 result = 0;
    for (U64 i = from; i + mark.size <= text.size; i += 1) {
@@ -261,7 +258,7 @@ _VIEW_HasLater(String8 text, U64 from, String8 mark) {
    return result;
 }
 
-internal FNT_Tag
+PRIVATE FNT_Tag
 _VIEW_FontFromStyle(TXT_Fonts* fonts, U32 style) {
    FNT_Tag result = fonts->regular;
    if (style & _VIEW_Style_Code) {
@@ -277,12 +274,12 @@ _VIEW_FontFromStyle(TXT_Fonts* fonts, U32 style) {
 #define _VIEW_CodePad 0.18f
 
 // Code is a little smaller: the letters of that font are wide.
-internal F32
+PRIVATE F32
 _VIEW_PxFromStyle(U32 style, F32 px) {
    return (style & _VIEW_Style_Code) ? px * 0.9f : px;
 }
 
-internal _VIEW_PieceList
+PRIVATE _VIEW_PieceList
 _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
    _VIEW_PieceList result = {0};
 
@@ -369,7 +366,7 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
 
 // As _VIEW_Lines, for text that may have words in bold and in code. A run
 // is given for each piece: every one as tall as the line, whatever its font.
-internal F32
+PRIVATE F32
 _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, String8 text, F32 x, F32 y, F32 max_width,
                 Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out, _VIEW_RunsOf* runs_of) {
    F32             line_height = TXT_LineHeight(fonts->regular, px);
@@ -453,7 +450,7 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
 // top left down, no wider than rect, at the block's own size if it has one
 // (@size). Returns the y under the last. The caller clips: the hits given
 // are only of what is inside shown, and the runs of everything.
-internal F32
+PRIVATE F32
 _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, DECK_Box* box, U64 box_idx, Rng2F32 rect,
            Rng2F32 shown, F32 scale, F32 alpha, VIEW_HitList* hits) {
    B32 centered = (slide->layout == DECK_Layout_Center);
@@ -571,7 +568,7 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
 // _VIEW_Body leaves between two of its lines - three quarters of one, at an
 // empty line or a heading - so that where one block ends and the next
 // begins can be seen, and not so much that they stop reading as one body.
-internal F32
+PRIVATE F32
 _VIEW_BlockGap(TXT_Fonts* fonts, F32 unit) {
    return TXT_LineHeight(fonts->regular, _VIEW_BODY_PX * unit);
 }
@@ -582,7 +579,7 @@ _VIEW_BlockGap(TXT_Fonts* fonts, F32 unit) {
 // scroll how far down them the room's top is, both in pixels. Drawn, and
 // put on the box hits has last been given, if there are more words than
 // room; nothing if they fit.
-internal void
+PRIVATE void
 _VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 page, F32 words_height, F32 scroll, F32 scale,
                 F32 alpha) {
    F32 room_h = room.max.y - room.min.y;
@@ -623,7 +620,7 @@ _VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 p
    }
 }
 
-internal void
+PRIVATE void
 _VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F32 text_size, Rng2F32 room, F32 words_max_y) {
    if (hits != 0 && hits->box_count < ArrayCount(hits->boxes) && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
       VIEW_Box* box = &hits->boxes[hits->box_count];
@@ -638,7 +635,7 @@ _VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F3
 }
 
 // An @place line's rect, from parts of the page to pixels.
-internal Rng2F32
+PRIVATE Rng2F32
 _VIEW_PlacedRect(Rng2F32 page, DECK_Place* place) {
    Vec2F32 page_dim = Dim2F32(page);
    return R2F32P(page.min.x + place->rect.min.x * page_dim.x, page.min.y + place->rect.min.y * page_dim.y,
@@ -648,7 +645,7 @@ _VIEW_PlacedRect(Rng2F32 page, DECK_Place* place) {
 // The shape a picture is laid out by: its width over its height. One that is
 // not loaded - not yet, or not found - is taken to be 4:3, the shape of the
 // box that says it is missing.
-internal F32
+PRIVATE F32
 _VIEW_AspectOf(DECK_Picture* picture) {
    F32 result = 4.0f / 3.0f;
    if (IMG_IsLoaded(&picture->image) && picture->image.size.x > 0 && picture->image.size.y > 0) {
@@ -669,7 +666,7 @@ _VIEW_AspectOf(DECK_Picture* picture) {
 // from its top with from_top: beside a body, level with its first line, as
 // one picture is. A row with fewer pictures than the others has them in the
 // middle.
-internal void
+PRIVATE void
 _VIEW_PictureGrid(Rng2F32 room, F32* aspects, U64 count, F32 gap, B32 from_top, Rng2F32* out) {
    Vec2F32 dim = Dim2F32(room);
    if (count == 0 || dim.x <= 0 || dim.y <= 0) {
@@ -741,7 +738,7 @@ _VIEW_PictureGrid(Rng2F32 room, F32* aspects, U64 count, F32 gap, B32 from_top, 
 // The slide's title, in rect: from its top, no wider than it. With measure
 // 0 it is drawn, with the bar under it, and its hit and its box are given.
 // Returns the y under the bar.
-internal F32
+PRIVATE F32
 _VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, Rng2F32 rect, F32 scale, B32 is_big,
             B32 centered, F32 alpha, B32 measure, VIEW_HitList* hits) {
    // Its words at a size and in a colour of their own, where the slide says
@@ -793,7 +790,7 @@ _VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* sli
    return y + bar_gap + bar_h;
 }
 
-internal void
+void
 VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, Rng2F32 rect, F32 alpha,
                VIEW_HitList* hits) {
    Vec2F32 rect_dim = Dim2F32(rect);
@@ -847,10 +844,10 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    }
 
    //- bgz: the page
-   Rng2F32 content = R2F32P(page.min.x + _VIEW_MARGIN_X * scale,
-                            page.min.y + _VIEW_MARGIN_TOP * scale,
-                            page.max.x - _VIEW_MARGIN_X * scale,
-                            page.max.y - _VIEW_MARGIN_BOTTOM * scale);
+   Rng2F32 content = R2F32P(page.min.x + VIEW_MARGIN_X * scale,
+                            page.min.y + VIEW_MARGIN_TOP * scale,
+                            page.max.x - VIEW_MARGIN_X * scale,
+                            page.max.y - VIEW_MARGIN_BOTTOM * scale);
    F32     gutter = _VIEW_PICTURE_GUTTER * scale;
 
    //- bgz: where the title is

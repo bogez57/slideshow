@@ -47,7 +47,7 @@
 // How many of the decks opened lately get a line.
 #define _OPEN_RECENTS_SHOWN 5
 
-internal void
+PRIVATE void
 _OPEN_PushRow(Arena* arena, OPEN_Row* rows, U64* row_count, U64 row_cap, OPEN_RowKind kind, String8 label, String8 path) {
    if (*row_count < row_cap) {
       OPEN_Row* row = &rows[*row_count];
@@ -60,7 +60,7 @@ _OPEN_PushRow(Arena* arena, OPEN_Row* rows, U64* row_count, U64 row_cap, OPEN_Ro
 
 // The name a new deck in folder gets: slides.md, or with that taken
 // slides2.md, and so on.
-internal String8
+PRIVATE String8
 _OPEN_NewDeckName(Arena* arena, String8 folder) {
    String8 result = Str8Lit("slides.md");
    Temp    scratch = ScratchBegin(&arena, 1);
@@ -75,7 +75,7 @@ _OPEN_NewDeckName(Arena* arena, String8 folder) {
 }
 
 // folder\name - but a drive's own folder, C:\ , has its \ already.
-internal String8
+PRIVATE String8
 _OPEN_PathInFolder(Arena* arena, String8 folder, String8 name) {
    B32 has_slash = (folder.size != 0 && folder.str[folder.size - 1] == '\\');
    return PushStr8F(arena, "%S%s%S", folder, has_slash ? "" : "\\", name);
@@ -83,7 +83,7 @@ _OPEN_PathInFolder(Arena* arena, String8 folder, String8 name) {
 
 // The folder a folder is in. A drive's own folder is in the list of drives:
 // the empty string.
-internal String8
+PRIVATE String8
 _OPEN_FolderAbove(String8 folder) {
    String8 result = {0};
    if (folder.size > 3) {
@@ -99,7 +99,7 @@ _OPEN_FolderAbove(String8 folder) {
 
 // Makes the rows again, from the decks opened lately and the folder as it
 // is now.
-internal void
+PRIVATE void
 _OPEN_Scan(App_State* app_state) {
    Temp scratch = ScratchBegin(0, 0);
 
@@ -122,7 +122,7 @@ _OPEN_Scan(App_State* app_state) {
       for (FileInfo info = {0}; FileIterNext(scratch.arena, it, &info);) {
          if (info.props.flags & FilePropertyFlag_IsFolder) {
             Str8ListPush(scratch.arena, &folder_names, info.name);
-         } else if (_DECK_NameIsTextDeck(info.name)) {
+         } else if (DECK_NameIsTextDeck(info.name)) {
             Str8ListPush(scratch.arena, &deck_names, info.name);
          } else if (IMG_NameIsImage(info.name)) {
             picture_count += 1;
@@ -132,8 +132,8 @@ _OPEN_Scan(App_State* app_state) {
    }
    String8Array folders = Str8ArrayFromList(scratch.arena, &folder_names);
    String8Array decks = Str8ArrayFromList(scratch.arena, &deck_names);
-   _DECK_SortNames(folders);
-   _DECK_SortNames(decks);
+   DECK_SortNames(folders);
+   DECK_SortNames(decks);
 
    //- bgz: the rows
    U64       recent_count = Min(app_state->recents.count, _OPEN_RECENTS_SHOWN);
@@ -187,7 +187,7 @@ _OPEN_Scan(App_State* app_state) {
    ScratchEnd(scratch);
 }
 
-internal void
+PRIVATE void
 _OPEN_GoToFolder(App_State* app_state, String8 folder) {
    // folder may be in the arena the scan clears: the scan copies it first.
    app_state->open_folder = folder;
@@ -195,7 +195,7 @@ _OPEN_GoToFolder(App_State* app_state, String8 folder) {
    _OPEN_Scan(app_state);
 }
 
-internal void
+void
 OPEN_Show(App_State* app_state) {
    Temp scratch = ScratchBegin(0, 0);
 
@@ -228,7 +228,7 @@ struct _OPEN_Layout {
    F32     row_h;
 };
 
-internal _OPEN_Layout
+PRIVATE _OPEN_Layout
 _OPEN_LayoutFromWindowDim(Vec2F32 window_dim) {
    _OPEN_Layout result = {0};
 
@@ -257,7 +257,7 @@ _OPEN_LayoutFromWindowDim(Vec2F32 window_dim) {
 //~ bgz: input
 
 // What a click on a row does.
-internal void
+PRIVATE void
 _OPEN_PickRow(App_State* app_state, OPEN_Row* row) {
    Temp scratch = ScratchBegin(0, 0);
 
@@ -313,7 +313,7 @@ _OPEN_PickRow(App_State* app_state, OPEN_Row* row) {
 
 // The keys, and what comes to the window rather than to the panel: a close, a
 // file dropped. The clicks and the wheel are the panel's (OPEN_Build).
-internal void
+void
 OPEN_Input(App_State* app_state, Vec2F32 window_dim) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;
@@ -364,7 +364,7 @@ OPEN_Input(App_State* app_state, Vec2F32 window_dim) {
 // and asked for clicks first.
 
 // A strip across the panel with a line of text in it: the title, the foot.
-internal void
+PRIVATE void
 _OPEN_BuildBar(Rng2F32 rect, F32 pad, String8 color_tag, String8 text, char* key) {
    UI_SetNextPrefWidth(UI_Px(Dim2F32(rect).x, 1));
    UI_SetNextPrefHeight(UI_Px(Dim2F32(rect).y, 1));
@@ -384,7 +384,7 @@ _OPEN_BuildBar(Rng2F32 rect, F32 pad, String8 color_tag, String8 text, char* key
 // end is what tells decks apart: the decks opened lately are often in
 // folders deep under the same one, and cut off at the right, every one of
 // their lines reads the same. A path that fits is as it is.
-internal String8
+PRIVATE String8
 _OPEN_FitPath(Arena* arena, FNT_Tag font, F32 px, String8 path, F32 room) {
    String8 result = path;
    if (TXT_Width(font, px, path) > room) {
@@ -406,7 +406,7 @@ _OPEN_FitPath(Arena* arena, FNT_Tag font, F32 px, String8 path, F32 room) {
    return result;
 }
 
-internal void
+void
 OPEN_Build(App_State* app_state, Vec2F32 window_dim) {
    _OPEN_Layout layout = _OPEN_LayoutFromWindowDim(window_dim);
    F32          ui = layout.ui;

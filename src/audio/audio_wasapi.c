@@ -4,7 +4,7 @@
 // The two functions of audio_device.h. This is the only file in the program
 // that includes Windows' audio headers or calls them: to play sound through
 // something else, write another file with the same two functions and
-// include that one in main.c instead.
+// include that one at the end of audio.c instead.
 //
 // A thread opens the sound card Windows has as its default, in shared mode,
 // and is woken by Windows each time the card has room for more sound. It
@@ -62,7 +62,7 @@ struct AUD_Device {
 
 // Plays through the default card until it stops answering or the device is
 // closed. Returns at once if there is no card to open.
-internal void
+PRIVATE void
 _AUD_PlayThroughCard(AUD_Device* device) {
    IMMDeviceEnumerator* enumerator = 0;
    IMMDevice*           card = 0;
@@ -188,7 +188,7 @@ _AUD_PlayThroughCard(AUD_Device* device) {
    if (wake_event != 0) CloseHandle(wake_event);
 }
 
-internal void
+PRIVATE void
 _AUD_DeviceThread(void* p) {
    AUD_Device* device = (AUD_Device*)p;
    SetThreadNameF("audio");
@@ -229,7 +229,7 @@ _AUD_DeviceThread(void* p) {
    }
 }
 
-internal AUD_Device*
+AUD_Device*
 AUD_DeviceOpen(Arena* arena, AUD_DeviceFunction* function, void* user) {
    AUD_Device* device = PushArray(arena, AUD_Device, 1);
    device->function = function;
@@ -241,7 +241,7 @@ AUD_DeviceOpen(Arena* arena, AUD_DeviceFunction* function, void* user) {
    return device;
 }
 
-internal void
+void
 AUD_DeviceClose(AUD_Device* device) {
    if (device == 0) {
       return;

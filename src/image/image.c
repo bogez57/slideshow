@@ -7,9 +7,9 @@
 // being decoded (IMG_LoadFromPath) everything stb_image asks for is pushed
 // on this one, nothing it frees is given back, and the caller lets go of it
 // all at once when the pixels have gone to the renderer.
-global Arena* _img_decode_arena = 0;
+PRIVATE Arena* _img_decode_arena = 0;
 
-internal void*
+PRIVATE void*
 _IMG_DecodeRealloc(void* old, U64 old_size, U64 new_size) {
    void* result = ArenaPush(_img_decode_arena, new_size, 16, 0);
    if (old != 0) {
@@ -36,7 +36,7 @@ _IMG_DecodeRealloc(void* old, U64 old_size, U64 new_size) {
 # pragma clang diagnostic pop
 #endif
 
-internal B32
+B32
 IMG_NameIsImage(String8 name) {
    B32 result = 0;
 
@@ -56,7 +56,7 @@ IMG_NameIsImage(String8 name) {
    return result;
 }
 
-internal IMG_Image
+IMG_Image
 IMG_LoadFromPath(String8 path) {
    IMG_Image result = {0};
    Temp      scratch = ScratchBegin(0, 0);
@@ -107,13 +107,13 @@ IMG_LoadFromPath(String8 path) {
    return result;
 }
 
-internal B32
+B32
 IMG_IsLoaded(IMG_Image* image) {
    B32 result = !Core_R_HandleMatch(image->texture, Core_R_HandleZero());
    return result;
 }
 
-internal void
+void
 IMG_Release(IMG_Image* image) {
    if (IMG_IsLoaded(image)) {
       Core_R_Tex2DRelease(image->texture);

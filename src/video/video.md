@@ -34,7 +34,7 @@ video_ffmpeg.c             the decoder there is, done with FFmpeg
 ## Changing the decoder
 
 1. Write `video_<other>.c` that defines the functions in `video_decoder.h`.
-2. In `src\main.c`, include it in place of `video/video_ffmpeg.c`.
+2. At the end of `video.c`, include it in place of `video_ffmpeg.c`.
 3. In `build.bat`, take out the `ffmpeg` block and what it adds to the
    include path and the link line, and add what the new one needs.
 

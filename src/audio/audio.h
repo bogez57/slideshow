@@ -1,3 +1,5 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: audio
 //
@@ -21,9 +23,6 @@
 // A voice is something that plays: a function the mixer calls, on the
 // audio thread, whenever the device wants more sound.
 
-#ifndef AUDIO_H
-#define AUDIO_H
-
 #define AUD_SAMPLE_RATE 48000
 #define AUD_CHANNELS    2
 
@@ -38,16 +37,14 @@ typedef struct AUD_Voice AUD_Voice;
 // Starts the device. Before any voice is added. With no sound card, or one
 // that can't be opened, everything works as it does with one - voices are
 // called at the same pace - and nothing is heard.
-internal void AUD_Init(void);
-internal void AUD_Shutdown(void);
+void AUD_Init(void);
+void AUD_Shutdown(void);
 
 // 0 if there are too many voices already (AUD_MAX_VOICES).
-internal AUD_Voice* AUD_VoiceAdd(AUD_VoiceFunction* function, void* user);
+AUD_Voice* AUD_VoiceAdd(AUD_VoiceFunction* function, void* user);
 // When this returns the function is not running and will not be called again.
-internal void AUD_VoiceRemove(AUD_Voice* voice);
+void AUD_VoiceRemove(AUD_Voice* voice);
 
 // Everything, at once. Muted, voices are still called: they keep their time.
-internal B32  AUD_IsMuted(void);
-internal void AUD_SetMuted(B32 muted);
-
-#endif // AUDIO_H
+B32  AUD_IsMuted(void);
+void AUD_SetMuted(B32 muted);

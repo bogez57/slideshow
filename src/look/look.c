@@ -28,8 +28,8 @@
 // The piece the cursor is in: 0 if there is none whose words can be sized -
 // no slides, or a slide with neither a title nor a body. The deck has to be
 // of the text as it is: FR_SyncDeck first.
-internal B32
-_LOOK_Target(App_State* app_state, U64* slide_idx_out, DECK_PlaceKind* kind_out, U64* idx_out) {
+B32
+LOOK_Target(App_State* app_state, U64* slide_idx_out, DECK_PlaceKind* kind_out, U64* idx_out) {
    DECK_Deck* deck = app_state->deck;
    ED_Editor* editor = app_state->editor;
    if (editor == 0 || deck->slide_count == 0) {
@@ -79,8 +79,8 @@ _LOOK_Target(App_State* app_state, U64* slide_idx_out, DECK_PlaceKind* kind_out,
    return result;
 }
 
-internal DECK_Look*
-_LOOK_Of(DECK_Slide* slide, DECK_PlaceKind kind, U64 idx) {
+DECK_Look*
+LOOK_Of(DECK_Slide* slide, DECK_PlaceKind kind, U64 idx) {
    DECK_Look* result = &slide->title_look;
    if (kind == DECK_PlaceKind_Text && idx < slide->box_count) {
       result = &slide->boxes[idx].look;
@@ -89,36 +89,36 @@ _LOOK_Of(DECK_Slide* slide, DECK_PlaceKind kind, U64 idx) {
 }
 
 // Writes the piece's @size line, or with has_size 0 takes it out.
-internal void
+PRIVATE void
 _LOOK_WriteSize(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 idx, B32 has_size, F32 size) {
-   DECK_Look* look = _LOOK_Of(slide, kind, idx);
+   DECK_Look* look = LOOK_Of(slide, kind, idx);
    if (has_size) {
       Temp    scratch = ScratchBegin(0, 0);
       String8 line = PushStr8F(scratch.arena, "@size %S %.2f", DECK_PlaceName(kind), size);
-      _EDIT_PutLineFor(editor, slide, kind, idx, look->has_size, look->size_line, line);
+      EDIT_PutLineFor(editor, slide, kind, idx, look->has_size, look->size_line, line);
       ScratchEnd(scratch);
    } else if (look->has_size) {
-      _EDIT_TakeOutLine(editor, look->size_line);
+      EDIT_TakeOutLine(editor, look->size_line);
    }
 }
 
 // Writes the piece's @color line, or with nothing for a colour takes it out.
-internal void
+PRIVATE void
 _LOOK_WriteColor(ED_Editor* editor, DECK_Slide* slide, DECK_PlaceKind kind, U64 idx, String8 color) {
-   DECK_Look* look = _LOOK_Of(slide, kind, idx);
+   DECK_Look* look = LOOK_Of(slide, kind, idx);
    if (color.size != 0) {
       Temp    scratch = ScratchBegin(0, 0);
       String8 line = PushStr8F(scratch.arena, "@color %S %S", DECK_PlaceName(kind), color);
-      _EDIT_PutLineFor(editor, slide, kind, idx, look->has_color, look->color_line, line);
+      EDIT_PutLineFor(editor, slide, kind, idx, look->has_color, look->color_line, line);
       ScratchEnd(scratch);
    } else if (look->has_color) {
-      _EDIT_TakeOutLine(editor, look->color_line);
+      EDIT_TakeOutLine(editor, look->color_line);
    }
 }
 
 // The size a step from size is: direction over 0 larger, under 0 smaller.
 // To two places, as it is written, and never the same as it was.
-internal F32
+PRIVATE F32
 _LOOK_SteppedSize(F32 size, S32 direction) {
    F32 result = (direction > 0) ? size * _LOOK_STEP : size / _LOOK_STEP;
    result = (F32)(S32)(result * 100.0f + 0.5f) / 100.0f;
@@ -129,11 +129,11 @@ _LOOK_SteppedSize(F32 size, S32 direction) {
 // The size the piece's words are drawn at, as a part of their usual size:
 // what the preview drew them at, if it is of the text as it is and of this
 // slide, else what the piece's @size line says, else 1.
-internal F32
+PRIVATE F32
 _LOOK_SizeNow(App_State* app_state, U64 slide_idx, DECK_PlaceKind kind, U64 idx) {
-   DECK_Look* look = _LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx);
+   DECK_Look* look = LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx);
    F32        result = look->has_size ? look->size : 1.0f;
-   if (!look->has_size && _PLACE_BoxesAreGood(app_state) && slide_idx == app_state->slide_idx) {
+   if (!look->has_size && PLACE_BoxesAreGood(app_state) && slide_idx == app_state->slide_idx) {
       for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
          VIEW_Box* box = &app_state->preview_boxes[i];
          if (box->kind == kind && box->idx == idx && box->text_size > 0) {
@@ -146,20 +146,20 @@ _LOOK_SizeNow(App_State* app_state, U64 slide_idx, DECK_PlaceKind kind, U64 idx)
 
 // After a change: the deck made again from the text, so that what is drawn
 // this frame is of the text as it now is.
-internal void
+PRIVATE void
 _LOOK_Changed(App_State* app_state) {
    app_state->editor->last_input_us = NowTimeUS();
    FR_SyncDeck(app_state);
    app_state->slide_idx = DECK_SlideFromTextPos(app_state->deck, app_state->editor->cursor);
 }
 
-internal void
+void
 LOOK_StepSize(App_State* app_state, S32 direction) {
    FR_SyncDeck(app_state);
    U64            slide_idx = 0;
    DECK_PlaceKind kind = DECK_PlaceKind_Title;
    U64            idx = 0;
-   if (!_LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
+   if (!LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
       FR_Notice(app_state, Str8Lit("Put the cursor in the words to size: a title, or a line of the body"));
       return;
    }
@@ -178,13 +178,13 @@ LOOK_StepSize(App_State* app_state, S32 direction) {
    _LOOK_Changed(app_state);
 }
 
-internal void
+void
 LOOK_SetColor(App_State* app_state, U64 named_idx) {
    FR_SyncDeck(app_state);
    U64            slide_idx = 0;
    DECK_PlaceKind kind = DECK_PlaceKind_Title;
    U64            idx = 0;
-   if (!_LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
+   if (!LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
       FR_Notice(app_state, Str8Lit("Put the cursor in the words to colour: a title, or a line of the body"));
       return;
    }
@@ -193,7 +193,7 @@ LOOK_SetColor(App_State* app_state, U64 named_idx) {
    _LOOK_Changed(app_state);
 }
 
-internal String8
+String8
 LOOK_Describe(Arena* arena, App_State* app_state, B32 is_color) {
    U64            slide_idx = 0;
    DECK_PlaceKind kind = DECK_PlaceKind_Title;
@@ -203,8 +203,8 @@ LOOK_Describe(Arena* arena, App_State* app_state, B32 is_color) {
    // Only of a deck that is of the text as it is: this is asked while the
    // screen is built, when it may not be.
    if (app_state->editor != 0 && app_state->parsed_edit_count == app_state->editor->edit_count &&
-       _LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
-      DECK_Look* look = _LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx);
+       LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
+      DECK_Look* look = LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx);
       // Whose words first, and short: what there is to click takes most of
       // the row, and the rest of this is cut off where it does not fit.
       char*      whose = (kind == DECK_PlaceKind_Title) ? "title" : "this block";
@@ -226,15 +226,15 @@ LOOK_Describe(Arena* arena, App_State* app_state, B32 is_color) {
    return result;
 }
 
-internal B32
+B32
 LOOK_ColorIsNow(App_State* app_state, U64 named_idx) {
    U64            slide_idx = 0;
    DECK_PlaceKind kind = DECK_PlaceKind_Title;
    U64            idx = 0;
    B32            result = 0;
    if (app_state->editor != 0 && app_state->parsed_edit_count == app_state->editor->edit_count &&
-       _LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
-      DECK_Look* look = _LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx);
+       LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
+      DECK_Look* look = LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx);
       if (named_idx >= DECK_NAMED_COLOR_COUNT) {
          result = !look->has_color;
       } else if (look->has_color) {
@@ -245,20 +245,20 @@ LOOK_ColorIsNow(App_State* app_state, U64 named_idx) {
    return result;
 }
 
-internal B32
+B32
 LOOK_SizeIsUsual(App_State* app_state) {
    U64            slide_idx = 0;
    DECK_PlaceKind kind = DECK_PlaceKind_Title;
    U64            idx = 0;
    B32            result = 0;
    if (app_state->editor != 0 && app_state->parsed_edit_count == app_state->editor->edit_count &&
-       _LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
-      result = !_LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx)->has_size;
+       LOOK_Target(app_state, &slide_idx, &kind, &idx)) {
+      result = !LOOK_Of(&app_state->deck->slides[slide_idx], kind, idx)->has_size;
    }
    return result;
 }
 
-internal void
+void
 LOOK_Input(App_State* app_state) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;

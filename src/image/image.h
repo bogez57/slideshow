@@ -1,3 +1,5 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: images
 //
@@ -9,9 +11,6 @@
 // pic, pnm. A jpg's EXIF rotation is not read - a photo taken sideways shows
 // sideways.
 
-#ifndef IMAGE_H
-#define IMAGE_H
-
 // The longest side a texture can have (Direct3D 11's limit).
 #define IMG_MAX_DIM 16384
 
@@ -22,13 +21,11 @@ struct IMG_Image {
 };
 
 // Whether a file name ends in an extension IMG_LoadFromPath can decode.
-internal B32 IMG_NameIsImage(String8 name);
+B32 IMG_NameIsImage(String8 name);
 
 // Reads and decodes the file and makes a texture of it. On failure the image
 // is zero, and why is printed.
-internal IMG_Image IMG_LoadFromPath(String8 path);
+IMG_Image IMG_LoadFromPath(String8 path);
 
-internal B32  IMG_IsLoaded(IMG_Image* image);
-internal void IMG_Release(IMG_Image* image);
-
-#endif // IMAGE_H
+B32  IMG_IsLoaded(IMG_Image* image);
+void IMG_Release(IMG_Image* image);

@@ -1,3 +1,5 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: caret
 //
@@ -5,10 +7,8 @@
 // What it is and how it works is at the top of caret.c; here is what the
 // rest of the program calls.
 
-#ifndef CARET_H
-#define CARET_H
+typedef struct App_State App_State;
 
-// The edit screen's words, typed into on the slide: caret\caret.c.
 // CARET_Click: a press at pos in the preview - 1 if it was in the title's
 // words or a block's, and the cursor has gone to the letter there
 // (keeps_mark: selecting from where it was). CARET_ScrollBlock: a block's
@@ -31,30 +31,28 @@
 // if what was done to them changed the cursor or a scroll; CARET_BuildLook,
 // last, the box of the piece the cursor is in, the selection and the caret:
 // 1 if it built that box.
-internal B32  CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark);
-internal void CARET_ScrollBlock(App_State* app_state, U64 block_idx, F32 delta);
-internal B32  CARET_DragTo(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos);
-internal void CARET_SelectWord(App_State* app_state);
-internal void CARET_SelectLine(App_State* app_state, DECK_PlaceKind kind, U64 idx);
-internal void CARET_BeforeDraw(App_State* app_state);
-internal B32  CARET_Follow(App_State* app_state, VIEW_HitList* hits);
-internal void CARET_KeepRuns(App_State* app_state, VIEW_HitList* hits);
-internal void CARET_BeforeLayout(App_State* app_state);
-internal B32  CARET_BuildBars(App_State* app_state, F32 ui, B32 interactive);
-internal B32  CARET_BuildRooms(App_State* app_state, F32 ui, B32 interactive);
-internal B32  CARET_BuildLook(App_State* app_state, F32 ui);
+B32  CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark);
+void CARET_ScrollBlock(App_State* app_state, U64 block_idx, F32 delta);
+B32  CARET_DragTo(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos);
+void CARET_SelectWord(App_State* app_state);
+void CARET_SelectLine(App_State* app_state, DECK_PlaceKind kind, U64 idx);
+void CARET_BeforeDraw(App_State* app_state);
+B32  CARET_Follow(App_State* app_state, VIEW_HitList* hits);
+void CARET_KeepRuns(App_State* app_state, VIEW_HitList* hits);
+void CARET_BeforeLayout(App_State* app_state);
+B32  CARET_BuildBars(App_State* app_state, F32 ui, B32 interactive);
+B32  CARET_BuildRooms(App_State* app_state, F32 ui, B32 interactive);
+B32  CARET_BuildLook(App_State* app_state, F32 ui);
 // Presenting: a block with more words than room is moved through by the
 // wheel over it, as far as it was in the edit screen when the slide came
 // up. CARET_PresentAfterDraw, after CARET_BeforeDraw and the slide's
 // VIEW_DrawSlide, takes the scroll off the slide and keeps its boxes;
 // CARET_PresentWheel is the wheel at pos, delta notches down - 1 if it was
 // over such a block.
-internal void CARET_PresentAfterDraw(App_State* app_state, VIEW_HitList* hits);
-internal B32  CARET_PresentWheel(App_State* app_state, Vec2F32 pos, F32 delta);
+void CARET_PresentAfterDraw(App_State* app_state, VIEW_HitList* hits);
+B32  CARET_PresentWheel(App_State* app_state, Vec2F32 pos, F32 delta);
 // Another drawing of a slide - the one fading out, the presenter window's -
 // with its blocks as far down their words as where it is shown, or was
 // when it was left; CARET_AfterDrawOf takes that off again.
-internal void CARET_BeforeDrawOf(App_State* app_state, U64 slide_idx);
-internal void CARET_AfterDrawOf(App_State* app_state, U64 slide_idx);
-
-#endif // CARET_H
+void CARET_BeforeDrawOf(App_State* app_state, U64 slide_idx);
+void CARET_AfterDrawOf(App_State* app_state, U64 slide_idx);

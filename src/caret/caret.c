@@ -43,13 +43,13 @@ struct _CARET_Place {
 };
 
 // Whether the runs kept from the last frame are of the text as it is.
-internal B32
+PRIVATE B32
 _CARET_RunsAreGood(App_State* app_state) {
-   return _PLACE_BoxesAreGood(app_state);
+   return PLACE_BoxesAreGood(app_state);
 }
 
 // How far into the run the text position pos is, across: pos is in it.
-internal F32
+PRIVATE F32
 _CARET_XInRun(String8 text, VIEW_Run* run, U64 pos) {
    String8 before = Str8Substr(text, R1U64(run->text_range.min, Min(pos, run->text_range.max)));
    return run->rect.min.x + TXT_Width(run->font, run->px, before);
@@ -57,7 +57,7 @@ _CARET_XInRun(String8 text, VIEW_Run* run, U64 pos) {
 
 // Where on the slide the text position pos is, by runs. Not found when the
 // line pos is on has nothing drawn and is not an empty line of a block.
-internal _CARET_Place
+PRIVATE _CARET_Place
 _CARET_PlaceFromPos(App_State* app_state, VIEW_Run* runs, U64 run_count, U64 pos) {
    _CARET_Place result = {0};
    String8      text = ED_Text(app_state->editor);
@@ -126,7 +126,7 @@ _CARET_PlaceFromPos(App_State* app_state, VIEW_Run* runs, U64 run_count, U64 pos
       U64            slide_idx = 0;
       DECK_PlaceKind kind = DECK_PlaceKind_Title;
       U64            idx = 0;
-      if (is_blank && _LOOK_Target(app_state, &slide_idx, &kind, &idx) && kind == DECK_PlaceKind_Text && idx == above->idx) {
+      if (is_blank && LOOK_Target(app_state, &slide_idx, &kind, &idx) && kind == DECK_PlaceKind_Text && idx == above->idx) {
          F32 left = above->rect.min.x;
          for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
             VIEW_Box* box = &app_state->preview_boxes[i];
@@ -150,7 +150,7 @@ _CARET_PlaceFromPos(App_State* app_state, VIEW_Run* runs, U64 run_count, U64 pos
 
 // The text position of the letter nearest to x in the run: before it or
 // after it, whichever edge is nearer.
-internal U64
+PRIVATE U64
 _CARET_PosInRun(String8 text, VIEW_Run* run, F32 x) {
    U64 result = run->text_range.min;
    if (x >= run->rect.max.x) {
@@ -176,10 +176,10 @@ _CARET_PosInRun(String8 text, VIEW_Run* run, F32 x) {
 
 // The box of the title's or of a block's words that pos is in the room of:
 // 0 for none, or when what is there is a picture. As a press there would
-// pick (_PLACE_BoxAt), and past that the room under a block's words.
-internal VIEW_Box*
+// pick (PLACE_BoxAt), and past that the room under a block's words.
+PRIVATE VIEW_Box*
 _CARET_WordsBoxAt(App_State* app_state, Vec2F32 pos) {
-   VIEW_Box* result = _PLACE_BoxAt(app_state, pos);
+   VIEW_Box* result = PLACE_BoxAt(app_state, pos);
    if (result == 0) {
       for (U64 i = 0; i < app_state->preview_box_count; i += 1) {
          VIEW_Box* box = &app_state->preview_boxes[i];
@@ -198,7 +198,7 @@ _CARET_WordsBoxAt(App_State* app_state, Vec2F32 pos) {
 // in the box. keeps_mark: the mark stays where it is, so what is between it
 // and the cursor is selected. whole_lines: only of the lines that show whole,
 // if any do.
-internal B32
+PRIVATE B32
 _CARET_ClickIn(App_State* app_state, VIEW_Box* box, Vec2F32 pos, B32 keeps_mark, B32 whole_lines) {
    B32 result = 0;
    if (box != 0) {
@@ -243,7 +243,7 @@ _CARET_ClickIn(App_State* app_state, VIEW_Box* box, Vec2F32 pos, B32 keeps_mark,
    return result;
 }
 
-internal B32
+B32
 CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
    if (!_CARET_RunsAreGood(app_state) || !Contains2F32(app_state->preview_page, pos)) {
       return 0;
@@ -265,7 +265,7 @@ CARET_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
 // of fifteen lines went past in under a second, too fast to stop on a line.
 // Now at the edge three of its lines a second, and ten more for each line
 // height further out, as far as forty.
-internal B32
+B32
 CARET_DragTo(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos) {
    B32 result = 0;
    if (_CARET_RunsAreGood(app_state)) {
@@ -313,14 +313,14 @@ CARET_DragTo(App_State* app_state, DECK_PlaceKind kind, U64 idx, Vec2F32 pos) {
 
 // 1 for a byte of a word: a letter, a digit, or part of a letter of several
 // bytes. What a double click takes in.
-internal B32
+PRIVATE B32
 _CARET_IsWordByte(U8 byte) {
    return ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') || byte == '_' || byte == '\'' ||
            byte >= 0x80);
 }
 
 // A double click: the word the cursor is in or beside is selected.
-internal void
+void
 CARET_SelectWord(App_State* app_state) {
    ED_Editor* editor = app_state->editor;
    String8    text = ED_Text(editor);
@@ -338,7 +338,7 @@ CARET_SelectWord(App_State* app_state) {
 // A triple click: the words of the line of text the cursor is in - a
 // paragraph, an item of a list, the title - as the slide has them, so
 // without the "- " or "# " they start with in the text.
-internal void
+void
 CARET_SelectLine(App_State* app_state, DECK_PlaceKind kind, U64 idx) {
    ED_Editor* editor = app_state->editor;
    String8    text = ED_Text(editor);
@@ -371,7 +371,7 @@ CARET_SelectLine(App_State* app_state, DECK_PlaceKind kind, U64 idx) {
 
 // The scroll of the block a box is of: its own if it is placed, the one
 // the others share if not.
-internal F32*
+PRIVATE F32*
 _CARET_ScrollOf(App_State* app_state, DECK_Slide* slide, U64 block_idx) {
    F32* result = &app_state->caret_body_scroll;
    if (block_idx < slide->box_count && slide->boxes[block_idx].place.is_set) {
@@ -380,7 +380,7 @@ _CARET_ScrollOf(App_State* app_state, DECK_Slide* slide, U64 block_idx) {
    return result;
 }
 
-internal void
+void
 CARET_ScrollBlock(App_State* app_state, U64 block_idx, F32 delta) {
    if (_CARET_RunsAreGood(app_state)) {
       // Some three lines of the body a notch (down the words when over 0).
@@ -394,7 +394,7 @@ CARET_ScrollBlock(App_State* app_state, U64 block_idx, F32 delta) {
 
 // The most a box's block can be moved down its words, in page units: none
 // when they fit. scale is pixels to a page unit.
-internal F32
+PRIVATE F32
 _CARET_MaxScroll(VIEW_Box* box, F32 scale) {
    F32 track_h = box->bar_track.max.y - box->bar_track.min.y;
    return (scale > 0 && box->words_height > track_h) ? (box->words_height - track_h) / scale : 0.0f;
@@ -402,7 +402,7 @@ _CARET_MaxScroll(VIEW_Box* box, F32 scale) {
 
 // The scroll of box's block for its bar's thumb with its top grab pixels
 // above mouse_y.
-internal void
+PRIVATE void
 _CARET_DragBar(App_State* app_state, VIEW_Box* box, F32 mouse_y) {
    DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
    F32         scale = VIEW_ScaleFromDim(Dim2F32(app_state->preview_page));
@@ -412,7 +412,7 @@ _CARET_DragBar(App_State* app_state, VIEW_Box* box, F32 mouse_y) {
    *_CARET_ScrollOf(app_state, slide, box->idx) = Clamp(0.0f, part, 1.0f) * _CARET_MaxScroll(box, scale);
 }
 
-internal void
+void
 CARET_BeforeLayout(App_State* app_state) {
    if (!app_state->caret_bar_drag) {
       return;
@@ -437,7 +437,7 @@ CARET_BeforeLayout(App_State* app_state) {
    }
 }
 
-internal B32
+B32
 CARET_BuildBars(App_State* app_state, F32 ui, B32 interactive) {
    B32 result = 0;
    if (!_CARET_RunsAreGood(app_state)) {
@@ -495,7 +495,7 @@ CARET_BuildBars(App_State* app_state, F32 ui, B32 interactive) {
    return result;
 }
 
-internal B32
+B32
 CARET_BuildRooms(App_State* app_state, F32 ui, B32 interactive) {
    B32 result = 0;
    if (!interactive || !_CARET_RunsAreGood(app_state)) {
@@ -513,7 +513,7 @@ CARET_BuildRooms(App_State* app_state, F32 ui, B32 interactive) {
       // A click here goes to the nearest letter, but the mouse is the bar
       // that text is typed at only right at the words (place\place.c) - and
       // while words are selected by a drag from there, wherever it goes.
-      B32 is_selecting = (app_state->place_drag.state == EDIT_PlaceDragState_Selecting);
+      B32 is_selecting = (app_state->place_drag.state == PLACE_DragState_Selecting);
       room->hover_cursor = (is_selecting || PLACE_IsAtWords(app_state, box->kind, box->idx, Core_WM_MouseFromWindow(app_state->window)))
                                ? WM_Cursor_IBar
                                : WM_Cursor_Pointer;
@@ -535,7 +535,7 @@ CARET_BuildRooms(App_State* app_state, F32 ui, B32 interactive) {
    return result;
 }
 
-internal void
+void
 CARET_PresentAfterDraw(App_State* app_state, VIEW_HitList* hits) {
    CARET_AfterDrawOf(app_state, app_state->slide_idx);
    MemoryCopyArray(app_state->present_boxes, hits->boxes);
@@ -543,7 +543,7 @@ CARET_PresentAfterDraw(App_State* app_state, VIEW_HitList* hits) {
    app_state->present_page = hits->page;
 }
 
-internal B32
+B32
 CARET_PresentWheel(App_State* app_state, Vec2F32 pos, F32 delta) {
    B32 result = 0;
    if (app_state->slide_idx >= app_state->deck->slide_count || app_state->caret_scroll_slide != app_state->slide_idx) {
@@ -570,7 +570,7 @@ CARET_PresentWheel(App_State* app_state, Vec2F32 pos, F32 delta) {
 
 // Scrolls put on a slide's blocks: the shared one, and one for each placed
 // block. 0 for scrolls takes them all off.
-internal void
+PRIVATE void
 _CARET_PutScroll(DECK_Slide* slide, F32 body_scroll, F32* scrolls) {
    slide->body_scroll = (scrolls != 0) ? body_scroll : 0;
    for (U64 i = 0; i < slide->box_count; i += 1) {
@@ -578,7 +578,7 @@ _CARET_PutScroll(DECK_Slide* slide, F32 body_scroll, F32* scrolls) {
    }
 }
 
-internal void
+void
 CARET_BeforeDraw(App_State* app_state) {
    DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
    // Another slide starts from its top. The one left keeps how far down it
@@ -594,7 +594,7 @@ CARET_BeforeDraw(App_State* app_state) {
    _CARET_PutScroll(slide, app_state->caret_body_scroll, app_state->caret_scroll);
 }
 
-internal void
+void
 CARET_BeforeDrawOf(App_State* app_state, U64 slide_idx) {
    if (slide_idx < app_state->deck->slide_count) {
       DECK_Slide* slide = &app_state->deck->slides[slide_idx];
@@ -607,7 +607,7 @@ CARET_BeforeDrawOf(App_State* app_state, U64 slide_idx) {
    }
 }
 
-internal void
+void
 CARET_AfterDrawOf(App_State* app_state, U64 slide_idx) {
    if (slide_idx < app_state->deck->slide_count) {
       _CARET_PutScroll(&app_state->deck->slides[slide_idx], 0, 0);
@@ -615,7 +615,7 @@ CARET_AfterDrawOf(App_State* app_state, U64 slide_idx) {
 }
 
 // The runs of a hit list, as an array on arena.
-internal VIEW_Run*
+PRIVATE VIEW_Run*
 _CARET_RunsFromHits(Arena* arena, VIEW_HitList* hits, U64* count_out) {
    VIEW_Run* result = PushArray(arena, VIEW_Run, Max(hits->run_count, 1));
    U64       count = 0;
@@ -633,7 +633,7 @@ _CARET_RunsFromHits(Arena* arena, VIEW_HitList* hits, U64* count_out) {
 // is about. 0 for none.
 // Whether the cursor is on the line of one of the slide's pictures: the
 // line of its path, ![](name).
-internal B32
+PRIVATE B32
 _CARET_CursorIsOnPictureLine(App_State* app_state) {
    B32        result = 0;
    DECK_Deck* deck = app_state->deck;
@@ -655,7 +655,7 @@ _CARET_CursorIsOnPictureLine(App_State* app_state) {
    return result;
 }
 
-internal VIEW_Box*
+PRIVATE VIEW_Box*
 _CARET_BoxOfCursor(App_State* app_state, VIEW_Box* boxes, U64 box_count, VIEW_Run* runs, U64 run_count, _CARET_Place* caret_out) {
    *caret_out = _CARET_PlaceFromPos(app_state, runs, run_count, app_state->editor->cursor);
    DECK_PlaceKind kind = caret_out->kind;
@@ -664,11 +664,11 @@ _CARET_BoxOfCursor(App_State* app_state, VIEW_Box* boxes, U64 box_count, VIEW_Ru
    // A picture's line is the picture's, not the words': the edit screen
    // puts the box around the picture (EDIT_Build). Without this, the line
    // of a picture just clicked or dropped would have the box around the
-   // title or a block of words instead - the piece _LOOK_Target picks for
+   // title or a block of words instead - the piece LOOK_Target picks for
    // a line that is not about words - and the picture none.
    if (!has_piece && !_CARET_CursorIsOnPictureLine(app_state)) {
       U64 slide_idx = 0;
-      has_piece = (_LOOK_Target(app_state, &slide_idx, &kind, &idx) && slide_idx == app_state->slide_idx);
+      has_piece = (LOOK_Target(app_state, &slide_idx, &kind, &idx) && slide_idx == app_state->slide_idx);
    }
    VIEW_Box* result = 0;
    for (U64 i = 0; i < box_count && has_piece; i += 1) {
@@ -679,7 +679,7 @@ _CARET_BoxOfCursor(App_State* app_state, VIEW_Box* boxes, U64 box_count, VIEW_Ru
    return result;
 }
 
-internal B32
+B32
 CARET_Follow(App_State* app_state, VIEW_HitList* hits) {
    DECK_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
    ED_Editor*  editor = app_state->editor;
@@ -763,13 +763,13 @@ CARET_Follow(App_State* app_state, VIEW_HitList* hits) {
    return result;
 }
 
-internal void
+void
 CARET_KeepRuns(App_State* app_state, VIEW_HitList* hits) {
    // On the arena the hits are kept on, which the layout has just cleared.
    app_state->preview_runs = _CARET_RunsFromHits(app_state->preview_hits_arena, hits, &app_state->preview_run_count);
 }
 
-internal B32
+B32
 CARET_BuildLook(App_State* app_state, F32 ui) {
    DECK_Deck*  deck = app_state->deck;
    ED_Editor*  editor = app_state->editor;
@@ -804,7 +804,7 @@ CARET_BuildLook(App_State* app_state, F32 ui) {
          if (is_on) {
             VIEW_Colors colors = VIEW_ColorsFromTheme(deck->theme);
             Vec4F32     color = (kind == DECK_PlaceKind_Title) ? colors.title : colors.body;
-            DECK_Look*  look = _LOOK_Of(slide, kind, idx);
+            DECK_Look*  look = LOOK_Of(slide, kind, idx);
             if (look->has_color) {
                color = look->color;
             }

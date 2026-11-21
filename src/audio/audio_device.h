@@ -1,13 +1,12 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: audio: what the mixer asks of a device
 //
 // The mixer (audio.c) is written against these two functions and nothing
 // else. A file that defines them is a device: audio_wasapi.c is the one
 // there is. To play sound through something else, write another such file
-// and include it in main.c in place of that one.
-
-#ifndef AUDIO_DEVICE_H
-#define AUDIO_DEVICE_H
+// and include it at the end of audio.c in place of that one.
 
 // Called on the device's own thread whenever it wants more sound: to write
 // frame_count frames (AUD_CHANNELS of F32 each, AUD_SAMPLE_RATE to the
@@ -22,8 +21,6 @@ typedef struct AUD_Device AUD_Device; // the device's own
 // still called, at the pace sound would be played at, and what it writes is
 // thrown away - so that whatever keeps time by the sound still does. A card
 // that turns up later is used.
-internal AUD_Device* AUD_DeviceOpen(Arena* arena, AUD_DeviceFunction* function, void* user);
+AUD_Device* AUD_DeviceOpen(Arena* arena, AUD_DeviceFunction* function, void* user);
 // When this returns the function is not running and will not be called again.
-internal void        AUD_DeviceClose(AUD_Device* device);
-
-#endif // AUDIO_DEVICE_H
+void        AUD_DeviceClose(AUD_Device* device);

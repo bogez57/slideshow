@@ -1,3 +1,5 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: deck
 //
@@ -85,9 +87,6 @@
 //
 // A slide with only a title shows it large, in the middle. A slide with only
 // a picture shows it filling the window, as a folder of images does.
-
-#ifndef DECK_H
-#define DECK_H
 
 #define DECK_MAX_BULLET_LEVEL 3
 
@@ -316,92 +315,98 @@ struct DECK_Deck {
 };
 
 // As written after @theme and @layout.
-internal String8 DECK_ThemeName(DECK_Theme theme);
-internal String8 DECK_LayoutName(DECK_Layout layout);
+String8 DECK_ThemeName(DECK_Theme theme);
+String8 DECK_LayoutName(DECK_Layout layout);
 // As written after @place.
-internal String8 DECK_PlaceName(DECK_PlaceKind kind);
+String8 DECK_PlaceName(DECK_PlaceKind kind);
 
 // The colours with names, idx under DECK_NAMED_COLOR_COUNT.
-internal DECK_NamedColor DECK_NamedColorFromIdx(U64 idx);
+DECK_NamedColor DECK_NamedColorFromIdx(U64 idx);
 // The colour an @color line's word is: a name, or #rrggbb (or #rgb). 0 if
 // it is neither.
-internal B32 DECK_ColorFromString(String8 string, Vec4F32* color_out);
+B32 DECK_ColorFromString(String8 string, Vec4F32* color_out);
 
 // Never 0. A folder that is missing, or has no images in it, gives a deck
 // with no slides.
-internal DECK_Deck* DECK_OpenFolder(String8 folder);
+DECK_Deck* DECK_OpenFolder(String8 folder);
 
 // Reads a deck from a text file. Never 0: a file that is missing or has
 // nothing in it gives a deck with no slides.
-internal DECK_Deck* DECK_OpenFile(String8 file);
+DECK_Deck* DECK_OpenFile(String8 file);
 
 // A deck from text that is already in memory - the editor's, which may not be
 // what is in the file. The deck keeps its own copy. Line endings must be \n
 // alone. file is where the text is from: pictures are found from its folder.
-internal DECK_Deck* DECK_OpenText(String8 text, String8 file);
+DECK_Deck* DECK_OpenText(String8 text, String8 file);
 
 // The slide a position in the deck's text is on: the last that begins at or
 // before it. 0 if there are no slides.
-internal U64 DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos);
+U64 DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos);
 
 // Moves the pictures src has loaded over to the pictures of dst's slides that show the
 // same file, so that a deck read again does not decode them again. src is
 // left with none of the ones moved. A file src could not load is marked as
 // not loadable in dst too. What no slide of dst takes, of a file a slide of
 // dst still shows, goes to dst's spares.
-internal void DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src);
+void DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src);
 
 // Opens whichever kind of deck path is: a text file, a folder, or one image
 // file. An image opens the folder it is in, and first_slide_out is given its
 // slide's index, which is where to start. For the others that is 0.
-internal DECK_Deck* DECK_OpenPath(String8 path, U64* first_slide_out);
+DECK_Deck* DECK_OpenPath(String8 path, U64* first_slide_out);
 
 // Whether there is anything on the slide but its picture.
-internal B32 DECK_SlideHasText(DECK_Slide* slide);
+B32 DECK_SlideHasText(DECK_Slide* slide);
 
 // The names of the image and video files in a folder and in the folders directly inside
 // it, as a slide's ![](...) line would name them from a text file there:
 // "hills.png", "pictures/bars.jpg". In order of name, on arena.
-internal String8Array DECK_PictureNamesFromFolder(Arena* arena, String8 folder);
+String8Array DECK_PictureNamesFromFolder(Arena* arena, String8 folder);
+
+// Whether a file name ends in an extension a text deck can have: .md or
+// .txt.
+B32 DECK_NameIsTextDeck(String8 name);
+
+// Sorts names in place, as a folder's slides are shown: by name, ignoring
+// case, with runs of digits in order of their number (2 before 10).
+void DECK_SortNames(String8Array names);
 
 // Releases every image the deck has loaded, and the deck itself.
-internal void DECK_Close(DECK_Deck* deck);
+void DECK_Close(DECK_Deck* deck);
 
 // Loads the pictures of a slide that are not loaded yet, and releases those
 // of slides more than one away from it: for the slide that is showing. A
 // slide is drawn with whichever of its pictures are loaded (VIEW_DrawSlide).
-internal void DECK_LoadSlide(DECK_Deck* deck, U64 slide_idx);
+void DECK_LoadSlide(DECK_Deck* deck, U64 slide_idx);
 
 // The same, but releases nothing: for a second look at a slide close to the
 // one DECK_LoadSlide was last asked for (the presenter's next slide).
-internal void DECK_LoadSlideOnly(DECK_Deck* deck, U64 slide_idx);
+void DECK_LoadSlideOnly(DECK_Deck* deck, U64 slide_idx);
 
 // The first of a slide's videos that is open - as long as its image is
 // loaded - else 0: the one whose time and state stand for the slide's.
-internal VID_Video* DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx);
+VID_Video* DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx);
 // Every open video of a slide, into videos, which has room for
 // DECK_MAX_PICTURES. Returns how many.
-internal U64 DECK_VideosFromSlide(DECK_Deck* deck, U64 slide_idx, VID_Video** videos);
+U64 DECK_VideosFromSlide(DECK_Deck* deck, U64 slide_idx, VID_Video** videos);
 // Whether any of the slide's pictures is a video file, open or not. Not one
 // that could not be opened.
-internal B32 DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx);
+B32 DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx);
 // Whether all of them that are video files are open: none still to load.
-internal B32 DECK_SlideVideosAreOpen(DECK_Deck* deck, U64 slide_idx);
+B32 DECK_SlideVideosAreOpen(DECK_Deck* deck, U64 slide_idx);
 // Once a frame: every open video's VID_Update, and spares kept for longer
 // than DECK_SPARE_SECONDS released.
-internal void DECK_UpdateVideos(DECK_Deck* deck);
+void DECK_UpdateVideos(DECK_Deck* deck);
 
 // Lets go of a picture and loads it again: for a file that has changed, or
 // whose path now leads somewhere else (below).
-internal void DECK_ReopenPicture(DECK_Picture* picture);
+void DECK_ReopenPicture(DECK_Picture* picture);
 
 // From now on, a slide whose picture is at path is shown the file at
 // stands_for instead - until DECK_ClearPathAlias(path). For a file that is
 // on its way to path and not there yet (copy\copy.c). For every deck: a
 // deck read again from its text keeps showing the same file. Slides that
-// have the picture loaded already are not changed: DECK_ReopenImage does
+// have the picture loaded already are not changed: DECK_ReopenPicture does
 // that.
-internal void DECK_SetPathAlias(String8 path, String8 stands_for);
-internal void DECK_ClearPathAlias(String8 path);
-
-#endif // DECK_H
+void DECK_SetPathAlias(String8 path, String8 stands_for);
+void DECK_ClearPathAlias(String8 path);

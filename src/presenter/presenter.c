@@ -34,7 +34,7 @@
 // main window's. A slide the presenter asks for is gone to by the
 // presentation's input, the next frame, so that it fades as the others do.
 
-internal void
+void
 PRES_Toggle(App_State* app_state) {
    if (app_state->presenter_open) {
       Core_R_WindowUnequip(app_state->presenter_window, app_state->presenter_window_eqp);
@@ -60,7 +60,7 @@ PRES_Toggle(App_State* app_state) {
    }
 }
 
-internal void
+void
 PRES_Input(App_State* app_state) {
    if (!app_state->presenter_open) {
       return;
@@ -111,7 +111,7 @@ struct _PRES_Slide {
    F32        bar;          // a bar this tall along its bottom, in the box's border colour. 0: none
 };
 
-internal void
+PRIVATE void
 _PRES_DrawSlide(UI_Box* box, void* user_data) {
    _PRES_Slide* s = (_PRES_Slide*)user_data;
    App_State*   app_state = s->app_state;
@@ -136,7 +136,7 @@ _PRES_DrawSlide(UI_Box* box, void* user_data) {
 }
 
 // A slide in a box of its own at rect; box_out, if not 0, is given the box.
-internal _PRES_Slide*
+PRIVATE _PRES_Slide*
 _PRES_BuildSlide(App_State* app_state, U64 slide_idx, Rng2F32 rect, B32 is_clicked, UI_Box** box_out, char* key) {
    _PRES_Slide* s = PushArray(UI_BuildArena(), _PRES_Slide, 1);
    s->app_state = app_state;
@@ -153,7 +153,7 @@ _PRES_BuildSlide(App_State* app_state, U64 slide_idx, Rng2F32 rect, B32 is_click
 
 // A button: a box with its word in the middle, lighter under the mouse. One
 // that is not enabled is faint, and takes no clicks. 1 when pressed.
-internal B32
+PRIVATE B32
 _PRES_Button(App_State* app_state, Rng2F32 rect, String8 label, F32 px, B32 is_enabled, char* key) {
    TXT_Fonts* fonts = &app_state->fonts;
 
@@ -184,7 +184,7 @@ _PRES_Button(App_State* app_state, Rng2F32 rect, String8 label, F32 px, B32 is_e
 
 // The clock stopped, or let run on from where it stopped: the time it stood
 // still is not counted.
-internal void
+PRIVATE void
 _PRES_ToggleClock(App_State* app_state) {
    U64 now_us = NowTimeUS();
    if (app_state->presenter_paused_us != 0) {
@@ -195,7 +195,7 @@ _PRES_ToggleClock(App_State* app_state) {
    }
 }
 
-internal void
+PRIVATE void
 _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
    DECK_Deck* deck = app_state->deck;
    TXT_Fonts* fonts = &app_state->fonts;
@@ -485,7 +485,7 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
    FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(0, 0, window_dim.x, window_dim.y), "###presenter background");
 }
 
-internal void
+void
 PRES_Draw(App_State* app_state) {
    Vec2F32 window_dim = Dim2F32(Core_WM_ClientRectFromWindow(app_state->presenter_window));
 

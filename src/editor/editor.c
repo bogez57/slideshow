@@ -15,7 +15,7 @@
 // Text as the editor keeps it, from text as it comes from a file or the
 // clipboard: no \r, four spaces for a tab (the font cache has no width for
 // one), and no other control characters. On arena.
-internal String8
+PRIVATE String8
 _ED_CleanText(Arena* arena, String8 string) {
    String8 result = {0};
    result.str = PushArrayNoZero(arena, U8, string.size * 4 + 1);
@@ -38,7 +38,7 @@ _ED_CleanText(Arena* arena, String8 string) {
    return result;
 }
 
-internal void
+PRIVATE void
 _ED_Reserve(ED_Editor* editor, U64 size) {
    if (size > editor->cap) {
       U64 cap = Max(editor->cap * 2, 4096);
@@ -59,7 +59,7 @@ _ED_Reserve(ED_Editor* editor, U64 size) {
 ////////////////////////////////
 //~ bgz: undo
 
-internal ED_Snapshot
+PRIVATE ED_Snapshot
 _ED_SnapshotMake(ED_Editor* editor) {
    ED_Snapshot result = {0};
    result.text = PushArrayNoZero(editor->history_arena, U8, editor->size + 1);
@@ -70,7 +70,7 @@ _ED_SnapshotMake(ED_Editor* editor) {
    return result;
 }
 
-internal void
+PRIVATE void
 _ED_SnapshotRestore(ED_Editor* editor, ED_Snapshot* snapshot) {
    _ED_Reserve(editor, snapshot->size);
    MemoryCopy(editor->text, snapshot->text, snapshot->size);
@@ -85,7 +85,7 @@ _ED_SnapshotRestore(ED_Editor* editor, ED_Snapshot* snapshot) {
 // change places.
 #define _ED_HISTORY_TIDY_SIZE MB(4)
 
-internal void
+PRIVATE void
 _ED_HistoryTidy(ED_Editor* editor) {
    U64 wanted_size = 0;
    for (U64 i = 0; i < editor->undo_count; i += 1) wanted_size += editor->undo[i].size + 1;
@@ -112,7 +112,7 @@ _ED_HistoryTidy(ED_Editor* editor) {
 }
 
 // Pushes onto one of the two stacks, letting go of the oldest when full.
-internal void
+PRIVATE void
 _ED_SnapshotPush(ED_Snapshot* stack, U64* count, ED_Snapshot snapshot) {
    if (*count == ED_MAX_UNDO) {
       MemoryCopy(stack, stack + 1, sizeof(stack[0]) * (ED_MAX_UNDO - 1));
@@ -122,14 +122,14 @@ _ED_SnapshotPush(ED_Snapshot* stack, U64* count, ED_Snapshot snapshot) {
    *count += 1;
 }
 
-internal void
+PRIVATE void
 _ED_SnapshotsClear(ED_Snapshot* stack, U64* count) {
    UnusedVariable(stack);
    *count = 0;
 }
 
 // Called before every change to the text, with what kind it will be.
-internal void
+PRIVATE void
 _ED_BeforeEdit(ED_Editor* editor, ED_EditKind kind) {
    U64 now_us = NowTimeUS();
 
@@ -147,7 +147,7 @@ _ED_BeforeEdit(ED_Editor* editor, ED_EditKind kind) {
 
 // What undo and redo both do: from is taken from, and what is there now is
 // put on to.
-internal void
+PRIVATE void
 _ED_StepHistory(ED_Editor* editor, ED_Snapshot* from, U64* from_count, ED_Snapshot* to, U64* to_count) {
    if (*from_count != 0) {
       _ED_SnapshotPush(to, to_count, _ED_SnapshotMake(editor));
@@ -166,23 +166,23 @@ _ED_StepHistory(ED_Editor* editor, ED_Snapshot* from, U64* from_count, ED_Snapsh
 ////////////////////////////////
 //~ bgz: positions
 
-internal U64
+PRIVATE U64
 _ED_SelectionMin(ED_Editor* editor) {
    return Min(editor->cursor, editor->mark);
 }
 
-internal U64
+PRIVATE U64
 _ED_SelectionMax(ED_Editor* editor) {
    return Max(editor->cursor, editor->mark);
 }
 
 // A byte in the middle of a UTF-8 character, which the cursor never rests on.
-internal B32
+PRIVATE B32
 _ED_IsContinuation(U8 c) {
    return (c & 0xC0) == 0x80;
 }
 
-internal U64
+PRIVATE U64
 _ED_PrevChar(ED_Editor* editor, U64 pos) {
    if (pos > 0) {
       pos -= 1;
@@ -191,7 +191,7 @@ _ED_PrevChar(ED_Editor* editor, U64 pos) {
    return pos;
 }
 
-internal U64
+PRIVATE U64
 _ED_NextChar(ED_Editor* editor, U64 pos) {
    if (pos < editor->size) {
       pos += 1;
@@ -202,33 +202,33 @@ _ED_NextChar(ED_Editor* editor, U64 pos) {
 
 // The start and end of the line pos is on, as the file has lines. The end is
 // where its \n is, or the end of the text.
-internal U64
+PRIVATE U64
 _ED_LineStart(ED_Editor* editor, U64 pos) {
    while (pos > 0 && editor->text[pos - 1] != '\n') pos -= 1;
    return pos;
 }
 
-internal U64
+PRIVATE U64
 _ED_LineEnd(ED_Editor* editor, U64 pos) {
    while (pos < editor->size && editor->text[pos] != '\n') pos += 1;
    return pos;
 }
 
-internal B32
+PRIVATE B32
 _ED_IsWordChar(U8 c) {
    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c >= 0x80;
 }
 
 // The start of the word before pos, and the end of the one after: what
 // Ctrl+Left and Ctrl+Right move to.
-internal U64
+PRIVATE U64
 _ED_WordLeft(ED_Editor* editor, U64 pos) {
    while (pos > 0 && !_ED_IsWordChar(editor->text[pos - 1])) pos -= 1;
    while (pos > 0 && _ED_IsWordChar(editor->text[pos - 1])) pos -= 1;
    return pos;
 }
 
-internal U64
+PRIVATE U64
 _ED_WordRight(ED_Editor* editor, U64 pos) {
    while (pos < editor->size && !_ED_IsWordChar(editor->text[pos])) pos += 1;
    while (pos < editor->size && _ED_IsWordChar(editor->text[pos])) pos += 1;
@@ -236,7 +236,7 @@ _ED_WordRight(ED_Editor* editor, U64 pos) {
 }
 
 // How many characters there are from start to pos.
-internal U64
+PRIVATE U64
 _ED_ColumnCount(ED_Editor* editor, U64 start, U64 pos) {
    U64 result = 0;
    for (U64 i = start; i < pos && i < editor->size; i += 1) {
@@ -253,7 +253,7 @@ _ED_ColumnCount(ED_Editor* editor, U64 start, U64 pos) {
 // Fills rows, if it is not 0, and returns how many there are. A line longer
 // than max_columns is cut into rows after the last space that fits, or at
 // max_columns if it has none. A space a row is cut after stays on that row.
-internal U64
+PRIVATE U64
 _ED_FillRows(ED_Editor* editor, U64 max_columns, ED_Row* rows) {
    U64 count = 0;
    U64 line_start = 0;
@@ -300,7 +300,7 @@ _ED_FillRows(ED_Editor* editor, U64 max_columns, ED_Row* rows) {
    return count;
 }
 
-internal ED_RowArray
+PRIVATE ED_RowArray
 _ED_Layout(Arena* arena, ED_Editor* editor, U64 max_columns) {
    ED_RowArray result = {0};
    max_columns = Max(max_columns, 8);
@@ -312,7 +312,7 @@ _ED_Layout(Arena* arena, ED_Editor* editor, U64 max_columns) {
 
 // The row pos is drawn on: the last that starts at or before it. A position
 // where a long line is cut is the start of the row after the cut.
-internal U64
+PRIVATE U64
 _ED_RowFromPos(ED_RowArray rows, U64 pos) {
    U64 result = 0;
    for (U64 i = 0; i < rows.count; i += 1) {
@@ -328,7 +328,7 @@ _ED_RowFromPos(ED_RowArray rows, U64 pos) {
 // The position at a column of a row, or the row's last if it is shorter. On
 // a row a line is cut after, the last is before the space at its end: after
 // it is the next row's first.
-internal U64
+PRIVATE U64
 _ED_PosFromRowColumn(ED_Editor* editor, ED_Row row, U64 column) {
    U64 last = row.end;
    if (!row.line_end && last > row.start) {
@@ -352,7 +352,7 @@ struct _ED_Metrics {
    U64     rows_visible; // that fit down, whole
 };
 
-internal _ED_Metrics
+PRIVATE _ED_Metrics
 _ED_MetricsFromBox(ED_Box box) {
    _ED_Metrics result = {0};
    F32         pad = box.px * _ED_PAD;
@@ -368,7 +368,7 @@ _ED_MetricsFromBox(ED_Box box) {
    return result;
 }
 
-internal U64
+PRIVATE U64
 _ED_PosFromPoint(ED_Editor* editor, ED_RowArray rows, _ED_Metrics* metrics, Vec2F32 point) {
    F32 y = point.y - metrics->text_rect.min.y + editor->scroll_y;
    F32 x = point.x - metrics->text_rect.min.x;
@@ -387,7 +387,7 @@ _ED_PosFromPoint(ED_Editor* editor, ED_RowArray rows, _ED_Metrics* metrics, Vec2
 
 // Puts string in place of start to end, and moves the cursor and mark as the
 // text around them moves. Nothing else: no undo, no selection.
-internal void
+PRIVATE void
 _ED_Splice(ED_Editor* editor, U64 start, U64 end, String8 string) {
    start = Min(start, editor->size);
    end = Clamp(start, end, editor->size);
@@ -419,7 +419,7 @@ _ED_Splice(ED_Editor* editor, U64 start, U64 end, String8 string) {
    editor->scroll_to_cursor = 1;
 }
 
-internal void
+void
 ED_Insert(ED_Editor* editor, String8 string, ED_EditKind kind) {
    U64 start = _ED_SelectionMin(editor);
    U64 end = _ED_SelectionMax(editor);
@@ -431,7 +431,7 @@ ED_Insert(ED_Editor* editor, String8 string, ED_EditKind kind) {
    editor->mark = editor->cursor;
 }
 
-internal void
+void
 ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start, U64 select_end) {
    U64 line_start = _ED_LineStart(editor, editor->cursor);
    U64 line_end = _ED_LineEnd(editor, editor->cursor);
@@ -460,7 +460,7 @@ ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start, U64 select_en
    editor->cursor = string_start + Min(select_end, string.size);
 }
 
-internal void
+void
 ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string) {
    start = Min(start, editor->size);
    end = Clamp(start, end, editor->size);
@@ -471,7 +471,7 @@ ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string) {
    editor->mark = editor->cursor;
 }
 
-internal void
+void
 ED_WrapSelection(ED_Editor* editor, String8 mark, String8 placeholder) {
    U64 start = Min(editor->cursor, editor->mark);
    U64 end = Max(editor->cursor, editor->mark);
@@ -504,7 +504,7 @@ ED_WrapSelection(ED_Editor* editor, String8 mark, String8 placeholder) {
    editor->scroll_to_cursor = 1;
 }
 
-internal void
+void
 ED_SetCursor(ED_Editor* editor, U64 pos) {
    editor->cursor = Min(pos, editor->size);
    editor->mark = editor->cursor;
@@ -513,7 +513,7 @@ ED_SetCursor(ED_Editor* editor, U64 pos) {
 }
 
 // Removes the selection, or with none, from the cursor to pos.
-internal void
+PRIVATE void
 _ED_Delete(ED_Editor* editor, U64 pos) {
    U64 start = _ED_SelectionMin(editor);
    U64 end = _ED_SelectionMax(editor);
@@ -531,7 +531,7 @@ _ED_Delete(ED_Editor* editor, U64 pos) {
 
 // How long the bullet at the start of a line is, with the spaces before it
 // and the one after: "  - " is 4. 0 if the line is not a bullet.
-internal U64
+PRIVATE U64
 _ED_BulletPrefixSize(ED_Editor* editor, U64 line_start, U64 line_end) {
    U64 pos = line_start;
    while (pos < line_end && editor->text[pos] == ' ') pos += 1;
@@ -549,7 +549,7 @@ _ED_BulletPrefixSize(ED_Editor* editor, U64 line_start, U64 line_end) {
 // Return. On a bullet it starts the next bullet, at the same level - and on
 // a bullet with nothing in it, takes the bullet away instead, which is how a
 // list is left.
-internal void
+PRIVATE void
 _ED_Newline(ED_Editor* editor) {
    B32 handled = 0;
 
@@ -599,7 +599,7 @@ _ED_Newline(ED_Editor* editor) {
 
 // Tab and Shift+Tab. On a bullet they move it a level in or out, wherever in
 // the line the cursor is. Elsewhere Tab types two spaces.
-internal void
+PRIVATE void
 _ED_Tab(ED_Editor* editor, B32 is_shift) {
    U64 line_start = _ED_LineStart(editor, editor->cursor);
    U64 line_end = _ED_LineEnd(editor, editor->cursor);
@@ -625,7 +625,7 @@ _ED_Tab(ED_Editor* editor, B32 is_shift) {
 ////////////////////////////////
 //~ bgz: files
 
-internal void
+PRIVATE void
 _ED_Read(ED_Editor* editor) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 data = DataFromFilePath(scratch.arena, editor->file);
@@ -663,7 +663,7 @@ _ED_Read(ED_Editor* editor) {
    ScratchEnd(scratch);
 }
 
-internal ED_Editor*
+ED_Editor*
 ED_Open(String8 file) {
    Arena*     arena = ArenaAlloc();
    ED_Editor* editor = PushArray(arena, ED_Editor, 1);
@@ -676,24 +676,24 @@ ED_Open(String8 file) {
    return editor;
 }
 
-internal void
+void
 ED_Close(ED_Editor* editor) {
    ArenaRelease(editor->history_arena);
    ArenaRelease(editor->history_spare);
    ArenaRelease(editor->arena); // the editor itself is on it
 }
 
-internal String8
+String8
 ED_Text(ED_Editor* editor) {
    return Str8(editor->text, editor->size);
 }
 
-internal B32
+B32
 ED_HasUnsavedChanges(ED_Editor* editor) {
    return editor->edit_count != editor->saved_count;
 }
 
-internal B32
+B32
 ED_Save(ED_Editor* editor) {
    String8 data = ED_Text(editor);
 
@@ -723,7 +723,7 @@ ED_Save(ED_Editor* editor) {
    return result;
 }
 
-internal B32
+B32
 ED_FileHasChanged(ED_Editor* editor) {
    // A file that is gone for a moment - some editors save by writing a new
    // file and renaming it - reads as modified at 0, and has not changed.
@@ -732,7 +732,7 @@ ED_FileHasChanged(ED_Editor* editor) {
    return result;
 }
 
-internal void
+void
 ED_Reload(ED_Editor* editor) {
    _ED_Read(editor);
 }
@@ -741,7 +741,7 @@ ED_Reload(ED_Editor* editor) {
 //~ bgz: input
 
 // Moves the cursor to pos, taking the mark along unless selecting.
-internal void
+PRIVATE void
 _ED_MoveTo(ED_Editor* editor, U64 pos, B32 is_selecting) {
    editor->cursor = Min(pos, editor->size);
    if (!is_selecting) {
@@ -752,7 +752,7 @@ _ED_MoveTo(ED_Editor* editor, U64 pos, B32 is_selecting) {
 
 // Up or down by row_delta rows, keeping to the column the cursor was in
 // before the first such move - through rows too short to have it.
-internal void
+PRIVATE void
 _ED_MoveRows(ED_Editor* editor, ED_RowArray rows, S64 row_delta, B32 is_selecting) {
    U64 row_idx = _ED_RowFromPos(rows, editor->cursor);
    if (editor->want_column < 0) {
@@ -767,7 +767,7 @@ _ED_MoveRows(ED_Editor* editor, ED_RowArray rows, S64 row_delta, B32 is_selectin
    editor->want_column = want_column;
 }
 
-internal void
+void
 ED_Press(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos, B32 is_selecting) {
    _ED_Metrics metrics = _ED_MetricsFromBox(box);
    ED_RowArray rows = _ED_Layout(arena, editor, metrics.columns);
@@ -776,7 +776,7 @@ ED_Press(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos, B32 is_select
    editor->last_input_us = NowTimeUS();
 }
 
-internal void
+void
 ED_Drag(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos) {
    _ED_Metrics metrics = _ED_MetricsFromBox(box);
    ED_RowArray rows = _ED_Layout(arena, editor, metrics.columns);
@@ -788,14 +788,14 @@ ED_Drag(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos) {
    }
 }
 
-internal void
+void
 ED_Wheel(ED_Editor* editor, ED_Box box, F32 notches) {
    _ED_Metrics metrics = _ED_MetricsFromBox(box);
    // Three rows a notch. Kept to the text when it is next drawn.
    editor->scroll_y += notches * metrics.row_h * 3.0f;
 }
 
-internal void
+void
 ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, ED_Box box) {
    _ED_Metrics metrics = _ED_MetricsFromBox(box);
    B32         had_input = 0;
@@ -976,7 +976,7 @@ ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, ED_Box box) {
 ////////////////////////////////
 //~ bgz: drawing
 
-internal void
+void
 ED_Draw(ED_Editor* editor, Arena* arena, ED_Box box) {
    _ED_Metrics metrics = _ED_MetricsFromBox(box);
    ED_RowArray rows = _ED_Layout(arena, editor, metrics.columns);

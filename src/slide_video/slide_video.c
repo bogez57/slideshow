@@ -30,9 +30,7 @@
 //
 // Nothing here knows how a video is decoded: it uses video.h only.
 
-#define FR_VIDEO_STEP_SECONDS 5.0
-// How long the presentation shows the strip after a key of the video's.
-#define FR_VIDEO_STRIP_SECONDS 2.5f
+#define _SVID_STEP_SECONDS 5.0
 
 typedef struct _SVID_Strip _SVID_Strip;
 struct _SVID_Strip {
@@ -44,7 +42,7 @@ struct _SVID_Strip {
    F32     time_x; // where the time is written
 };
 
-internal String8
+PRIVATE String8
 _SVID_Clock(Arena* arena, F64 time_s) {
    U64     seconds = (U64)Max(time_s, 0.0);
    String8 result = PushStr8F(arena, "%llu:%02llu", (unsigned long long)(seconds / 60), (unsigned long long)(seconds % 60));
@@ -53,7 +51,7 @@ _SVID_Clock(Arena* arena, F64 time_s) {
 
 // Where the strip's parts are, for a video drawn at video_rect. ui: how many
 // pixels a unit of the sizes is.
-internal _SVID_Strip
+PRIVATE _SVID_Strip
 _SVID_StripFromRect(App_State* app_state, Rng2F32 video_rect, F32 ui) {
    _SVID_Strip result = {0};
    TXT_Fonts*     fonts = &app_state->fonts;
@@ -101,12 +99,12 @@ _SVID_StripFromRect(App_State* app_state, Rng2F32 video_rect, F32 ui) {
 // of the strip are in its own boxes, with whole pixels: as the hand-drawn
 // strip was.
 
-internal String8
+PRIVATE String8
 _SVID_PartKey(Arena* arena, U64 id, char* part) {
    return PushStr8F(arena, "###video %llu %s", (unsigned long long)id, part);
 }
 
-internal B32
+B32
 SVID_BuildStripHits(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id) {
    _SVID_Strip strip = _SVID_StripFromRect(app_state, video_rect, ui);
    UI_BoxFlags    flags = UI_BoxFlag_MouseClickable;
@@ -148,7 +146,7 @@ SVID_BuildStripHits(App_State* app_state, VID_Video* video, Rng2F32 video_rect, 
 
 // Whether the mouse is on a part of the strip: its click box hovered, or -
 // with no click boxes - under the mouse.
-internal B32
+PRIVATE B32
 _SVID_PartIsHot(U64 id, char* part, Rng2F32 rect, B32 interactive) {
    B32 result = 0;
    if (interactive) {
@@ -165,13 +163,13 @@ _SVID_PartIsHot(U64 id, char* part, Rng2F32 rect, B32 interactive) {
 
 // A box of the strip's, at rect in the window, inside the strip's box,
 // which starts at origin.
-internal UI_Box*
+PRIVATE UI_Box*
 _SVID_StripBox(UI_BoxFlags flags, Rng2F32 rect, Vec2F32 origin, U64 id, char* part) {
    UI_SetNextRect(R2F32P(rect.min.x - origin.x, rect.min.y - origin.y, rect.max.x - origin.x, rect.max.y - origin.y));
    return UI_BuildBoxFromStringf(flags, "###video look %llu %s", (unsigned long long)id, part);
 }
 
-internal void
+void
 SVID_BuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rect, F32 ui, U64 id, B32 interactive) {
    _SVID_Strip strip = _SVID_StripFromRect(app_state, video_rect, ui);
    Temp           scratch = ScratchBegin(0, 0);
@@ -246,7 +244,7 @@ SVID_BuildStripLook(App_State* app_state, VID_Video* video, Rng2F32 video_rect, 
 }
 
 // Whether any of videos is playing.
-internal B32
+PRIVATE B32
 _FR_AnyPlaying(VID_Video** videos, U64 count) {
    B32 result = 0;
    for (U64 i = 0; i < count; i += 1) {
@@ -255,7 +253,7 @@ _FR_AnyPlaying(VID_Video** videos, U64 count) {
    return result;
 }
 
-internal B32
+B32
 SVID_SlideIsPlaying(DECK_Deck* deck, U64 slide_idx) {
    VID_Video* videos[DECK_MAX_PICTURES] = {0};
    U64        count = DECK_VideosFromSlide(deck, slide_idx, videos);
@@ -266,7 +264,7 @@ SVID_SlideIsPlaying(DECK_Deck* deck, U64 slide_idx) {
 // is playing, else all played. Not by the first alone: a shorter one that
 // has reached its end while the others go on would have K start it over,
 // and pause nothing.
-internal void
+void
 SVID_ToggleSlide(DECK_Deck* deck, U64 slide_idx) {
    VID_Video* videos[DECK_MAX_PICTURES] = {0};
    U64        count = DECK_VideosFromSlide(deck, slide_idx, videos);
@@ -278,7 +276,7 @@ SVID_ToggleSlide(DECK_Deck* deck, U64 slide_idx) {
 
 // The keys of the videos of the slide showing, while presenting: one key
 // is for all of them. Returns whether one was pressed.
-internal B32
+B32
 SVID_Keys(App_State* app_state) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;
@@ -304,14 +302,14 @@ SVID_Keys(App_State* app_state) {
    B32 was_playing = _FR_AnyPlaying(videos, count);
    while (Core_WM_KeyPress(events, window, 0, WM_Key_J)) {
       for (U64 i = 0; i < count; i += 1) {
-         VID_Seek(videos[i], VID_Position(videos[i]) - FR_VIDEO_STEP_SECONDS);
+         VID_Seek(videos[i], VID_Position(videos[i]) - _SVID_STEP_SECONDS);
          VID_SetPlaying(videos[i], was_playing);
       }
       result = 1;
    }
    while (Core_WM_KeyPress(events, window, 0, WM_Key_L)) {
       for (U64 i = 0; i < count; i += 1) {
-         VID_Seek(videos[i], VID_Position(videos[i]) + FR_VIDEO_STEP_SECONDS);
+         VID_Seek(videos[i], VID_Position(videos[i]) + _SVID_STEP_SECONDS);
          VID_SetPlaying(videos[i], was_playing);
       }
       result = 1;
@@ -323,7 +321,7 @@ SVID_Keys(App_State* app_state) {
 // Once a frame, after the frame's input: starts the video of the slide that
 // has come up in the presentation, stops the one of the slide that has
 // gone, and moves every open video on.
-internal void
+void
 SVID_Update(App_State* app_state) {
    DECK_Deck* deck = app_state->deck;
 

@@ -41,7 +41,7 @@ struct COPY_Job {
    B32 said_waiting; // that the copy is whole and waits for the video to stop
 };
 
-internal void
+PRIVATE void
 _COPY_Thread(void* p) {
    COPY_Job* job = (COPY_Job*)p;
    SetThreadNameF("file copy");
@@ -95,7 +95,7 @@ _COPY_Thread(void* p) {
 }
 
 // Whether dst is being copied to already.
-internal B32
+B32
 COPY_IsCopyingTo(App_State* app_state, String8 dst) {
    B32 result = 0;
    for (COPY_Job* job = app_state->first_copy; job != 0; job = job->next) {
@@ -109,7 +109,7 @@ COPY_IsCopyingTo(App_State* app_state, String8 dst) {
 
 // Starts copying src to dst, and has dst stand for src in the deck until
 // the copy has taken over.
-internal void
+void
 COPY_Start(App_State* app_state, String8 src, String8 dst) {
    Arena*    arena = ArenaAlloc();
    COPY_Job* job = PushArray(arena, COPY_Job, 1);
@@ -128,7 +128,7 @@ COPY_Start(App_State* app_state, String8 src, String8 dst) {
 }
 
 // Whether a copy is still being made.
-internal B32
+B32
 COPY_IsBusy(App_State* app_state) {
    B32 result = 0;
    for (COPY_Job* job = app_state->first_copy; job != 0; job = job->next) {
@@ -143,7 +143,7 @@ COPY_IsBusy(App_State* app_state) {
    return result;
 }
 
-internal void
+PRIVATE void
 _COPY_Release(COPY_Job* job) {
    ThreadJoin(job->thread, max_U64);
    MutexRelease(job->mutex);
@@ -152,7 +152,7 @@ _COPY_Release(COPY_Job* job) {
 
 // Once a frame: a copy that is through is taken over to, if its video is not
 // playing, or given up on.
-internal void
+void
 COPY_Update(App_State* app_state) {
    DECK_Deck* deck = app_state->deck;
 
@@ -225,7 +225,7 @@ COPY_Update(App_State* app_state) {
 
 // At exit: every copy still going is stopped, and what it had written is
 // deleted.
-internal void
+void
 COPY_CancelAll(App_State* app_state) {
    for (COPY_Job* job = app_state->first_copy, *next = 0; job != 0; job = next) {
       next = job->next;

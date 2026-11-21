@@ -101,7 +101,7 @@ struct VID_Video {
 
 // The audio thread, wanting more sound: from the ring, as much as there is.
 // What it does not write stays silence.
-internal void
+PRIVATE void
 _VID_Voice(void* user, F32* samples, U64 frame_count, F64 delay_s) {
    VID_Video* video = (VID_Video*)user;
 
@@ -132,7 +132,7 @@ _VID_Voice(void* user, F32* samples, U64 frame_count, F64 delay_s) {
    }
 }
 
-internal B32
+B32
 VID_NameIsVideo(String8 name) {
    B32 result = 0;
 
@@ -152,7 +152,7 @@ VID_NameIsVideo(String8 name) {
    return result;
 }
 
-internal void
+PRIVATE void
 _VID_DecodeThread(void* p) {
    VID_Video* video = (VID_Video*)p;
    SetThreadNameF("video decode");
@@ -277,7 +277,7 @@ _VID_DecodeThread(void* p) {
    }
 }
 
-internal VID_Video*
+VID_Video*
 VID_Open(String8 path) {
    VID_Video* result = 0;
 
@@ -338,7 +338,7 @@ VID_Open(String8 path) {
    return result;
 }
 
-internal void
+void
 VID_Close(VID_Video* video) {
    if (video == 0) {
       return;
@@ -361,44 +361,44 @@ VID_Close(VID_Video* video) {
    ArenaRelease(video->arena);
 }
 
-internal R_Handle
+R_Handle
 VID_Texture(VID_Video* video) {
    return video->texture;
 }
 
-internal Vec2S32
+Vec2S32
 VID_Size(VID_Video* video) {
    return video->info.size;
 }
 
-internal F64
+F64
 VID_Duration(VID_Video* video) {
    return video->info.duration_s;
 }
 
-internal F64
+F64
 VID_Position(VID_Video* video) {
    return video->position_s;
 }
 
-internal B32
+B32
 VID_IsPlaying(VID_Video* video) {
    return video->playing;
 }
 
-internal B32
+B32
 VID_HasEnded(VID_Video* video) {
    return video->ended;
 }
 
-internal void
+void
 VID_SetMuted(VID_Video* video, B32 muted) {
    MutexTake(video->mutex);
    video->sound_muted = muted;
    MutexDrop(video->mutex);
 }
 
-internal void
+void
 VID_Seek(VID_Video* video, F64 time_s) {
    if (video->info.duration_s > 0) {
       time_s = Min(time_s, video->info.duration_s);
@@ -423,7 +423,7 @@ VID_Seek(VID_Video* video, F64 time_s) {
    video->ended = 0;
 }
 
-internal void
+void
 VID_SetPlaying(VID_Video* video, B32 playing) {
    if (playing && video->ended) {
       VID_Seek(video, 0);
@@ -439,7 +439,7 @@ VID_SetPlaying(VID_Video* video, B32 playing) {
    }
 }
 
-internal void
+void
 VID_Update(VID_Video* video) {
    U64 now_us = NowTimeUS();
    F64 dt_s = (video->updated_us != 0) ? (F64)(now_us - video->updated_us) / 1000000.0 : 0;
@@ -538,3 +538,6 @@ VID_Update(VID_Video* video) {
       CondVarBroadcast(video->wake_decode);
    }
 }
+
+// The decoder: the one file to change for another (video_decoder.h).
+#include "video_ffmpeg.c"

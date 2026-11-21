@@ -32,9 +32,9 @@ struct _AUD_State {
    F32*      voice_samples; // one voice's, before it is added in
 };
 
-global _AUD_State* _aud_state = 0;
+PRIVATE _AUD_State* _aud_state = 0;
 
-internal void
+PRIVATE void
 _AUD_Mix(void* user, F32* samples, U64 frame_count, F64 delay_s) {
    _AUD_State* state = (_AUD_State*)user;
    U64         sample_count = frame_count * AUD_CHANNELS;
@@ -70,7 +70,7 @@ _AUD_Mix(void* user, F32* samples, U64 frame_count, F64 delay_s) {
    }
 }
 
-internal void
+void
 AUD_Init(void) {
    if (_aud_state != 0) {
       return;
@@ -83,7 +83,7 @@ AUD_Init(void) {
    _aud_state->device = AUD_DeviceOpen(arena, _AUD_Mix, _aud_state);
 }
 
-internal void
+void
 AUD_Shutdown(void) {
    if (_aud_state == 0) {
       return;
@@ -94,7 +94,7 @@ AUD_Shutdown(void) {
    _aud_state = 0;
 }
 
-internal AUD_Voice*
+AUD_Voice*
 AUD_VoiceAdd(AUD_VoiceFunction* function, void* user) {
    AUD_Voice* result = 0;
    if (_aud_state != 0 && function != 0) {
@@ -112,7 +112,7 @@ AUD_VoiceAdd(AUD_VoiceFunction* function, void* user) {
    return result;
 }
 
-internal void
+void
 AUD_VoiceRemove(AUD_Voice* voice) {
    if (_aud_state != 0 && voice != 0) {
       MutexTake(_aud_state->mutex);
@@ -122,7 +122,7 @@ AUD_VoiceRemove(AUD_Voice* voice) {
    }
 }
 
-internal B32
+B32
 AUD_IsMuted(void) {
    B32 result = 0;
    if (_aud_state != 0) {
@@ -133,7 +133,7 @@ AUD_IsMuted(void) {
    return result;
 }
 
-internal void
+void
 AUD_SetMuted(B32 muted) {
    if (_aud_state != 0) {
       MutexTake(_aud_state->mutex);
@@ -141,3 +141,6 @@ AUD_SetMuted(B32 muted) {
       MutexDrop(_aud_state->mutex);
    }
 }
+
+// The device: the one file to change for another (audio_device.h).
+#include "audio_wasapi.c"

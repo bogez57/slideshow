@@ -20,13 +20,13 @@
 // the watch missed.
 #define _FR_RELOAD_CHECK_SECONDS 2.0f
 
-internal void
+void
 FR_Notice(App_State* app_state, String8 notice) {
    app_state->notice = notice;
    app_state->notice_us = NowTimeUS();
 }
 
-internal String8
+String8
 FR_CurrentNotice(App_State* app_state) {
    String8 result = {0};
    U64     notice_us = (U64)(FR_NOTICE_SECONDS * 1000000.0f);
@@ -36,7 +36,7 @@ FR_CurrentNotice(App_State* app_state) {
    return result;
 }
 
-internal void
+void
 FR_RequestQuit(App_State* app_state) {
    B32 has_unsaved = (app_state->editor != 0 && ED_HasUnsavedChanges(app_state->editor));
    if (has_unsaved && !app_state->quit_warned) {
@@ -51,7 +51,7 @@ FR_RequestQuit(App_State* app_state) {
    }
 }
 
-internal String8
+String8
 FR_WholePath(Arena* arena, String8 path) {
    B32 is_whole = ((path.size >= 2 && path.str[1] == ':') ||
                    (path.size >= 1 && (path.str[0] == '\\' || path.str[0] == '/')));
@@ -90,7 +90,7 @@ FR_WholePath(Arena* arena, String8 path) {
 ////////////////////////////////
 //~ bgz: the log
 
-internal String8
+String8
 FR_LocalFolder(Arena* arena) {
    String8 result = PushStr8F(arena, "%S\\local", GetProcessInfo()->binary_path);
    if (!FilePathExists(result)) {
@@ -99,7 +99,7 @@ FR_LocalFolder(Arena* arena) {
    return result;
 }
 
-internal void
+void
 FR_OpenLogFile(App_State* app_state) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 folder = PushStr8F(scratch.arena, "%S\\logs", FR_LocalFolder(scratch.arena));
@@ -121,7 +121,7 @@ FR_OpenLogFile(App_State* app_state) {
    ScratchEnd(scratch);
 }
 
-internal void
+void
 FR_WriteLogs(App_State* app_state, LogScopeResult logs) {
    Temp scratch = ScratchBegin(0, 0);
 
@@ -164,7 +164,7 @@ FR_WriteLogs(App_State* app_state, LogScopeResult logs) {
 
 // In the program's local folder, beside it, so that it goes where the
 // program goes and is found wherever the program is started from.
-internal String8
+PRIVATE String8
 _FR_RecentsFilePath(Arena* arena) {
    Temp    scratch = ScratchBegin(&arena, 1);
    String8 result = PushStr8F(arena, "%S\\recent.txt", FR_LocalFolder(scratch.arena));
@@ -172,7 +172,7 @@ _FR_RecentsFilePath(Arena* arena) {
    return result;
 }
 
-internal void
+void
 FR_LoadRecents(App_State* app_state) {
    if (app_state->recents_arena == 0) {
       app_state->recents_arena = ArenaAlloc();
@@ -201,7 +201,7 @@ FR_LoadRecents(App_State* app_state) {
 }
 
 // Puts path first among the decks opened lately, and writes them out.
-internal void
+PRIVATE void
 _FR_RememberRecent(App_State* app_state, String8 path) {
    if (app_state->recents_arena == 0) {
       app_state->recents_arena = ArenaAlloc();
@@ -237,7 +237,7 @@ _FR_RememberRecent(App_State* app_state, String8 path) {
    ScratchEnd(scratch);
 }
 
-internal B32
+B32
 FR_OpenPath(App_State* app_state, String8 path) {
    if (app_state->editor != 0 && ED_HasUnsavedChanges(app_state->editor)) {
       FR_Notice(app_state, Str8Lit("Unsaved changes. Save (Ctrl+S) before opening something else."));
@@ -321,7 +321,7 @@ FR_OpenPath(App_State* app_state, String8 path) {
    return 1;
 }
 
-internal void
+void
 FR_SyncDeck(App_State* app_state) {
    ED_Editor* editor = app_state->editor;
    if (editor == 0) {
@@ -391,7 +391,7 @@ FR_SyncDeck(App_State* app_state) {
 //                     window
 //    quit             Esc (a folder of images), or closing the window
 
-internal void
+PRIVATE void
 _FR_PresentInput(App_State* app_state) {
    WM_EventList* events = &app_state->events;
    WM_Window     window = app_state->window;
@@ -598,7 +598,7 @@ _FR_PresentInput(App_State* app_state) {
 
 // The slide, and the one fading out under it: the custom draw of the
 // window's box.
-internal void
+PRIVATE void
 _FR_DrawSlide(UI_Box* box, void* user_data) {
    App_State* app_state = (App_State*)user_data;
    DECK_Deck* deck = app_state->deck;
@@ -650,7 +650,7 @@ _FR_DrawSlide(UI_Box* box, void* user_data) {
    }
 }
 
-internal void
+void
 FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 words, char* fmt, ...) {
    Temp    scratch = ScratchBegin(0, 0);
    va_list args;
@@ -676,7 +676,7 @@ FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 wor
 }
 
 // A panel's background at rect, in the colour of tag.
-internal UI_Box*
+PRIVATE UI_Box*
 _FR_BuildPanel(String8 tag, Rng2F32 rect, F32 radius, char* key) {
    UI_SetNextColorTag(tag);
    UI_SetNextCornerRadius00(radius);
@@ -689,7 +689,7 @@ _FR_BuildPanel(String8 tag, Rng2F32 rect, F32 radius, char* key) {
 // What is drawn over the slide, top first: a notice, the list of keys, the
 // notes, the slide's number, the play bar, what to do with no slides, the
 // video's strip - then the slide itself.
-internal void
+PRIVATE void
 _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
    DECK_Deck* deck = app_state->deck;
    TXT_Fonts* fonts = &app_state->fonts;
@@ -893,7 +893,7 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
    // clicked: a click is the next slide. Lit where the mouse is.
    VID_Video* video = DECK_VideoFromSlide(deck, app_state->slide_idx);
    if (video != 0 && app_state->video_auto_slide == app_state->slide_idx + 1) {
-      U64 strip_us = (U64)(FR_VIDEO_STRIP_SECONDS * 1000000.0f);
+      U64 strip_us = (U64)(SVID_STRIP_SECONDS * 1000000.0f);
       B32 key_was_recent = (app_state->video_key_us != 0 && NowTimeUS() - app_state->video_key_us < strip_us);
       // Paused: all of the slide's videos, not only the first, which may be
       // a short one that has ended while the others play on.
@@ -937,7 +937,7 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
 // the list is on UI_BuildArena, which is the selected state's, and lasts
 // until the next UI_EndBuild. Another window's events are not this one's: a
 // press in the presenter's window is at a place in that window.
-internal UI_EventList
+PRIVATE UI_EventList
 _FR_UIEventsFromEvents(App_State* app_state, UI_State* ui_state, WM_Window window) {
    UI_SelectState(ui_state);
 
@@ -985,7 +985,7 @@ _FR_UIEventsFromEvents(App_State* app_state, UI_State* ui_state, WM_Window windo
    return ui_events;
 }
 
-internal UI_Box*
+PRIVATE UI_Box*
 _FR_BuildRectBoxV(UI_BoxFlags flags, Rng2F32 rect, char* fmt, va_list args) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 key = PushStr8FV(scratch.arena, fmt, args);
@@ -1002,7 +1002,7 @@ _FR_BuildRectBoxV(UI_BoxFlags flags, Rng2F32 rect, char* fmt, va_list args) {
    return box;
 }
 
-internal UI_Box*
+UI_Box*
 FR_BuildRectBox(UI_BoxFlags flags, Rng2F32 rect, char* fmt, ...) {
    va_list args;
    va_start(args, fmt);
@@ -1020,7 +1020,7 @@ struct _FR_Edge {
 // Drawn at the rect it was given, not the box's: the layout puts a box on
 // whole pixels, and an outline around a piece of the slide is where the
 // piece is, which is not.
-internal void
+PRIVATE void
 _FR_DrawEdge(UI_Box* box, void* user_data) {
    _FR_Edge* edge = (_FR_Edge*)user_data;
    Rng2F32   r = edge->rect;
@@ -1032,7 +1032,7 @@ _FR_DrawEdge(UI_Box* box, void* user_data) {
    Core_D_Rect(R2F32P(r.max.x - t, r.min.y, r.max.x, r.max.y), R2F32P(0, 0, 1, 1), c);
 }
 
-internal UI_Box*
+UI_Box*
 FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...) {
    va_list args;
    va_start(args, fmt);
@@ -1047,19 +1047,19 @@ FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...) {
    return box;
 }
 
-internal F32
+F32
 FR_UIScale(Vec2F32 window_dim) {
    return Clamp(1.0f, window_dim.y / 900.0f, 2.0f);
 }
 
-internal F32
+F32
 FR_UIFontSize(F32 px) {
    // As text.c's _TXT_PointsFromPx: the UI hands its size to the same font
    // cache, which takes points, 72 to an inch where pixels are 96.
    return Max((F32)(S32)(px * 0.75f), 1.0f);
 }
 
-internal void
+void
 FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64* last_frame_us) {
    Vec2F32      window_dim = Dim2F32(Core_WM_ClientRectFromWindow(window));
    UI_EventList ui_events = _FR_UIEventsFromEvents(app_state, ui_state, window);
@@ -1209,13 +1209,13 @@ FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64*
 
    // The slideshow's regular font, at the hand-drawn screens' text size
    // (15 pixels at FR_UIScale 1, as the edit screen's), and drawn as they
-   // draw it (text.c's _TXT_RASTER_FLAGS), so the two look alike side by
+   // draw it (text.h's TXT_RASTER_FLAGS), so the two look alike side by
    // side. Panels push their own sizes and fonts where they differ.
    FNT_Tag font = app_state->fonts.regular;
    UI_PushFont(font);
    UI_PushFontSize(FR_UIFontSize((F32)(S32)(15.0f * FR_UIScale(window_dim))));
-   UI_PushTextRasterFlags(_TXT_RASTER_FLAGS);
-   UI_SetLabelFont(font, _TXT_RASTER_FLAGS);
+   UI_PushTextRasterFlags(TXT_RASTER_FLAGS);
+   UI_SetLabelFont(font, TXT_RASTER_FLAGS);
 
    // A ctx menu builds with the stack's bottom value, which is whatever was
    // last pushed on the empty stack. Pinned here, or a UI_PrefWidth(UI_Pct(..))
@@ -1225,7 +1225,7 @@ FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64*
    UI_PushPrefHeight(UI_TopPrefHeight());
 }
 
-internal void
+void
 FR_DrawUITree(UI_State* ui_state) {
    for (UI_Box* box = UI_RootFromState(ui_state); !UI_BoxIsNil(box);) {
       UI_BoxRec rec = UI_BoxRecDfPost(box, &ui_nil_box);
@@ -1310,7 +1310,7 @@ FR_DrawUITree(UI_State* ui_state) {
 //~ bgz: the frame
 
 // The font cache's turn of the frame, before any text is measured or drawn.
-internal void
+PRIVATE void
 _FR_BeginText(App_State* app_state, Vec2F32 window_dim) {
    // Text is drawn at sizes that follow the window's (view.h), and the font
    // cache keeps every glyph of every size it has drawn, in textures. Left
@@ -1326,7 +1326,7 @@ _FR_BeginText(App_State* app_state, Vec2F32 window_dim) {
    Core_FNT_Frame();
 }
 
-internal void
+void
 FrameWork(App_State* app_state) {
    // What is logged this frame is gathered, and written at the frame's end.
    LogSelect(app_state->log);

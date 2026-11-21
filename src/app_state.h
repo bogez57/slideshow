@@ -1,76 +1,10 @@
+#pragma once
+
 ////////////////////////////////
 //~ bgz: app state
 //
 // Everything the slideshow knows, in one struct. There is one, made in
 // _EntryPoint (main.c).
-
-#ifndef APP_STATE_H
-#define APP_STATE_H
-
-// A line of the open screen.
-typedef enum OPEN_RowKind {
-   OPEN_RowKind_Label,   // says what the rows under it are. Not to be clicked
-   OPEN_RowKind_Recent,  // a deck opened lately
-   OPEN_RowKind_Up,      // the folder this one is in
-   OPEN_RowKind_Browse,  // Windows' own open-file window, starting in this folder
-   OPEN_RowKind_New,     // a new text deck, in this folder
-   OPEN_RowKind_Present, // this folder's pictures, as a deck
-   OPEN_RowKind_Folder,
-   OPEN_RowKind_Deck,    // a text deck in this folder
-} OPEN_RowKind;
-
-typedef struct OPEN_Row OPEN_Row;
-struct OPEN_Row {
-   OPEN_RowKind kind;
-   String8      label; // as shown
-   String8      path;  // what a click opens, or goes to
-};
-
-typedef struct COPY_Job COPY_Job;
-
-// A press on one of the preview's pictures, its title or its body, and what
-// has come of it.
-typedef enum EDIT_PlaceDragState {
-   EDIT_PlaceDragState_None,
-   EDIT_PlaceDragState_Pressed, // the button is down on it, and the mouse has not gone far: a click, so far
-   EDIT_PlaceDragState_Dragging,
-   // The button went down right at the words of the title or of a block:
-   // nothing is moved, the words from there to the mouse are selected
-   // (CARET_DragTo, caret\caret.c).
-   EDIT_PlaceDragState_Selecting,
-} EDIT_PlaceDragState;
-
-typedef struct EDIT_PlaceDrag EDIT_PlaceDrag;
-struct EDIT_PlaceDrag {
-   EDIT_PlaceDragState state;
-   DECK_PlaceKind      kind;
-   U64                 idx;         // which of the slide's pictures, or of its body's blocks
-   U32                 corner;      // 0: all of it is moved. 1 to 4: that corner is - top left, top right, bottom left, bottom right. 5 to 8: that side is - left, right, top, bottom
-   U64                 slide_idx;
-   U64                 edit_count;  // the editor's when the button went down: a change to the text ends it
-   Vec2F32             press_mouse;
-   Rng2F32             start;       // where it was then, in parts of the page
-   Rng2F32             now;         // where the mouse has it
-   // With Shift down: what it has been lined up with, across and down, as
-   // parts of the page - lines drawn over the slide while it is.
-   B32                 has_guide_x;
-   B32                 has_guide_y;
-   F32                 guide_x;
-   F32                 guide_y;
-   // The other box each line is an edge or the middle of, outlined with it:
-   // the body's box is larger than its words, and a line through empty space
-   // says nothing until its box shows. None for the page's own lines.
-   B32                 has_guide_box_x;
-   B32                 has_guide_box_y;
-   Rng2F32             guide_box_x;
-   Rng2F32             guide_box_y;
-   DECK_Place          before;     // the slide's place of that kind as the text has it, to go back to
-   // Selecting: the hit of the preview pressed (a line of words), whose box
-   // is the UI's active one, or -1 for a piece's box or the room beside the
-   // words. A line moved out of its block's room by the drag has no hit,
-   // and its box is built without one (PLACE_BuildHits).
-   S64                 select_hit;
-};
 
 typedef struct App_State App_State;
 struct App_State {
@@ -88,7 +22,7 @@ struct App_State {
 
    // The UI layer (src\ui): its box cache, hot and active boxes, and so on,
    // made once at the start. A UI tree is built inside FrameWork every frame,
-   // between _FR_BeginUI and UI_EndBuild (frame.c).
+   // between FR_BeginUIBuild and UI_EndBuild (frame.c).
    UI_State* ui_state;
    FNT_Tag   ui_icon_font;     // raddebugger's icon font, data\fonts\Icons.ttf. The zero tag without it: no icons
    U64       ui_last_frame_us; // when the last UI build began, for its animations. 0: none yet
@@ -249,7 +183,7 @@ struct App_State {
    // mouse (place\place.c). While it is, the slide is given the place the
    // mouse makes without its being in the text: the @place line is written
    // when the button comes up.
-   EDIT_PlaceDrag place_drag;
+   PLACE_Drag place_drag;
    // The last press at the words on the slide, and which of a double or a
    // triple click it was - 1, 2 or 3; 0 after a press anywhere else there
    // (PLACE_PressWords).
@@ -276,10 +210,8 @@ struct App_State {
    U64 fade_from_idx; // the slide that was showing. Past the last: none, fade from the background
    U64 fade_start_us; // 0 until the frame that first draws the new slide
 
-   // Playing: the deck moves on by itself, a slide every _FR_PLAY_SECONDS,
+   // Playing: the deck moves on by itself, a slide every FR_PLAY_SECONDS,
    // and from the last slide back to the first.
    B32 playing;
    U64 play_from_us; // when the slide showing began its turn
 };
-
-#endif // APP_STATE_H
