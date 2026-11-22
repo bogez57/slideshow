@@ -8,7 +8,7 @@
 //  1. The slide gets its picture line at once, naming the file as it will
 //     be in the deck's folder.
 //  2. Until the file is there, the deck is told that its path stands for
-//     the original's (DECK_SetPathAlias), and the video plays from where it
+//     the original's (Deck_SetPathAlias), and the video plays from where it
 //     was dropped from.
 //  3. A thread copies the file, a piece at a time, under another name
 //     (name.copying), and gives it its real name when it is whole: a copy
@@ -23,8 +23,8 @@
 
 #define _COPY_PIECE_SIZE MB(4)
 
-struct COPY_Job {
-   COPY_Job* next;
+struct Copy_Job {
+   Copy_Job* next;
    Arena*    arena;
    String8   src; // the original
    String8   dst; // in the deck's folder
@@ -42,8 +42,8 @@ struct COPY_Job {
 };
 
 PRIVATE void
-_COPY_Thread(void* p) {
-   COPY_Job* job = (COPY_Job*)p;
+_Copy_Thread(void* p) {
+   Copy_Job* job = (Copy_Job*)p;
    SetThreadNameF("file copy");
 
    Arena* arena = ArenaAlloc();
@@ -96,9 +96,9 @@ _COPY_Thread(void* p) {
 
 // Whether dst is being copied to already.
 B32
-COPY_IsCopyingTo(App_State* app_state, String8 dst) {
+Copy_IsCopyingTo(const App_State* app_state, String8 dst) {
    B32 result = 0;
-   for (COPY_Job* job = app_state->first_copy; job != 0; job = job->next) {
+   for (Copy_Job* job = app_state->first_copy; job != 0; job = job->next) {
       if (Str8Match(job->dst, dst, StringMatchFlag_CaseInsensitive)) {
          result = 1;
          break;
@@ -110,28 +110,28 @@ COPY_IsCopyingTo(App_State* app_state, String8 dst) {
 // Starts copying src to dst, and has dst stand for src in the deck until
 // the copy has taken over.
 void
-COPY_Start(App_State* app_state, String8 src, String8 dst) {
+Copy_Start(App_State* app_state, String8 src, String8 dst) {
    Arena*    arena = ArenaAlloc();
-   COPY_Job* job = PushArray(arena, COPY_Job, 1);
+   Copy_Job* job = PushArray(arena, Copy_Job, 1);
    job->arena = arena;
    job->src = PushStr8Copy(arena, src);
    job->dst = PushStr8Copy(arena, dst);
    job->tmp = PushStr8F(arena, "%S.copying", dst);
    job->mutex = MutexAlloc();
 
-   DECK_SetPathAlias(job->dst, job->src);
+   Deck_SetPathAlias(job->dst, job->src);
 
    job->next = app_state->first_copy;
    app_state->first_copy = job;
-   job->thread = ThreadLaunch(_COPY_Thread, job);
+   job->thread = ThreadLaunch(_Copy_Thread, job);
    LogInfoF("Copying %S to %S\n", src, dst);
 }
 
 // Whether a copy is still being made.
 B32
-COPY_IsBusy(App_State* app_state) {
+Copy_IsBusy(const App_State* app_state) {
    B32 result = 0;
-   for (COPY_Job* job = app_state->first_copy; job != 0; job = job->next) {
+   for (Copy_Job* job = app_state->first_copy; job != 0; job = job->next) {
       MutexTake(job->mutex);
       B32 done = job->done;
       MutexDrop(job->mutex);
@@ -144,7 +144,7 @@ COPY_IsBusy(App_State* app_state) {
 }
 
 PRIVATE void
-_COPY_Release(COPY_Job* job) {
+_Copy_Release(Copy_Job* job) {
    ThreadJoin(job->thread, max_U64);
    MutexRelease(job->mutex);
    ArenaRelease(job->arena);
@@ -153,11 +153,11 @@ _COPY_Release(COPY_Job* job) {
 // Once a frame: a copy that is through is taken over to, if its video is not
 // playing, or given up on.
 void
-COPY_Update(App_State* app_state) {
-   DECK_Deck* deck = app_state->deck;
+Copy_Update(App_State* app_state) {
+   Deck_Deck* deck = app_state->deck;
 
-   COPY_Job** link = &app_state->first_copy;
-   for (COPY_Job* job = *link; job != 0; job = *link) {
+   Copy_Job** link = &app_state->first_copy;
+   for (Copy_Job* job = *link; job != 0; job = *link) {
       MutexTake(job->mutex);
       B32 done = job->done;
       B32 ok = job->ok;
@@ -168,14 +168,14 @@ COPY_Update(App_State* app_state) {
          // The alias stays: the video goes on playing from where it is, for
          // as long as the program runs.
          LogUserErrorF("Could not copy %S to %S\n", job->src, job->dst);
-         FR_Notice(app_state, Str8Lit("Could not copy the video into the deck's folder. It plays from the original."));
+         StateOp_App_Notice(app_state->op_list)->notice = Str8Lit("Could not copy the video into the deck's folder. It plays from the original.");
          is_finished = 1;
       } else if (done) {
          B32 is_playing = 0;
          for (U64 i = 0; i < deck->slide_count && !is_playing; i += 1) {
             for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
-               DECK_Picture* picture = &deck->slides[i].pictures[k];
-               if (picture->video != 0 && VID_IsPlaying(picture->video) &&
+               Deck_Picture* picture = &deck->slides[i].pictures[k];
+               if (picture->video != 0 && Video_IsPlaying(picture->video) &&
                    Str8Match(picture->path, job->dst, StringMatchFlag_CaseInsensitive)) {
                   is_playing = 1;
                   break;
@@ -191,32 +191,32 @@ COPY_Update(App_State* app_state) {
          } else {
             // From here on the path is its own. Every slide showing the
             // file is opened again, on the copy, where it was.
-            DECK_ClearPathAlias(job->dst);
+            Deck_ClearPathAlias(job->dst);
             for (U64 i = 0; i < deck->slide_count; i += 1) {
                for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
-                  DECK_Picture* picture = &deck->slides[i].pictures[k];
+                  Deck_Picture* picture = &deck->slides[i].pictures[k];
                   // One that could not be opened from the original is tried
                   // again too, now that the file is where the slide says.
                   if ((picture->video != 0 || picture->load_failed) &&
                       Str8Match(picture->path, job->dst, StringMatchFlag_CaseInsensitive)) {
-                     F64 position_s = (picture->video != 0) ? VID_Position(picture->video) : 0;
-                     DECK_ReopenPicture(picture);
+                     F64 position_s = (picture->video != 0) ? Video_Position(picture->video) : 0;
+                     Deck_ReopenPicture(picture);
                      if (picture->video != 0 && position_s > 0) {
-                        VID_Seek(picture->video, position_s);
+                        Video_Seek(picture->video, position_s);
                      }
                   }
                }
             }
             LogInfoF("%S is copied, and used from now on\n", job->dst);
-            FR_Notice(app_state, Str8Lit("Video copied into the deck's folder"));
-            app_state->pictures_scanned_us = 0; // the list of pictures, if open, is out of date
+            StateOp_App_Notice(app_state->op_list)->notice = Str8Lit("Video copied into the deck's folder");
+            g_edit_view.pictures_scanned_us = 0; // the list of pictures, if open, is out of date
             is_finished = 1;
          }
       }
 
       if (is_finished) {
          *link = job->next;
-         _COPY_Release(job);
+         _Copy_Release(job);
       } else {
          link = &job->next;
       }
@@ -226,13 +226,13 @@ COPY_Update(App_State* app_state) {
 // At exit: every copy still going is stopped, and what it had written is
 // deleted.
 void
-COPY_CancelAll(App_State* app_state) {
-   for (COPY_Job* job = app_state->first_copy, *next = 0; job != 0; job = next) {
+Copy_CancelAll(App_State* app_state) {
+   for (Copy_Job* job = app_state->first_copy, *next = 0; job != 0; job = next) {
       next = job->next;
       MutexTake(job->mutex);
       job->cancel = 1;
       MutexDrop(job->mutex);
-      _COPY_Release(job);
+      _Copy_Release(job);
    }
    app_state->first_copy = 0;
 }

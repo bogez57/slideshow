@@ -6,22 +6,30 @@ The preview is typed into (caret), its pieces moved and resized with the mouse (
 
 ## State
 
-In `App_State`:
+In `App_State`, changed by ops only:
 
 - `is_editing`: the edit screen is up, not the presentation.
-- `show_format`, `format_scroll`: the Format panel.
-- `show_pictures`, `pictures_arena`, `pictures`, `pictures_scanned_us`, `pictures_scroll`: the list of pictures in the deck's folder.
-- `preview_hits_arena`, `preview_hits`, `preview_hit_count`, `preview_hits_edit_count`, `preview_boxes`, `preview_box_count`, `preview_page`: where the preview's pieces were laid out this frame, and for which text.
-- `preview_focus_hidden`, `preview_focus_hidden_cursor`: Esc has taken the box around the piece the cursor is in off the preview.
+- `show_format`, `show_pictures`: the Format panel is open, and the list of pictures in its place.
+- `editor`, `deck`, `slide_idx`: the text, the deck made from it and the slide the cursor is on. `_FR_UpdateAppState` (frame.c) makes the deck again and finds the slide after the ops have run, so the screen is always built from a deck that is of the text as it is.
 
-## Functions
+The screen's own, `g_edit_view` (`Edit_View`, edit.h), written with no op:
 
-- `EDIT_Input`: the screen's keys, then the editor's.
-- `EDIT_Build`: the whole screen, in FrameWork's UI build.
-- `EDIT_PreviewClick`, `EDIT_PreviewHitAt`: a press on the preview's slide, and which piece a point is on.
-- `EDIT_PutLineFor`, `EDIT_TakeOutLine`: write or take out a line about one piece of a slide (@place, @size, @color).
+- `hits`, `hit_count`, `hits_arena`, `hits_edit_count`, `runs`, `run_count`, `boxes`, `box_count`, `page`: where the preview's pieces were laid out this frame, and for which text. caret, place and look read them.
+- `format_scroll`: where the Format panel's lines are scrolled to.
+- `pictures`, `pictures_arena`, `pictures_scanned_us`, `pictures_scroll`: the names in the list of pictures, and where it is scrolled to.
+
+## Functions and ops
+
+- `Edit_Input`: the screen's keys, then the editor's. Pushes ops.
+- `Edit_Build`: the whole screen, in FrameWork's UI build. Lays the preview's slide out into `g_edit_view`, and pushes ops for clicks.
+- `Edit_PreviewHitAt`: which piece of the preview a point is on.
+- `Edit_PutLineFor`, `Edit_TakeOutLine`: write or take out a line about one piece of a slide (@place, @size, @color). They change the text: called from ops only.
+- Ops, edit.c's own: `Edit_KeyInput` (the editor's keys and typing, from what is left of the frame's events), `Edit_TextPress`, `Edit_TextDrag`, `Edit_TextWheel` (the mouse in the text), `Edit_ToggleFormat`, `Edit_ClosePictures`, `Edit_Deselect`, `Edit_Wrap` (bold, code), `Edit_Save`, `Edit_Present`, `Edit_MoveSlide`, `Edit_AddSlide`, `Edit_GoToSlide`, `Edit_DropPicture`, `Edit_PutPicture`, `Edit_FormatRow`.
+- Op other layers push too: `Edit_PreviewClick` (a press on the preview's slide: the cursor to the letter, or the picture's name selected).
 
 ## Used by
 
 - frame.c: its input and build, while the edit screen is up.
-- place, look: the lines they write, and the piece under the mouse.
+- place, look: the lines their ops write, the preview's layout, and the click on a piece.
+- caret: the preview's layout.
+- copy: marks the list of pictures out of date.

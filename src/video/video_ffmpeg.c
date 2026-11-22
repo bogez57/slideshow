@@ -31,14 +31,14 @@
 // Where the card can't - a codec it has no circuit for, a form of H.265 it
 // does not know, no card - decoding is on the processor, on as many threads
 // as FFmpeg sees fit, as it was before. That is found out when the file is
-// opened, by decoding its first frame there (VID_DecoderOpen), and the log
+// opened, by decoding its first frame there (Video_DecoderOpen), and the log
 // says which of the two it is. A card that fails later, part way through a
 // file, is given up on: the stream is opened again on the processor and goes
-// on from where it was, picture and sound (_VID_FallBackToProcessor).
+// on from where it was, picture and sound (_Video_FallBackToProcessor).
 //
 // FFmpeg's memory is its own (malloc): its libraries are DLLs with no way
 // to be given an arena. Everything it allocates here is let go of in
-// VID_DecoderClose.
+// Video_DecoderClose.
 
 // FFmpeg's headers are found through -Isrc\third_party\ffmpeg\include
 // (build.bat): they include each other from there. They have fields named
@@ -73,19 +73,19 @@
 // Packets of the file read while looking for the other stream's: a file has
 // its video and its sound in turns, and the one asked for is rarely the
 // one that comes next.
-typedef struct _VID_PacketNode _VID_PacketNode;
-struct _VID_PacketNode {
-   _VID_PacketNode* next;
+typedef struct _Video_PacketNode _Video_PacketNode;
+struct _Video_PacketNode {
+   _Video_PacketNode* next;
    AVPacket*        packet;
 };
 
-typedef struct _VID_PacketQueue _VID_PacketQueue;
-struct _VID_PacketQueue {
-   _VID_PacketNode* first;
-   _VID_PacketNode* last;
+typedef struct _Video_PacketQueue _Video_PacketQueue;
+struct _Video_PacketQueue {
+   _Video_PacketNode* first;
+   _Video_PacketNode* last;
 };
 
-struct VID_Decoder {
+struct Video_Decoder {
    String8          path; // to say which file, when something goes wrong
    AVFormatContext* format;
    AVCodecContext*  codec;
@@ -105,7 +105,7 @@ struct VID_Decoder {
    AVBufferRef* card;        // FFmpeg's device on it
    int          card_format; // the form a frame still on the card has (enum AVPixelFormat)
    AVFrame*     card_frame;  // a frame brought back from it
-   // frame holds the file's first frame, decoded in VID_DecoderOpen to find
+   // frame holds the file's first frame, decoded in Video_DecoderOpen to find
    // out whether the card takes the stream: it is the next given out.
    B32          has_first_frame;
    // After giving up on the card part way through: the video's frames up to
@@ -131,8 +131,8 @@ struct VID_Decoder {
 
    //- bgz: reading the file for two streams
    B32              file_ended; // there are no more packets to read
-   _VID_PacketQueue video_packets;
-   _VID_PacketQueue sound_packets;
+   _Video_PacketQueue video_packets;
+   _Video_PacketQueue sound_packets;
 
    //- bgz: sound. sound_codec is 0 if the file has none, or none was asked for
    int                sound_stream_idx;
@@ -159,8 +159,8 @@ struct VID_Decoder {
 };
 
 PRIVATE void
-_VID_PacketQueueClear(_VID_PacketQueue* queue) {
-   for (_VID_PacketNode* node = queue->first, *next = 0; node != 0; node = next) {
+_Video_PacketQueueClear(_Video_PacketQueue* queue) {
+   for (_Video_PacketNode* node = queue->first, *next = 0; node != 0; node = next) {
       next = node->next;
       av_packet_free(&node->packet);
       av_free(node);
@@ -173,15 +173,15 @@ _VID_PacketQueueClear(_VID_PacketQueue* queue) {
 // decoder->packet, which the caller unrefs. 0 when there are no more.
 // Packets of the other stream met on the way are kept for when it asks.
 PRIVATE B32
-_VID_NextPacket(VID_Decoder* decoder, B32 want_sound) {
+_Video_NextPacket(Video_Decoder* decoder, B32 want_sound) {
    B32               result = 0;
-   _VID_PacketQueue* mine = want_sound ? &decoder->sound_packets : &decoder->video_packets;
-   _VID_PacketQueue* others = want_sound ? &decoder->video_packets : &decoder->sound_packets;
+   _Video_PacketQueue* mine = want_sound ? &decoder->sound_packets : &decoder->video_packets;
+   _Video_PacketQueue* others = want_sound ? &decoder->video_packets : &decoder->sound_packets;
    int               my_idx = want_sound ? decoder->sound_stream_idx : decoder->stream_idx;
    int               other_idx = want_sound ? decoder->stream_idx : (decoder->sound_codec != 0 ? decoder->sound_stream_idx : -1);
 
    if (mine->first != 0) {
-      _VID_PacketNode* node = mine->first;
+      _Video_PacketNode* node = mine->first;
       mine->first = node->next;
       if (mine->first == 0) {
          mine->last = 0;
@@ -203,7 +203,7 @@ _VID_NextPacket(VID_Decoder* decoder, B32 want_sound) {
       if (decoder->packet->stream_index == my_idx) {
          result = 1;
       } else if (decoder->packet->stream_index == other_idx) {
-         _VID_PacketNode* node = (_VID_PacketNode*)av_mallocz(sizeof(_VID_PacketNode));
+         _Video_PacketNode* node = (_Video_PacketNode*)av_mallocz(sizeof(_Video_PacketNode));
          AVPacket*        kept = av_packet_alloc();
          if (node != 0 && kept != 0) {
             av_packet_move_ref(kept, decoder->packet);
@@ -230,9 +230,9 @@ _VID_NextPacket(VID_Decoder* decoder, B32 want_sound) {
 // After the file has been sought in: what was read and decoded from where
 // it was is let go of, for the video and the sound both.
 PRIVATE void
-_VID_AfterSeek(VID_Decoder* decoder) {
-   _VID_PacketQueueClear(&decoder->video_packets);
-   _VID_PacketQueueClear(&decoder->sound_packets);
+_Video_AfterSeek(Video_Decoder* decoder) {
+   _Video_PacketQueueClear(&decoder->video_packets);
+   _Video_PacketQueueClear(&decoder->sound_packets);
    decoder->file_ended = 0;
 
    avcodec_flush_buffers(decoder->codec);
@@ -259,7 +259,7 @@ _VID_AfterSeek(VID_Decoder* decoder) {
 // - takes a seek to a byte without saying no, and then reads from wherever
 // it was.
 PRIVATE void
-_VID_SeekToStart(VID_Decoder* decoder) {
+_Video_SeekToStart(Video_Decoder* decoder) {
    int error = -1;
    int format_flags = decoder->format->iformat->flags;
    if ((format_flags & AVFMT_TS_DISCONT) && !(format_flags & AVFMT_NO_BYTE_SEEK)) {
@@ -268,14 +268,14 @@ _VID_SeekToStart(VID_Decoder* decoder) {
    if (error < 0) {
       av_seek_frame(decoder->format, decoder->stream_idx, decoder->start_ticks, AVSEEK_FLAG_BACKWARD);
    }
-   _VID_AfterSeek(decoder);
+   _Video_AfterSeek(decoder);
    decoder->seek_was_to_start = 1;
    decoder->sound_next_s = 0;
 }
 
 // What FFmpeg has to say about one of its error codes.
 PRIVATE String8
-_VID_FFmpegError(Arena* arena, int code) {
+_Video_FFmpegError(Arena* arena, int code) {
    char text[AV_ERROR_MAX_STRING_SIZE] = {0};
    av_strerror(code, text, sizeof(text));
    String8 result = PushStr8Copy(arena, Str8CString(text));
@@ -287,8 +287,8 @@ _VID_FFmpegError(Arena* arena, int code) {
 // circuit for this stream after all - FFmpeg's own choice, which is the
 // processor.
 PRIVATE enum AVPixelFormat
-_VID_PickFormat(AVCodecContext* codec, const enum AVPixelFormat* formats) {
-   VID_Decoder* decoder = (VID_Decoder*)codec->opaque;
+_Video_PickFormat(AVCodecContext* codec, const enum AVPixelFormat* formats) {
+   Video_Decoder* decoder = (Video_Decoder*)codec->opaque;
    for (const enum AVPixelFormat* format = formats; *format != AV_PIX_FMT_NONE; format += 1) {
       if ((int)*format == decoder->card_format) {
          return *format;
@@ -302,7 +302,7 @@ _VID_PickFormat(AVCodecContext* codec, const enum AVPixelFormat* formats) {
 // processor. Returns FFmpeg's error, under 0, if it could not be started;
 // decoder->codec is then 0.
 PRIVATE int
-_VID_OpenVideoCodec(VID_Decoder* decoder, const AVCodec* codec, B32 use_card) {
+_Video_OpenVideoCodec(Video_Decoder* decoder, const AVCodec* codec, B32 use_card) {
    AVStream* stream = decoder->format->streams[decoder->stream_idx];
    int       error = 0;
 
@@ -335,7 +335,7 @@ _VID_OpenVideoCodec(VID_Decoder* decoder, const AVCodec* codec, B32 use_card) {
          if (decoder->card != 0) {
             decoder->codec->hw_device_ctx = av_buffer_ref(decoder->card);
             decoder->codec->opaque = decoder;
-            decoder->codec->get_format = _VID_PickFormat;
+            decoder->codec->get_format = _Video_PickFormat;
             if (decoder->codec->hw_device_ctx == 0) {
                av_buffer_unref(&decoder->card);
                decoder->codec->get_format = avcodec_default_get_format;
@@ -348,7 +348,7 @@ _VID_OpenVideoCodec(VID_Decoder* decoder, const AVCodec* codec, B32 use_card) {
       // the packets. More would each hold frames of their own on the card,
       // and give each frame out that many frames later. If FFmpeg finds at
       // the first frame that the card can't after all, the codec is opened
-      // again on the processor with its threads (VID_DecoderOpen).
+      // again on the processor with its threads (Video_DecoderOpen).
       decoder->codec->thread_count = (decoder->card != 0) ? 1 : 0;
       error = avcodec_open2(decoder->codec, codec, 0);
    }
@@ -364,14 +364,14 @@ _VID_OpenVideoCodec(VID_Decoder* decoder, const AVCodec* codec, B32 use_card) {
 // processor. Where the file is read from is not changed: the caller seeks.
 // Returns FFmpeg's error, under 0, if the processor can't either.
 PRIVATE int
-_VID_ReopenOnProcessor(VID_Decoder* decoder) {
+_Video_ReopenOnProcessor(Video_Decoder* decoder) {
    const AVCodec* codec = decoder->codec->codec;
    avcodec_free_context(&decoder->codec);
    av_buffer_unref(&decoder->card);
    decoder->has_first_frame = 0;
    av_frame_unref(decoder->frame);
    av_frame_unref(decoder->card_frame);
-   int error = _VID_OpenVideoCodec(decoder, codec, 0);
+   int error = _Video_OpenVideoCodec(decoder, codec, 0);
    return error;
 }
 
@@ -384,7 +384,7 @@ _VID_ReopenOnProcessor(VID_Decoder* decoder) {
 // packets can go in before a frame comes out, and several frames can come
 // out of one.
 PRIVATE int
-_VID_ReceiveFrame(VID_Decoder* decoder) {
+_Video_ReceiveFrame(Video_Decoder* decoder) {
    if (decoder->has_first_frame) {
       decoder->has_first_frame = 0;
       return 0;
@@ -399,14 +399,14 @@ _VID_ReceiveFrame(VID_Decoder* decoder) {
       }
       if (error == AVERROR_EOF && decoder->frames_since_seek == 0 && !decoder->seek_was_to_start) {
          // A seek that found nothing to decode: from the start instead.
-         _VID_SeekToStart(decoder);
+         _Video_SeekToStart(decoder);
          continue;
       }
       if (error != AVERROR(EAGAIN) || decoder->is_draining) {
          break;
       }
 
-      if (_VID_NextPacket(decoder, 0)) {
+      if (_Video_NextPacket(decoder, 0)) {
          // A packet it can't take is passed over: one bad one does not end
          // the video.
          avcodec_send_packet(decoder->codec, decoder->packet);
@@ -422,13 +422,13 @@ _VID_ReceiveFrame(VID_Decoder* decoder) {
 }
 
 void
-VID_DecoderClose(VID_Decoder* decoder) {
+Video_DecoderClose(Video_Decoder* decoder) {
    if (decoder == 0) {
       return;
    }
    // Each of these takes a pointer to nothing in its stride.
-   _VID_PacketQueueClear(&decoder->video_packets);
-   _VID_PacketQueueClear(&decoder->sound_packets);
+   _Video_PacketQueueClear(&decoder->video_packets);
+   _Video_PacketQueueClear(&decoder->sound_packets);
    swr_free(&decoder->sound_convert);
    av_freep(&decoder->sound_pending);
    av_frame_free(&decoder->sound_frame);
@@ -442,9 +442,9 @@ VID_DecoderClose(VID_Decoder* decoder) {
    avformat_close_input(&decoder->format);
 }
 
-VID_Decoder*
-VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_DecoderInfo* info_out) {
-   VID_Decoder* decoder = PushArray(arena, VID_Decoder, 1);
+Video_Decoder*
+Video_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, Video_DecoderInfo* info_out) {
+   Video_Decoder* decoder = PushArray(arena, Video_Decoder, 1);
    decoder->path = PushStr8Copy(arena, path);
    decoder->stream_idx = -1;
    decoder->sound_stream_idx = -1;
@@ -463,9 +463,9 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
    const AVCodec* codec = 0;
    int            error = avformat_open_input(&decoder->format, (char*)path_z.str, 0, 0);
    if (error < 0) {
-      LogUserErrorF("Could not open %S as a video: %S\n", path, _VID_FFmpegError(scratch.arena, error));
+      LogUserErrorF("Could not open %S as a video: %S\n", path, _Video_FFmpegError(scratch.arena, error));
    } else if ((error = avformat_find_stream_info(decoder->format, 0)) < 0) {
-      LogUserErrorF("Could not read what is in %S: %S\n", path, _VID_FFmpegError(scratch.arena, error));
+      LogUserErrorF("Could not read what is in %S: %S\n", path, _Video_FFmpegError(scratch.arena, error));
    } else if ((decoder->stream_idx = av_find_best_stream(decoder->format, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0)) < 0 ||
               codec == 0) {
       LogUserErrorF("%S has no video in it that can be decoded\n", path);
@@ -473,13 +473,13 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
       AVStream* stream = decoder->format->streams[decoder->stream_idx];
 
       // On the card, and if that will not even start, on the processor.
-      error = _VID_OpenVideoCodec(decoder, codec, 1);
+      error = _Video_OpenVideoCodec(decoder, codec, 1);
       if (error < 0) {
-         error = _VID_OpenVideoCodec(decoder, codec, 0);
+         error = _Video_OpenVideoCodec(decoder, codec, 0);
       }
       if (error < 0) {
          LogUserErrorF("Could not start the %s decoder for %S: %S\n", codec->name, path,
-                       _VID_FFmpegError(scratch.arena, error));
+                       _Video_FFmpegError(scratch.arena, error));
       } else if (decoder->codec->width <= 0 || decoder->codec->height <= 0) {
          LogUserErrorF("%S does not say how big its picture is\n", path);
       } else {
@@ -569,14 +569,14 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
          //- bgz: the card or the processor
          //
          // Whether the card takes the stream is only known once FFmpeg has
-         // read the stream's first headers and asked _VID_PickFormat. So the
+         // read the stream's first headers and asked _Video_PickFormat. So the
          // first frame is decoded now, and held for the first
-         // VID_DecoderNextFrame. Now and not on the player's thread because
+         // Video_DecoderNextFrame. Now and not on the player's thread because
          // the log is the main thread's: what another thread logs is lost.
          // After the sound is opened, so that its packets read on the way
          // are kept.
          if (decoder->card != 0) {
-            int first_error = _VID_ReceiveFrame(decoder);
+            int first_error = _Video_ReceiveFrame(decoder);
             if (first_error == 0 && decoder->frame->format == decoder->card_format) {
                decoder->has_first_frame = 1;
                LogInfoF("Video %S: decoded on the graphics card (%s, %s)\n", path, codec->name,
@@ -591,15 +591,15 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
                            codec->name);
                } else {
                   LogInfoF("Video %S: decoded on the processor (%s): the graphics card could not decode it: %S\n", path,
-                           codec->name, _VID_FFmpegError(scratch.arena, first_error));
+                           codec->name, _Video_FFmpegError(scratch.arena, first_error));
                }
-               error = _VID_ReopenOnProcessor(decoder);
+               error = _Video_ReopenOnProcessor(decoder);
                if (error < 0) {
                   LogUserErrorF("Could not start the %s decoder for %S: %S\n", codec->name, path,
-                                _VID_FFmpegError(scratch.arena, error));
+                                _Video_FFmpegError(scratch.arena, error));
                   is_open = 0;
                } else {
-                  _VID_SeekToStart(decoder);
+                  _Video_SeekToStart(decoder);
                }
             }
          } else {
@@ -612,7 +612,7 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
    ScratchEnd(scratch);
 
    if (!is_open) {
-      VID_DecoderClose(decoder);
+      Video_DecoderClose(decoder);
       decoder = 0;
    }
    return decoder;
@@ -630,7 +630,7 @@ VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_Dec
 // What is logged here is lost - this is the player's thread, and the log is
 // the main thread's.
 PRIVATE B32
-_VID_FallBackToProcessor(VID_Decoder* decoder) {
+_Video_FallBackToProcessor(Video_Decoder* decoder) {
    if (decoder->card == 0) {
       return 0;
    }
@@ -640,9 +640,9 @@ _VID_FallBackToProcessor(VID_Decoder* decoder) {
    F64 resume_s = decoder->last_time_s;
    F64 skip_s = decoder->gave_frame ? resume_s : 0;
    F64 sound_resume_s = decoder->sound_given_s;
-   B32 result = (_VID_ReopenOnProcessor(decoder) >= 0);
+   B32 result = (_Video_ReopenOnProcessor(decoder) >= 0);
    if (result) {
-      VID_DecoderSeek(decoder, resume_s);
+      Video_DecoderSeek(decoder, resume_s);
       decoder->skip_until_s = skip_s;
       decoder->sound_skip_until_s = sound_resume_s;
    }
@@ -652,10 +652,10 @@ _VID_FallBackToProcessor(VID_Decoder* decoder) {
 // What the next frame of the file is, and when: 1 and the frame, 0 if there
 // is none. *card_failed_out: the card failed at it, and nothing was given.
 PRIVATE B32
-_VID_NextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out, B32* card_failed_out) {
+_Video_NextFrame(Video_Decoder* decoder, U8* pixels, F64* time_s_out, B32* card_failed_out) {
    *card_failed_out = 0;
 
-   int error = _VID_ReceiveFrame(decoder);
+   int error = _Video_ReceiveFrame(decoder);
    if (error != 0) {
       // AVERROR_EOF: the end. EAGAIN: asked for more after being told there
       // is none. Anything else: it can't go on - which on the card is for
@@ -665,7 +665,7 @@ _VID_NextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out, B32* card_fail
             *card_failed_out = 1;
          } else {
             Temp scratch = ScratchBegin(0, 0);
-            LogUserErrorF("%S stopped decoding: %S\n", decoder->path, _VID_FFmpegError(scratch.arena, error));
+            LogUserErrorF("%S stopped decoding: %S\n", decoder->path, _Video_FFmpegError(scratch.arena, error));
             ScratchEnd(scratch);
          }
       }
@@ -768,12 +768,12 @@ _VID_NextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out, B32* card_fail
 }
 
 B32
-VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
+Video_DecoderNextFrame(Video_Decoder* decoder, U8* pixels, F64* time_s_out) {
    for (;;) {
       B32 card_failed = 0;
-      B32 result = _VID_NextFrame(decoder, pixels, time_s_out, &card_failed);
+      B32 result = _Video_NextFrame(decoder, pixels, time_s_out, &card_failed);
       if (card_failed) {
-         if (_VID_FallBackToProcessor(decoder)) {
+         if (_Video_FallBackToProcessor(decoder)) {
             continue;
          }
          LogUserErrorF("%S stopped decoding\n", decoder->path);
@@ -790,7 +790,7 @@ VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out) {
 // A frame of the file's sound, just decoded, into sound_pending as two
 // channels of F32 at the rate given out.
 PRIVATE void
-_VID_ConvertSound(VID_Decoder* decoder) {
+_Video_ConvertSound(Video_Decoder* decoder) {
    AVFrame* frame = decoder->sound_frame;
    int      channels = frame->ch_layout.nb_channels;
 
@@ -861,7 +861,7 @@ _VID_ConvertSound(VID_Decoder* decoder) {
 }
 
 U64
-VID_DecoderNextSound(VID_Decoder* decoder, F32* samples, U64 frame_cap, F64* time_s_out) {
+Video_DecoderNextSound(Video_Decoder* decoder, F32* samples, U64 frame_cap, F64* time_s_out) {
    if (decoder->sound_codec == 0 || frame_cap == 0) {
       return 0;
    }
@@ -871,7 +871,7 @@ VID_DecoderNextSound(VID_Decoder* decoder, F32* samples, U64 frame_cap, F64* tim
    while (decoder->sound_pending_count == 0) {
       int error = avcodec_receive_frame(decoder->sound_codec, decoder->sound_frame);
       if (error == 0) {
-         _VID_ConvertSound(decoder);
+         _Video_ConvertSound(decoder);
          av_frame_unref(decoder->sound_frame);
 
          // After a fall back to the processor: the part given out before it
@@ -893,7 +893,7 @@ VID_DecoderNextSound(VID_Decoder* decoder, F32* samples, U64 frame_cap, F64* tim
       if (error != AVERROR(EAGAIN) || decoder->sound_is_draining) {
          return 0; // the end, or it can't go on
       }
-      if (_VID_NextPacket(decoder, 1)) {
+      if (_Video_NextPacket(decoder, 1)) {
          avcodec_send_packet(decoder->sound_codec, decoder->packet);
          av_packet_unref(decoder->packet);
       } else {
@@ -913,7 +913,7 @@ VID_DecoderNextSound(VID_Decoder* decoder, F32* samples, U64 frame_cap, F64* tim
 }
 
 void
-VID_DecoderSeek(VID_Decoder* decoder, F64 time_s) {
+Video_DecoderSeek(Video_Decoder* decoder, F64 time_s) {
    decoder->last_time_s = time_s;
    decoder->skip_until_s = 0;
    decoder->sound_skip_until_s = 0;
@@ -932,9 +932,9 @@ VID_DecoderSeek(VID_Decoder* decoder, F64 time_s) {
       error = av_seek_frame(decoder->format, decoder->stream_idx, ticks, AVSEEK_FLAG_BACKWARD);
    }
    if (error < 0) {
-      _VID_SeekToStart(decoder);
+      _Video_SeekToStart(decoder);
    } else {
-      _VID_AfterSeek(decoder);
+      _Video_AfterSeek(decoder);
       decoder->seek_was_to_start = 0;
       decoder->sound_next_s = time_s;
    }

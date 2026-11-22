@@ -4,7 +4,7 @@
 // See text.h.
 
 PRIVATE B32
-_TXT_FontIsValid(FNT_Tag font) {
+_Text_FontIsValid(FNT_Tag font) {
    B32 result = !Core_FNT_TagMatch(font, Core_FNT_TagZero());
    return result;
 }
@@ -12,20 +12,20 @@ _TXT_FontIsValid(FNT_Tag font) {
 // The font cache's size for a size in pixels: points, 72 to an inch where
 // pixels are 96, and no less than one - it rasterizes nothing at zero.
 PRIVATE F32
-_TXT_PointsFromPx(F32 px) {
+_Text_PointsFromPx(F32 px) {
    F32 points = (F32)(S32)(px * 0.75f);
    return Max(points, 1.0f);
 }
 
 // The first of the paths that is a file, as a font. The zero tag if none is.
 PRIVATE FNT_Tag
-_TXT_FontFromFirstPath(String8* paths, U64 path_count) {
+_Text_FontFromFirstPath(String8* paths, U64 path_count) {
    FNT_Tag result = Core_FNT_TagZero();
 
    for (U64 i = 0; i < path_count; i += 1) {
       if (FilePathExists(paths[i])) {
          result = Core_FNT_TagFromPath(paths[i]);
-         if (_TXT_FontIsValid(result)) {
+         if (_Text_FontIsValid(result)) {
             break;
          }
       }
@@ -34,9 +34,9 @@ _TXT_FontFromFirstPath(String8* paths, U64 path_count) {
    return result;
 }
 
-TXT_Fonts
-TXT_OpenFonts(void) {
-   TXT_Fonts result = {0};
+Text_Fonts
+Text_OpenFonts(void) {
+   Text_Fonts result = {0};
    Temp      scratch = ScratchBegin(0, 0);
 
    // Where Windows is installed, which is not always C:\Windows.
@@ -63,22 +63,22 @@ TXT_OpenFonts(void) {
        PushStr8F(scratch.arena, "%s\\Fonts\\cour.ttf", windows_dir),
    };
 
-   result.regular = _TXT_FontFromFirstPath(regular_paths, ArrayCount(regular_paths));
-   result.bold = _TXT_FontFromFirstPath(bold_paths, ArrayCount(bold_paths));
+   result.regular = _Text_FontFromFirstPath(regular_paths, ArrayCount(regular_paths));
+   result.bold = _Text_FontFromFirstPath(bold_paths, ArrayCount(bold_paths));
 
-   result.mono = _TXT_FontFromFirstPath(mono_paths, ArrayCount(mono_paths));
+   result.mono = _Text_FontFromFirstPath(mono_paths, ArrayCount(mono_paths));
 
    // One font is better than none, for either.
-   if (!_TXT_FontIsValid(result.bold)) {
+   if (!_Text_FontIsValid(result.bold)) {
       result.bold = result.regular;
    }
-   if (!_TXT_FontIsValid(result.regular)) {
+   if (!_Text_FontIsValid(result.regular)) {
       result.regular = result.bold;
    }
-   if (!_TXT_FontIsValid(result.mono)) {
+   if (!_Text_FontIsValid(result.mono)) {
       result.mono = result.regular;
    }
-   if (!_TXT_FontIsValid(result.regular)) {
+   if (!_Text_FontIsValid(result.regular)) {
       LogUserErrorF("No font could be opened: text will not be drawn\n");
    }
 
@@ -90,11 +90,11 @@ TXT_OpenFonts(void) {
 // of that, in pixels (rad\font_provider\dwrite\font_provider_dwrite.c). A
 // glyph's bitmap is ascent + descent + line gap tall, in those pixels.
 F32
-TXT_LineHeight(FNT_Tag font, F32 px) {
+Text_LineHeight(FNT_Tag font, F32 px) {
    F32 result = 0;
 
-   if (_TXT_FontIsValid(font)) {
-      FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, _TXT_PointsFromPx(px));
+   if (_Text_FontIsValid(font)) {
+      FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, _Text_PointsFromPx(px));
       result = (metrics.ascent + metrics.descent + metrics.line_gap) * (96.0f / 72.0f);
    }
 
@@ -102,13 +102,13 @@ TXT_LineHeight(FNT_Tag font, F32 px) {
 }
 
 F32
-TXT_Width(FNT_Tag font, F32 px, String8 string) {
+Text_Width(FNT_Tag font, F32 px, String8 string) {
    F32 result = 0;
 
-   if (_TXT_FontIsValid(font) && string.size != 0) {
+   if (_Text_FontIsValid(font) && string.size != 0) {
       // Measured as it is drawn, with the same flags: the font cache keeps
       // glyphs apart by flags, and would rasterize every one twice.
-      FNT_Run run = Core_FNT_RunFromString(font, _TXT_PointsFromPx(px), 0, 0, TXT_RASTER_FLAGS, string);
+      FNT_Run run = Core_FNT_RunFromString(font, _Text_PointsFromPx(px), 0, 0, TXT_RASTER_FLAGS, string);
       result = run.dim.x;
    }
 
@@ -118,13 +118,13 @@ TXT_Width(FNT_Tag font, F32 px, String8 string) {
 // The font cache draws a run into a bitmap round(ascent + descent + line gap)
 // + 1 pixels tall, with the baseline round(descent) + round(line gap) above
 // its bottom (rad\font_provider\dwrite\font_provider_dwrite.c, fp_raster).
-// TXT_Draw puts the top of that bitmap at the position it is given.
+// Text_Draw puts the top of that bitmap at the position it is given.
 F32
-TXT_Baseline(FNT_Tag font, F32 px) {
+Text_Baseline(FNT_Tag font, F32 px) {
    F32 result = 0;
 
-   if (_TXT_FontIsValid(font)) {
-      FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, _TXT_PointsFromPx(px));
+   if (_Text_FontIsValid(font)) {
+      FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, _Text_PointsFromPx(px));
       F32         k = 96.0f / 72.0f;
       F32         bitmap_h = (F32)(S32)(k * (metrics.ascent + metrics.descent + metrics.line_gap) + 0.5f) + 1.0f;
       result = bitmap_h - (F32)(S32)(k * metrics.descent + 0.5f) - (F32)(S32)(k * metrics.line_gap + 0.5f);
@@ -134,11 +134,11 @@ TXT_Baseline(FNT_Tag font, F32 px) {
 }
 
 F32
-TXT_CapHeight(FNT_Tag font, F32 px) {
+Text_CapHeight(FNT_Tag font, F32 px) {
    F32 result = 0;
 
-   if (_TXT_FontIsValid(font)) {
-      FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, _TXT_PointsFromPx(px));
+   if (_Text_FontIsValid(font)) {
+      FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, _Text_PointsFromPx(px));
       result = metrics.capital_height * (96.0f / 72.0f);
    }
 
@@ -146,9 +146,9 @@ TXT_CapHeight(FNT_Tag font, F32 px) {
 }
 
 void
-TXT_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string) {
-   if (_TXT_FontIsValid(font) && string.size != 0) {
-      F32         points = _TXT_PointsFromPx(px);
+Text_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string) {
+   if (_Text_FontIsValid(font) && string.size != 0) {
+      F32         points = _Text_PointsFromPx(px);
       FNT_Metrics metrics = Core_FNT_MetricsFromTagSize(font, points);
       FNT_Run     run = Core_FNT_RunFromString(font, points, 0, 0, TXT_RASTER_FLAGS, string);
 
@@ -164,10 +164,10 @@ TXT_Draw(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 string) 
 }
 
 String8List
-TXT_Wrap(Arena* arena, FNT_Tag font, F32 px, String8 string, F32 max_width) {
+Text_Wrap(Arena* arena, FNT_Tag font, F32 px, String8 string, F32 max_width) {
    String8List result = {0};
 
-   F32 space_width = TXT_Width(font, px, Str8Lit(" "));
+   F32 space_width = Text_Width(font, px, Str8Lit(" "));
 
    U64 line_start = 0; // where the line being built begins
    U64 line_end = 0;   // the end of its last word. == line_start: no words yet
@@ -184,7 +184,7 @@ TXT_Wrap(Arena* arena, FNT_Tag font, F32 px, String8 string, F32 max_width) {
          break;
       }
 
-      F32 word_width = TXT_Width(font, px, Str8Substr(string, R1U64(word_start, word_end)));
+      F32 word_width = Text_Width(font, px, Str8Substr(string, R1U64(word_start, word_end)));
 
       if (line_end == line_start) {
          // The first word of a line always goes on it.

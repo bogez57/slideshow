@@ -8,10 +8,10 @@ Draws one slide into a rect: lays out its title, body and pictures on a page of 
 
 ## Functions
 
-- `VIEW_DrawSlide`: lays out and draws a slide. Given a `VIEW_HitList`, it also says where each piece went (`VIEW_Hit`, `VIEW_Box`) and where its letters are (`VIEW_Run`), for clicks and the caret.
-- `VIEW_ColorsFromTheme`: a theme's colours.
-- `VIEW_ScaleFromDim`, `VIEW_PageRectFromRect`: where the page goes in a rect, and how large.
-- `VIEW_DrawImageFit`: a picture as large as fits, its shape kept.
+- `View_DrawSlide`: lays out and draws a slide. Given a `View_HitList`, it also says where each piece went (`View_Hit`, `View_Box`) and where its letters are (`View_Run`), for clicks and the caret.
+- `View_ColorsFromTheme`: a theme's colours.
+- `View_ScaleFromDim`, `View_PageRectFromRect`: where the page goes in a rect, and how large.
+- `View_DrawImageFit`: a picture as large as fits, its shape kept.
 - `VIEW_MARGIN_X`, `VIEW_MARGIN_TOP`, `VIEW_MARGIN_BOTTOM`: the page's margins.
 
 ## Used by

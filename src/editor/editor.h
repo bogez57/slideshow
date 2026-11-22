@@ -8,24 +8,24 @@
 // business - edit\edit.c hands the text to the deck layer.
 //
 // The text is UTF-8 with \n line endings and no tabs, whatever the file had:
-// ED_Open converts, and ED_Save writes the file's own line endings back.
+// Editor_Open converts, and Editor_Save writes the file's own line endings back.
 //
 // Lines too long for the box are wrapped, at spaces where there are any. The
 // font must be one whose characters are all the same width.
 //
-// Memory is two arenas of the editor's own, both released by ED_Close. One
+// Memory is two arenas of the editor's own, both released by Editor_Close. One
 // has the editor and its text. The other has the undo history, whose copies
 // of the text come and go in no order an arena can follow: the ones let go
 // of are left where they are until they add up, and then the ones still
 // wanted are copied to a fresh arena and the old one is cleared
-// (_ED_HistoryTidy in editor.c).
+// (_Editor_HistoryTidy in editor.c).
 
 // How many changes can be undone. Each is a whole copy of the text, which for
 // a deck is small.
 #define ED_MAX_UNDO 256
 
-typedef struct ED_Snapshot ED_Snapshot;
-struct ED_Snapshot {
+typedef struct Editor_Snapshot Editor_Snapshot;
+struct Editor_Snapshot {
    U8* text;
    U64 size;
    U64 cursor;
@@ -34,15 +34,15 @@ struct ED_Snapshot {
 
 // What kind of change the last one was. Changes of the same kind that follow
 // each other closely are undone together.
-typedef enum ED_EditKind {
-   ED_EditKind_None,
-   ED_EditKind_Type,
-   ED_EditKind_Delete,
-   ED_EditKind_Other, // never joined to the one before
-} ED_EditKind;
+typedef enum Editor_EditKind {
+   Editor_EditKind_None,
+   Editor_EditKind_Type,
+   Editor_EditKind_Delete,
+   Editor_EditKind_Other, // never joined to the one before
+} Editor_EditKind;
 
-typedef struct ED_Editor ED_Editor;
-struct ED_Editor {
+typedef struct Editor_Editor Editor_Editor;
+struct Editor_Editor {
    Arena*    arena;         // the editor, its file's name and its text
    String8   file;
    B32       file_crlf;     // the file's line endings were \r\n
@@ -60,13 +60,13 @@ struct ED_Editor {
    U64 edit_count;  // goes up with every change to the text
    U64 saved_count; // edit_count when the text was last read or written
 
-   ED_Snapshot undo[ED_MAX_UNDO];
+   Editor_Snapshot undo[ED_MAX_UNDO];
    U64         undo_count;
-   ED_Snapshot redo[ED_MAX_UNDO];
+   Editor_Snapshot redo[ED_MAX_UNDO];
    U64         redo_count;
    Arena*      history_arena; // the snapshots' text - and that of ones let go of since the last tidy
    Arena*      history_spare; // empty: what the next tidy copies to
-   ED_EditKind last_edit_kind;
+   Editor_EditKind last_edit_kind;
    U64         last_edit_us;
 
    F32 scroll_y;         // pixels the text is scrolled up by
@@ -75,78 +75,78 @@ struct ED_Editor {
 };
 
 // One row of text as drawn: a line, or a part of one that is too long.
-typedef struct ED_Row ED_Row;
-struct ED_Row {
+typedef struct Editor_Row Editor_Row;
+struct Editor_Row {
    U64 start;
    U64 end;        // one past the last character drawn. Not the \n
    B32 line_start; // the row begins a line
    B32 line_end;   // the row ends a line: a \n or the end of the text follows
 };
 
-typedef struct ED_RowArray ED_RowArray;
-struct ED_RowArray {
-   ED_Row* v;
+typedef struct Editor_RowArray Editor_RowArray;
+struct Editor_RowArray {
+   Editor_Row* v;
    U64     count;
 };
 
-// Where the text is drawn and how big. The same one is given to ED_Input,
-// the mouse's calls and ED_Draw in a frame.
-typedef struct ED_Box ED_Box;
-struct ED_Box {
+// Where the text is drawn and how big. The same one is given to Editor_Input,
+// the mouse's calls and Editor_Draw in a frame.
+typedef struct Editor_Box Editor_Box;
+struct Editor_Box {
    Rng2F32 rect;
    FNT_Tag font;
    F32     px;
 };
 
-// Never 0. A file that does not exist gives an empty editor, and ED_Save
+// Never 0. A file that does not exist gives an empty editor, and Editor_Save
 // makes the file.
-ED_Editor* ED_Open(String8 file);
-void       ED_Close(ED_Editor* editor);
+Editor_Editor* Editor_Open(String8 file);
+void       Editor_Close(Editor_Editor* editor);
 
 // The text as it is now. Good until the next change.
-String8 ED_Text(ED_Editor* editor);
+String8 Editor_Text(Editor_Editor* editor);
 
-B32 ED_HasUnsavedChanges(ED_Editor* editor);
-B32 ED_Save(ED_Editor* editor);
+B32 Editor_HasUnsavedChanges(Editor_Editor* editor);
+B32 Editor_Save(Editor_Editor* editor);
 
 // Whether the file has been written by something else since it was read or
 // saved here.
-B32 ED_FileHasChanged(ED_Editor* editor);
+B32 Editor_FileHasChanged(Editor_Editor* editor);
 
 // Reads the file again, dropping the text here and its undo history.
-void ED_Reload(ED_Editor* editor);
+void Editor_Reload(Editor_Editor* editor);
 
 // Puts string where the selection is, or at the cursor if there is none.
-void ED_Insert(ED_Editor* editor, String8 string, ED_EditKind kind);
+void Editor_Insert(Editor_Editor* editor, String8 string, Editor_EditKind kind);
 
 // Puts string on a line of its own: straight in if the cursor's line is
 // empty, else on a new line under it. The part of string from select_start to
 // select_end is left selected, to be typed over - both the same for a plain
 // cursor there.
-void ED_InsertLine(ED_Editor* editor, String8 string, U64 select_start, U64 select_end);
+void Editor_InsertLine(Editor_Editor* editor, String8 string, U64 select_start, U64 select_end);
 
 // Puts string in place of the text from start to end, and the cursor after it.
-void ED_ReplaceRange(ED_Editor* editor, U64 start, U64 end, String8 string);
+void Editor_ReplaceRange(Editor_Editor* editor, U64 start, U64 end, String8 string);
 
 // Puts mark before and after the selection, which stays selected - or takes
 // them away, if they are there already. With no selection, writes
 // placeholder between two marks and selects it, to be typed over.
-void ED_WrapSelection(ED_Editor* editor, String8 mark, String8 placeholder);
+void Editor_WrapSelection(Editor_Editor* editor, String8 mark, String8 placeholder);
 
-void ED_SetCursor(ED_Editor* editor, U64 pos);
+void Editor_SetCursor(Editor_Editor* editor, U64 pos);
 
 // Keys and typing. Events it uses are eaten, so what the caller wants for
 // itself (its own shortcuts) it takes first. arena is for the frame: the row
 // layout and the clipboard's text go on it.
-void ED_Input(ED_Editor* editor, Arena* arena, WM_EventList* events, ED_Box box);
+void Editor_Input(Editor_Editor* editor, Arena* arena, WM_EventList* events, Editor_Box box);
 
 // The mouse, as the caller's box over the text has it (the edit screen's UI
 // box): a press at pos puts the cursor at the nearest gap between letters
 // there - selecting from where it was, with is_selecting; a drag, while the
 // button that went down in the text stays down, over the box or not, takes
 // the cursor along and leaves the mark; the wheel scrolls notches down.
-void ED_Press(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos, B32 is_selecting);
-void ED_Drag(ED_Editor* editor, Arena* arena, ED_Box box, Vec2F32 pos);
-void ED_Wheel(ED_Editor* editor, ED_Box box, F32 notches);
+void Editor_Press(Editor_Editor* editor, Arena* arena, Editor_Box box, Vec2F32 pos, B32 is_selecting);
+void Editor_Drag(Editor_Editor* editor, Arena* arena, Editor_Box box, Vec2F32 pos);
+void Editor_Wheel(Editor_Editor* editor, Editor_Box box, F32 notches);
 
-void ED_Draw(ED_Editor* editor, Arena* arena, ED_Box box);
+void Editor_Draw(Editor_Editor* editor, Arena* arena, Editor_Box box);

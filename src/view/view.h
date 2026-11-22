@@ -23,9 +23,9 @@
 // title or a block of the body where it says instead. The body's blocks
 // (@box) that are not placed are one under another, where the body is.
 // Words are never made smaller to fit: a block's that do not fit its room
-// are not shown, DECK_Box's scroll says how far down them it shows, and a
+// are not shown, Deck_Box's scroll says how far down them it shows, and a
 // scroll bar beside the room says there are more.
-// @size and @color lines (DECK_Look) give the title's words, or a block's,
+// @size and @color lines (Deck_Look) give the title's words, or a block's,
 // a size and a colour of their own.
 
 #define VIEW_PAGE_W 1280.0f
@@ -39,31 +39,31 @@
 
 // A theme's colours. The background is the caller's to draw, behind the
 // slide and around it: a slide is drawn over it, at any alpha.
-typedef struct VIEW_Colors VIEW_Colors;
-struct VIEW_Colors {
+typedef struct View_Colors View_Colors;
+struct View_Colors {
    Vec4F32 background;
    Vec4F32 title;
    Vec4F32 body;
    Vec4F32 accent; // the bar under the title, headings, bullets' dots
 };
 
-VIEW_Colors VIEW_ColorsFromTheme(DECK_Theme theme);
+View_Colors View_ColorsFromTheme(Deck_Theme theme);
 
 // How many pixels a page unit is in a rect of this size.
-F32 VIEW_ScaleFromDim(Vec2F32 dim);
+F32 View_ScaleFromDim(Vec2F32 dim);
 
 // The largest rect of the page's shape that fits in rect, in the middle.
-Rng2F32 VIEW_PageRectFromRect(Rng2F32 rect);
+Rng2F32 View_PageRectFromRect(Rng2F32 rect);
 
 // The image as large as fits in rect with its shape kept, in the middle of
 // it. alpha is how much of it shows over what is already drawn.
-void VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha);
+void View_DrawImageFit(Image_Image* image, Rng2F32 rect, F32 alpha);
 
 // Where a piece of a slide was drawn, and where in the deck's text it is
 // from: what a click on the slide is a click on.
-typedef struct VIEW_Hit VIEW_Hit;
-struct VIEW_Hit {
-   VIEW_Hit* next;
+typedef struct View_Hit View_Hit;
+struct View_Hit {
+   View_Hit* next;
    Rng2F32   rect;
    Rng1U64   text_range;
 };
@@ -73,10 +73,10 @@ struct VIEW_Hit {
 // title's as wide as its words. As many as a slide can have: each picture,
 // each block and the title.
 #define VIEW_MAX_BOXES (DECK_MAX_PICTURES + DECK_MAX_BOXES + 1)
-typedef struct VIEW_Box VIEW_Box;
-struct VIEW_Box {
-   DECK_PlaceKind kind;
-   U64            idx; // which of the slide's pictures, or blocks of its body (DECK_Box). 0 for the title
+typedef struct View_Box View_Box;
+struct View_Box {
+   Deck_PlaceKind kind;
+   U64            idx; // which of the slide's pictures, or blocks of its body (Deck_Box). 0 for the title
    Rng2F32        rect;
    // The part of their usual size its words were drawn at: an @size line's,
    // or 1. 0 for a picture.
@@ -106,31 +106,31 @@ struct VIEW_Box {
 // With these, a letter of the deck's text can be found on the slide, and a
 // point on the slide in the text (caret\caret.c). Runs of words that are
 // not shown - under the bottom of their block's room - are here too.
-typedef struct VIEW_Run VIEW_Run;
-struct VIEW_Run {
-   VIEW_Run*      next;
+typedef struct View_Run View_Run;
+struct View_Run {
+   View_Run*      next;
    Rng2F32        rect;       // the letters across, the line they are on down
    Rng1U64        text_range; // where they are in the deck's text. Empty for a line with no words yet
-   FNT_Tag        font;       // what they were drawn with: TXT_Width with these
+   FNT_Tag        font;       // what they were drawn with: Text_Width with these
    F32            px;         // measures them as drawn
-   DECK_PlaceKind kind;       // whose they are: the title's, or a block's
+   Deck_PlaceKind kind;       // whose they are: the title's, or a block's
    U64            idx;        // which block
 };
 
-typedef struct VIEW_HitList VIEW_HitList;
-struct VIEW_HitList {
-   VIEW_Hit* first;
-   VIEW_Hit* last;
+typedef struct View_HitList View_HitList;
+struct View_HitList {
+   View_Hit* first;
+   View_Hit* last;
    U64       count;
 
-   VIEW_Run* first_run;
-   VIEW_Run* last_run;
+   View_Run* first_run;
+   View_Run* last_run;
    U64       run_count;
 
    // Where the slide's title, each block of its body and each of its
    // pictures were put: what an @place line would move. None for a picture
    // behind the words.
-   VIEW_Box boxes[VIEW_MAX_BOXES];
+   View_Box boxes[VIEW_MAX_BOXES];
    U64      box_count;
    Rng2F32  page; // the page the slide was drawn on
 
@@ -141,8 +141,8 @@ struct VIEW_HitList {
 };
 
 // The slide is drawn with whichever of its pictures are loaded: loading is
-// the caller's business (DECK_LoadSlide). alpha is as for
-// VIEW_DrawImageFit, for the whole slide. Line lists for wrapped text go on
+// the caller's business (Deck_LoadSlide). alpha is as for
+// View_DrawImageFit, for the whole slide. Line lists for wrapped text go on
 // arena, and are not needed after the call. Nothing is drawn outside rect.
 //
 // A picture that could not be loaded (slide->load_failed) is drawn as a box
@@ -156,5 +156,5 @@ struct VIEW_HitList {
 // (slide->layout) says where its picture and words go, and its @place lines
 // (slide->places, and the pictures' and blocks' own) put any of them
 // somewhere else.
-void VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, Rng2F32 rect, F32 alpha,
-                             VIEW_HitList* hits);
+void View_DrawSlide(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Slide* slide, Rng2F32 rect, F32 alpha,
+                             View_HitList* hits);

@@ -4,13 +4,13 @@
 // See image.h.
 
 // stb_image's memory is an arena, not the C runtime's: while an image is
-// being decoded (IMG_LoadFromPath) everything stb_image asks for is pushed
+// being decoded (Image_LoadFromPath) everything stb_image asks for is pushed
 // on this one, nothing it frees is given back, and the caller lets go of it
 // all at once when the pixels have gone to the renderer.
 PRIVATE Arena* _img_decode_arena = 0;
 
 PRIVATE void*
-_IMG_DecodeRealloc(void* old, U64 old_size, U64 new_size) {
+_Image_DecodeRealloc(void* old, U64 old_size, U64 new_size) {
    void* result = ArenaPush(_img_decode_arena, new_size, 16, 0);
    if (old != 0) {
       MemoryCopy(result, old, Min(old_size, new_size));
@@ -19,7 +19,7 @@ _IMG_DecodeRealloc(void* old, U64 old_size, U64 new_size) {
 }
 
 #define STBI_MALLOC(size)                              ArenaPush(_img_decode_arena, (U64)(size), 16, 0)
-#define STBI_REALLOC_SIZED(old, old_size, new_size)    _IMG_DecodeRealloc((old), (U64)(old_size), (U64)(new_size))
+#define STBI_REALLOC_SIZED(old, old_size, new_size)    _Image_DecodeRealloc((old), (U64)(old_size), (U64)(new_size))
 #define STBI_FREE(memory)                              ((void)(memory))
 
 // stb_image is held to its own warnings, not the app's. From memory only:
@@ -37,7 +37,7 @@ _IMG_DecodeRealloc(void* old, U64 old_size, U64 new_size) {
 #endif
 
 B32
-IMG_NameIsImage(String8 name) {
+Image_NameIsImage(String8 name) {
    B32 result = 0;
 
    String8 extensions[] = {Str8Lit("png"), Str8Lit("jpg"), Str8Lit("jpeg"), Str8Lit("bmp"), Str8Lit("gif"),
@@ -56,9 +56,9 @@ IMG_NameIsImage(String8 name) {
    return result;
 }
 
-IMG_Image
-IMG_LoadFromPath(String8 path) {
-   IMG_Image result = {0};
+Image_Image
+Image_LoadFromPath(String8 path) {
+   Image_Image result = {0};
    Temp      scratch = ScratchBegin(0, 0);
 
    String8 data = DataFromFilePath(scratch.arena, path);
@@ -108,14 +108,14 @@ IMG_LoadFromPath(String8 path) {
 }
 
 B32
-IMG_IsLoaded(IMG_Image* image) {
+Image_IsLoaded(Image_Image* image) {
    B32 result = !Core_R_HandleMatch(image->texture, Core_R_HandleZero());
    return result;
 }
 
 void
-IMG_Release(IMG_Image* image) {
-   if (IMG_IsLoaded(image)) {
+Image_Release(Image_Image* image) {
+   if (Image_IsLoaded(image)) {
       Core_R_Tex2DRelease(image->texture);
    }
    MemoryZeroStruct(image);

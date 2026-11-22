@@ -30,12 +30,15 @@
 //
 // It is built with the UI layer, as the main window's screens are, with a
 // UI_State of its own (app_state->presenter_ui_state) and its own events:
-// PRES_Draw builds it, lays it out and draws it, in its own frame after the
-// main window's. A slide the presenter asks for is gone to by the
-// presentation's input, the next frame, so that it fades as the others do.
+// Presenter_Draw builds it, lays it out and draws it, in its own frame after the
+// main window's. What a click asks for is a state op, run at the start of the
+// next frame: a slide gone to (App_GoToSlide) fades as the others do.
+
+// When the window's last UI build began, for its animations. 0: none yet.
+PRIVATE U64 _presenter_ui_last_frame_us;
 
 void
-PRES_Toggle(App_State* app_state) {
+Presenter_Toggle(App_State* app_state) {
    if (app_state->presenter_open) {
       Core_R_WindowUnequip(app_state->presenter_window, app_state->presenter_window_eqp);
       Core_WM_WindowClose(app_state->presenter_window);
@@ -54,18 +57,17 @@ PRES_Toggle(App_State* app_state) {
       app_state->presenter_open = 1;
       app_state->presenter_started_us = NowTimeUS();
       app_state->presenter_paused_us = 0;
-      app_state->presenter_ui_last_frame_us = 0;
-      app_state->presenter_goto = 0;
+      _presenter_ui_last_frame_us = 0;
       Core_WM_WindowFirstPaint(app_state->presenter_window);
    }
 }
 
 void
-PRES_Input(App_State* app_state) {
+Presenter_Input(const App_State* app_state) {
    if (!app_state->presenter_open) {
       return;
    }
-   WM_EventList* events = &app_state->events;
+   WM_EventList* events = app_state->events;
 
    WM_Event* next_event = 0;
    for (WM_Event* event = events->first; event != 0; event = next_event) {
@@ -80,7 +82,7 @@ PRES_Input(App_State* app_state) {
                       ((event->kind == WM_EventKind_Press || event->kind == WM_EventKind_Release) && is_mouse_button));
       if (event->kind == WM_EventKind_WindowClose) {
          // Only this window: the program goes on.
-         app_state->toggle_presenter = 1;
+         StateOp_App_TogglePresenter(app_state->op_list);
          Core_WM_EatEvent(events, event);
       } else if (event->kind == WM_EventKind_Press && !is_mouse_button) {
          // A key: as if pressed in the main window.
@@ -89,7 +91,7 @@ PRES_Input(App_State* app_state) {
          // The wheel: left for the presentation, which turns the slides by
          // it whichever window it was over.
       } else if (is_mouse) {
-         // Left for this window's UI (PRES_Draw), which asks for its own
+         // Left for this window's UI (Presenter_Draw), which asks for its own
          // window's events only. Nothing of the main window's reads another
          // window's mouse.
       } else {
@@ -100,9 +102,9 @@ PRES_Input(App_State* app_state) {
 
 //- bgz: what the boxes draw that the UI cannot: slides
 
-typedef struct _PRES_Slide _PRES_Slide;
-struct _PRES_Slide {
-   App_State* app_state;
+typedef struct _Presenter_Slide _Presenter_Slide;
+struct _Presenter_Slide {
+   const App_State* app_state;
    U64        slide_idx;
    Rng2F32    rect;         // exactly: the box's is on whole pixels
    F32        alpha;
@@ -112,23 +114,23 @@ struct _PRES_Slide {
 };
 
 PRIVATE void
-_PRES_DrawSlide(UI_Box* box, void* user_data) {
-   _PRES_Slide* s = (_PRES_Slide*)user_data;
-   App_State*   app_state = s->app_state;
-   DECK_Deck*   deck = app_state->deck;
+_Presenter_DrawSlide(UI_Box* box, void* user_data) {
+   _Presenter_Slide* s = (_Presenter_Slide*)user_data;
+   const App_State*   app_state = s->app_state;
+   Deck_Deck*   deck = app_state->deck;
    if (s->slide_idx >= deck->slide_count) {
       return;
    }
    if (s->frame > 0) {
       Core_D_Rect(Pad2F32(s->rect, s->frame), R2F32P(0, 0, 1, 1), box->border_color);
    }
-   Core_D_Rect(s->rect, R2F32P(0, 0, 1, 1), VIEW_ColorsFromTheme(deck->theme).background);
+   Core_D_Rect(s->rect, R2F32P(0, 0, 1, 1), View_ColorsFromTheme(deck->theme).background);
    if (s->keeps_scroll) {
-      CARET_BeforeDrawOf(app_state, s->slide_idx);
+      Caret_BeforeDrawOf(app_state, s->slide_idx);
    }
-   VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[s->slide_idx], s->rect, s->alpha, 0);
+   View_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[s->slide_idx], s->rect, s->alpha, 0);
    if (s->keeps_scroll) {
-      CARET_AfterDrawOf(app_state, s->slide_idx);
+      Caret_AfterDrawOf(app_state, s->slide_idx);
    }
    if (s->bar > 0) {
       Core_D_Rect(R2F32P(s->rect.min.x, s->rect.max.y - s->bar, s->rect.max.x, s->rect.max.y), R2F32P(0, 0, 1, 1), box->border_color);
@@ -136,15 +138,15 @@ _PRES_DrawSlide(UI_Box* box, void* user_data) {
 }
 
 // A slide in a box of its own at rect; box_out, if not 0, is given the box.
-PRIVATE _PRES_Slide*
-_PRES_BuildSlide(App_State* app_state, U64 slide_idx, Rng2F32 rect, B32 is_clicked, UI_Box** box_out, char* key) {
-   _PRES_Slide* s = PushArray(UI_BuildArena(), _PRES_Slide, 1);
+PRIVATE _Presenter_Slide*
+_Presenter_BuildSlide(const App_State* app_state, U64 slide_idx, Rng2F32 rect, B32 is_clicked, UI_Box** box_out, char* key) {
+   _Presenter_Slide* s = PushArray(UI_BuildArena(), _Presenter_Slide, 1);
    s->app_state = app_state;
    s->slide_idx = slide_idx;
    s->rect = rect;
    s->alpha = 1.0f;
    UI_Box* box = FR_BuildRectBox(is_clicked ? UI_BoxFlag_MouseClickable : 0, rect, "%s %llu", key, (unsigned long long)slide_idx);
-   UI_BoxEquipCustomDraw(box, _PRES_DrawSlide, s);
+   UI_BoxEquipCustomDraw(box, _Presenter_DrawSlide, s);
    if (box_out != 0) {
       *box_out = box;
    }
@@ -154,11 +156,11 @@ _PRES_BuildSlide(App_State* app_state, U64 slide_idx, Rng2F32 rect, B32 is_click
 // A button: a box with its word in the middle, lighter under the mouse. One
 // that is not enabled is faint, and takes no clicks. 1 when pressed.
 PRIVATE B32
-_PRES_Button(App_State* app_state, Rng2F32 rect, String8 label, F32 px, B32 is_enabled, char* key) {
-   TXT_Fonts* fonts = &app_state->fonts;
+_Presenter_Button(const App_State* app_state, Rng2F32 rect, String8 label, F32 px, B32 is_enabled, char* key) {
+   const Text_Fonts* fonts = &app_state->fonts;
 
    // Its word shrinks to fit across it.
-   F32 label_w = TXT_Width(fonts->regular, px, label);
+   F32 label_w = Text_Width(fonts->regular, px, label);
    F32 room = Dim2F32(rect).x * 0.9f;
    if (label_w > room && label_w > 0) {
       px = (F32)(S32)Max(px * room / label_w, 8.0f);
@@ -182,10 +184,13 @@ _PRES_Button(App_State* app_state, Rng2F32 rect, String8 label, F32 px, B32 is_e
    return result;
 }
 
+//- bgz: state ops: the clock
+
 // The clock stopped, or let run on from where it stopped: the time it stood
 // still is not counted.
-PRIVATE void
-_PRES_ToggleClock(App_State* app_state) {
+void
+Presenter_ToggleClock(App_State* app_state, StateOp_List* ops) {
+   UnusedVariable(ops);
    U64 now_us = NowTimeUS();
    if (app_state->presenter_paused_us != 0) {
       app_state->presenter_started_us += now_us - app_state->presenter_paused_us;
@@ -194,11 +199,25 @@ _PRES_ToggleClock(App_State* app_state) {
       app_state->presenter_paused_us = now_us;
    }
 }
+STATE_OP_NO_PARAMS(Presenter_ToggleClock)
+
+// To 00:00, running or stopped as it was.
+void
+Presenter_ResetClock(App_State* app_state, StateOp_List* ops) {
+   UnusedVariable(ops);
+   U64 now_us = NowTimeUS();
+   app_state->presenter_started_us = now_us;
+   if (app_state->presenter_paused_us != 0) {
+      app_state->presenter_paused_us = now_us;
+   }
+}
+STATE_OP_NO_PARAMS(Presenter_ResetClock)
 
 PRIVATE void
-_PRES_Build(App_State* app_state, Vec2F32 window_dim) {
-   DECK_Deck* deck = app_state->deck;
-   TXT_Fonts* fonts = &app_state->fonts;
+_Presenter_Build(const App_State* app_state, Vec2F32 window_dim) {
+   Deck_Deck*    deck = app_state->deck;
+   const Text_Fonts*   fonts = &app_state->fonts;
+   StateOp_List* ops = app_state->op_list;
 
    Vec4F32 color_text = UI_ThemeColor(Str8Lit(""), UI_ColorSlot_Text);
    Vec4F32 color_dim = UI_ThemeColor(Str8Lit("dim"), UI_ColorSlot_Text);
@@ -214,9 +233,9 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
    F32 notes_px = (F32)(S32)Max(22.0f * ui, 13.0f);
    F32 count_px = (F32)(S32)Max(20.0f * ui, 12.0f);
    F32 clock_px = (F32)(S32)Max(52.0f * ui, 20.0f);
-   F32 label_h = TXT_LineHeight(fonts->regular, label_px);
+   F32 label_h = Text_LineHeight(fonts->regular, label_px);
    F32 button_px = (F32)(S32)Max(16.0f * ui, 11.0f);
-   F32 button_h = (F32)(S32)(TXT_LineHeight(fonts->regular, button_px) * 1.7f);
+   F32 button_h = (F32)(S32)(Text_LineHeight(fonts->regular, button_px) * 1.7f);
    F32 gap = (F32)(S32)Max(pad * 0.4f, 2.0f);
 
    // Along the bottom, every slide, small. A window too short to spare
@@ -235,16 +254,16 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
 
    if (deck->slide_count != 0 && Dim2F32(left).x > 0 && Dim2F32(right).x > 0 && Dim2F32(left).y > 0) {
       U64         slide_idx = Min(app_state->slide_idx, deck->slide_count - 1);
-      DECK_Slide* slide = &deck->slides[slide_idx];
+      Deck_Slide* slide = &deck->slides[slide_idx];
 
       //- bgz: the slide showing: as wide as the left, and no taller than
       // leaves the notes a third of the height. As far down its blocks'
       // words as the wheel has them on the screen.
       F32     slide_w = Dim2F32(left).x;
       F32     slide_h = Min(slide_w * VIEW_PAGE_H / VIEW_PAGE_W, Dim2F32(left).y * 0.66f);
-      Rng2F32 slide_rect = VIEW_PageRectFromRect(R2F32P(left.min.x, left.min.y, left.max.x, left.min.y + slide_h));
+      Rng2F32 slide_rect = View_PageRectFromRect(R2F32P(left.min.x, left.min.y, left.max.x, left.min.y + slide_h));
       slide_rect = R2F32P(left.min.x, left.min.y, left.min.x + Dim2F32(slide_rect).x, left.min.y + Dim2F32(slide_rect).y);
-      _PRES_BuildSlide(app_state, slide_idx, slide_rect, 0, 0, "###presenter slide")->keeps_scroll = 1;
+      _Presenter_BuildSlide(app_state, slide_idx, slide_rect, 0, 0, "###presenter slide")->keeps_scroll = 1;
 
       //- bgz: its notes, under it
       {
@@ -252,7 +271,7 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
          FR_BuildWords(fonts->bold, label_px, V2F32(left.min.x, y), color_dim, Str8Lit("Notes"), "###presenter notes label");
          y += label_h * 1.4f;
 
-         F32     line_h = TXT_LineHeight(fonts->regular, notes_px);
+         F32     line_h = Text_LineHeight(fonts->regular, notes_px);
          UI_Box* notes_box = FR_BuildRectBox(UI_BoxFlag_Clip, R2F32P(left.min.x, y, left.max.x, left.max.y), "###presenter notes");
          UI_Parent(notes_box) {
             String8List notes = slide->notes;
@@ -265,7 +284,7 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
             // A line that does not fit whole is left out, and the rest after it.
             U64 line_idx = 0;
             for (String8Node* note = notes.first; note != 0; note = note->next) {
-               String8List lines = TXT_Wrap(UI_BuildArena(), fonts->regular, notes_px, note->string, Dim2F32(left).x);
+               String8List lines = Text_Wrap(UI_BuildArena(), fonts->regular, notes_px, note->string, Dim2F32(left).x);
                for (String8Node* line = lines.first; line != 0; line = line->next) {
                   if (y + line_h > left.max.y) {
                      break;
@@ -292,11 +311,11 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
          // the column.
          String8 count = PushStr8F(UI_BuildArena(), "Slide %llu of %llu", (unsigned long long)(slide_idx + 1),
                                    (unsigned long long)deck->slide_count);
-         F32 count_w = TXT_Width(fonts->regular, count_px, count);
+         F32 count_w = Text_Width(fonts->regular, count_px, count);
          if (count_w > right_w && count_w > 0) {
             count_px = (F32)(S32)Max(count_px * right_w / count_w, 8.0f);
          }
-         F32 count_h = TXT_LineHeight(fonts->regular, count_px);
+         F32 count_h = Text_LineHeight(fonts->regular, count_px);
 
          // A stopped clock stands at the time it was stopped.
          B32     is_paused = (app_state->presenter_paused_us != 0);
@@ -307,12 +326,12 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
                                          (unsigned long long)((seconds / 60) % 60), (unsigned long long)(seconds % 60))
                              : PushStr8F(UI_BuildArena(), "%02llu:%02llu", (unsigned long long)(seconds / 60),
                                          (unsigned long long)(seconds % 60));
-         F32 clock_w = TXT_Width(fonts->bold, clock_px, clock);
+         F32 clock_w = Text_Width(fonts->bold, clock_px, clock);
          if (clock_w > right_w && clock_w > 0) {
             clock_px = (F32)(S32)Max(clock_px * right_w / clock_w, 8.0f);
-            clock_w = TXT_Width(fonts->bold, clock_px, clock);
+            clock_w = Text_Width(fonts->bold, clock_px, clock);
          }
-         F32 clock_h = TXT_LineHeight(fonts->bold, clock_px);
+         F32 clock_h = Text_LineHeight(fonts->bold, clock_px);
 
          // All that goes under the next slide, top to bottom: the buttons,
          // the count, the clock, its buttons, the hint.
@@ -339,18 +358,18 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
             // Its picture is loaded here: the main window only loads the one
             // showing. Being next to that one, it is not released again
             // until the deck moves on from both.
-            DECK_LoadSlideOnly(deck, slide_idx + 1);
+            Deck_LoadSlideOnly(deck, slide_idx + 1);
             // A click on it goes on to it. Under the mouse it has a frame,
             // to say so.
             UI_Box*      next_box = 0;
-            _PRES_Slide* next = _PRES_BuildSlide(app_state, slide_idx + 1, next_rect, 1, &next_box, "###presenter next");
+            _Presenter_Slide* next = _Presenter_BuildSlide(app_state, slide_idx + 1, next_rect, 1, &next_box, "###presenter next");
             UI_Signal    signal = UI_SignalFromBox(next_box);
             if (UI_Hovering(signal)) {
                next->frame = (F32)(S32)Max(2.0f * ui, 1.0f);
                next_box->border_color = UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Border);
             }
             if (signal.f & UI_SignalFlag_LeftPressed) {
-               app_state->presenter_goto = slide_idx + 2;
+               StateOp_App_GoToSlide(ops)->slide_idx = slide_idx + 1;
             }
          } else {
             UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("end"), UI_ColorSlot_Background));
@@ -368,13 +387,13 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
          //- bgz: back and on, side by side, as wide as the column
          F32 half_w = (F32)(S32)((right_w - gap) * 0.5f);
          if (y + button_h <= right.max.y) {
-            if (_PRES_Button(app_state, R2F32P(right.min.x, y, right.min.x + half_w, y + button_h), Str8Lit("Previous"), button_px, has_prev,
+            if (_Presenter_Button(app_state, R2F32P(right.min.x, y, right.min.x + half_w, y + button_h), Str8Lit("Previous"), button_px, has_prev,
                              "###presenter previous")) {
-               app_state->presenter_goto = slide_idx;
+               StateOp_App_GoToSlide(ops)->slide_idx = slide_idx - 1;
             }
-            if (_PRES_Button(app_state, R2F32P(right.min.x + half_w + gap, y, right.max.x, y + button_h), Str8Lit("Next"), button_px, has_next,
+            if (_Presenter_Button(app_state, R2F32P(right.min.x + half_w + gap, y, right.max.x, y + button_h), Str8Lit("Next"), button_px, has_next,
                              "###presenter next button")) {
-               app_state->presenter_goto = slide_idx + 2;
+               StateOp_App_GoToSlide(ops)->slide_idx = slide_idx + 1;
             }
          }
          y += button_h + pad;
@@ -392,42 +411,37 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
             UI_Box* clock_box = FR_BuildRectBox(UI_BoxFlag_MouseClickable, R2F32P(right.min.x, y, right.min.x + Min(clock_w, right_w), y + clock_h),
                                                 "###presenter clock click");
             if (UI_SignalFromBox(clock_box).f & UI_SignalFlag_LeftPressed) {
-               _PRES_ToggleClock(app_state);
+               StateOp_Presenter_ToggleClock(ops);
             }
          }
          y += clock_h * 1.1f;
 
          if (y + button_h <= right.max.y) {
-            if (_PRES_Button(app_state, R2F32P(right.min.x, y, right.min.x + half_w, y + button_h), is_paused ? Str8Lit("Resume") : Str8Lit("Pause"),
+            if (_Presenter_Button(app_state, R2F32P(right.min.x, y, right.min.x + half_w, y + button_h), is_paused ? Str8Lit("Resume") : Str8Lit("Pause"),
                              button_px, 1, "###presenter pause")) {
-               _PRES_ToggleClock(app_state);
+               StateOp_Presenter_ToggleClock(ops);
             }
-            if (_PRES_Button(app_state, R2F32P(right.min.x + half_w + gap, y, right.max.x, y + button_h), Str8Lit("Reset"), button_px, 1,
+            if (_Presenter_Button(app_state, R2F32P(right.min.x + half_w + gap, y, right.max.x, y + button_h), Str8Lit("Reset"), button_px, 1,
                              "###presenter reset")) {
-               // To 00:00, running or stopped as it was.
-               U64 now_us = NowTimeUS();
-               app_state->presenter_started_us = now_us;
-               if (app_state->presenter_paused_us != 0) {
-                  app_state->presenter_paused_us = now_us;
-               }
+               StateOp_Presenter_ResetClock(ops);
             }
          }
          y += button_h + gap * 1.5f;
 
          // The slide's videos, if it has any: played and paused from here
          // too, all together, as K does.
-         if (DECK_VideoFromSlide(deck, slide_idx) != 0) {
+         if (Deck_VideoFromSlide(deck, slide_idx) != 0) {
             if (y + button_h <= right.max.y) {
-               if (_PRES_Button(app_state, R2F32P(right.min.x, y, right.max.x, y + button_h),
-                                SVID_SlideIsPlaying(deck, slide_idx) ? Str8Lit("Pause video") : Str8Lit("Play video"), button_px, 1,
+               if (_Presenter_Button(app_state, R2F32P(right.min.x, y, right.max.x, y + button_h),
+                                SlideVideo_SlideIsPlaying(deck, slide_idx) ? Str8Lit("Pause video") : Str8Lit("Play video"), button_px, 1,
                                 "###presenter video")) {
-                  SVID_ToggleSlide(deck, slide_idx);
+                  StateOp_SlideVideo_ToggleSlide(ops)->slide_idx = slide_idx;
                }
             }
             y += button_h + gap * 1.5f;
          }
 
-         String8List hint = TXT_Wrap(UI_BuildArena(), fonts->regular, label_px, Str8Lit("V closes this window"), right_w);
+         String8List hint = Text_Wrap(UI_BuildArena(), fonts->regular, label_px, Str8Lit("V closes this window"), right_w);
          U64         hint_idx = 0;
          for (String8Node* line = hint.first; line != 0 && y + label_h <= right.max.y; line = line->next, hint_idx += 1) {
             FR_BuildWords(fonts->regular, label_px, V2F32(right.min.x, y), color_dim, line->string, "###presenter hint %llu",
@@ -464,11 +478,11 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
             // screen's row: loading every picture of a long deck for its
             // small slides is what the deck avoids.
             UI_Box*      thumb_box = 0;
-            _PRES_Slide* thumb = _PRES_BuildSlide(app_state, i, rect, 1, &thumb_box, "###presenter thumb");
+            _Presenter_Slide* thumb = _Presenter_BuildSlide(app_state, i, rect, 1, &thumb_box, "###presenter thumb");
             UI_Signal    signal = UI_SignalFromBox(thumb_box);
             B32          is_hot = UI_Hovering(signal);
             if (signal.f & UI_SignalFlag_LeftPressed) {
-               app_state->presenter_goto = i + 1;
+               StateOp_App_GoToSlide(ops)->slide_idx = i;
             }
             // The one showing has a bar under it, in the clock's colour.
             thumb->alpha = (is_showing || is_hot) ? 1.0f : 0.7f;
@@ -486,13 +500,13 @@ _PRES_Build(App_State* app_state, Vec2F32 window_dim) {
 }
 
 void
-PRES_Draw(App_State* app_state) {
+Presenter_Draw(const App_State* app_state) {
    Vec2F32 window_dim = Dim2F32(Core_WM_ClientRectFromWindow(app_state->presenter_window));
 
-   FR_BeginUIBuild(app_state, app_state->presenter_ui_state, app_state->presenter_window, &app_state->presenter_ui_last_frame_us);
+   FR_BeginUIBuild(app_state, app_state->presenter_ui_state, app_state->presenter_window, &_presenter_ui_last_frame_us);
    // What is shown is text as it is - a note, a title - never a box's key.
    UI_FlagsAdd(UI_BoxFlag_DisableIDString) UI_ColorTag(Str8Lit("presenter")) {
-      _PRES_Build(app_state, window_dim);
+      _Presenter_Build(app_state, window_dim);
    }
    UI_EndBuild();
 

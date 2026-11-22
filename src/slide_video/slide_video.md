@@ -4,15 +4,17 @@ A slide's video: when it plays, and its strip of controls - play and pause, the 
 
 ## State
 
-- `App_State`'s `video_auto_slide`: the slide whose video was started because the presentation came to it.
-- `video_key_us`, written by the presentation (frame.c): when one of the video's keys was last pressed, for how long the strip shows.
+- `App_State`'s `video_auto_slide`: the slide whose video was started because the presentation came to it. Written by `SlideVideo_Update`.
+- Whether a video plays and where it is are the video's own (src\video), changed by the ops below.
+- When one of the video's keys was last pressed, for how long the strip shows, is frame.c's (`_frame_state.video_key_us`).
 
-## Functions
+## Functions and ops
 
-- `SVID_BuildStripHits`, `SVID_BuildStripLook`: the strip as UI boxes - the ones clicked, and the ones drawn.
-- `SVID_SlideIsPlaying`, `SVID_ToggleSlide`: a slide's videos together.
-- `SVID_Keys`: the video's keys while presenting.
-- `SVID_Update`: once a frame, starts and stops videos as slides come and go.
+- `SlideVideo_BuildStripHits`, `SlideVideo_BuildStripLook`: the strip as UI boxes - the ones clicked, which push ops, and the ones drawn.
+- `SlideVideo_SlideIsPlaying`: whether any of a slide's videos is playing.
+- `SlideVideo_Keys`: the video's keys while presenting. Pushes ops.
+- `SlideVideo_Update`: once a frame, from `_FR_UpdateAppState`, starts and stops videos as slides come and go.
+- Ops: `SlideVideo_ToggleSlide` and `SlideVideo_StepSlide` (a slide's videos together), `SlideVideo_TogglePicture` and `SlideVideo_SeekPicture` (one video, by its slide and which picture it is), `SlideVideo_ToggleMuted`.
 - `SVID_STRIP_SECONDS`: how long the presentation shows the strip after a key.
 
 ## Used by

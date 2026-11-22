@@ -4,14 +4,14 @@ Drawing and measuring text, on top of bgz's font cache and draw layers. Sizes ar
 
 ## State
 
-- None of its own. The fonts it opens (`TXT_Fonts`) are kept in `App_State` as `fonts`.
+- None of its own. The fonts it opens (`Text_Fonts`) are kept in `App_State` as `fonts`.
 
 ## Functions
 
-- `TXT_OpenFonts`: the regular, bold and mono fonts - the program's own in `data\fonts`, else Windows'.
-- `TXT_LineHeight`, `TXT_Width`, `TXT_Baseline`, `TXT_CapHeight`: measuring.
-- `TXT_Draw`: one line of text.
-- `TXT_Wrap`: a string cut into lines no wider than a width.
+- `Text_OpenFonts`: the regular, bold and mono fonts - the program's own in `data\fonts`, else Windows'.
+- `Text_LineHeight`, `Text_Width`, `Text_Baseline`, `Text_CapHeight`: measuring.
+- `Text_Draw`: one line of text.
+- `Text_Wrap`: a string cut into lines no wider than a width.
 - `TXT_RASTER_FLAGS`: how the font cache draws the letters, for the UI layer to draw its text the same way.
 
 ## Used by

@@ -4,7 +4,7 @@
 // See audio.h. Nothing here knows what plays the sound: that is
 // audio_device.h.
 //
-// The device asks for sound (_AUD_Mix, on its thread). Each voice in turn
+// The device asks for sound (_Audio_Mix, on its thread). Each voice in turn
 // writes what it has into a buffer of silence, and the buffers are added
 // up. The list of voices is under the mutex, which the device's thread
 // holds while it mixes: a voice being removed waits for the mix to finish,
@@ -15,28 +15,28 @@
 // the voices' buffer, which is not on the stack.
 #define _AUD_MIX_FRAMES 8192
 
-struct AUD_Voice {
-   AUD_VoiceFunction* function; // 0: free
+struct Audio_Voice {
+   Audio_VoiceFunction* function; // 0: free
    void*              user;
 };
 
-typedef struct _AUD_State _AUD_State;
-struct _AUD_State {
+typedef struct _Audio_State _Audio_State;
+struct _Audio_State {
    Arena*      arena;
-   AUD_Device* device;
+   Audio_Device* device;
    Mutex       mutex;
 
    //- bgz: under the mutex
-   AUD_Voice voices[AUD_MAX_VOICES];
+   Audio_Voice voices[AUD_MAX_VOICES];
    B32       muted;
    F32*      voice_samples; // one voice's, before it is added in
 };
 
-PRIVATE _AUD_State* _aud_state = 0;
+PRIVATE _Audio_State* _aud_state = 0;
 
 PRIVATE void
-_AUD_Mix(void* user, F32* samples, U64 frame_count, F64 delay_s) {
-   _AUD_State* state = (_AUD_State*)user;
+_Audio_Mix(void* user, F32* samples, U64 frame_count, F64 delay_s) {
+   _Audio_State* state = (_Audio_State*)user;
    U64         sample_count = frame_count * AUD_CHANNELS;
    MemoryZero(samples, sample_count * sizeof(F32));
 
@@ -48,7 +48,7 @@ _AUD_Mix(void* user, F32* samples, U64 frame_count, F64 delay_s) {
       F32* out = samples + frame * AUD_CHANNELS;
 
       for (U64 i = 0; i < AUD_MAX_VOICES; i += 1) {
-         AUD_Voice* voice = &state->voices[i];
+         Audio_Voice* voice = &state->voices[i];
          if (voice->function == 0) {
             continue;
          }
@@ -71,32 +71,32 @@ _AUD_Mix(void* user, F32* samples, U64 frame_count, F64 delay_s) {
 }
 
 void
-AUD_Init(void) {
+Audio_Init(void) {
    if (_aud_state != 0) {
       return;
    }
    Arena* arena = ArenaAlloc();
-   _aud_state = PushArray(arena, _AUD_State, 1);
+   _aud_state = PushArray(arena, _Audio_State, 1);
    _aud_state->arena = arena;
    _aud_state->mutex = MutexAlloc();
    _aud_state->voice_samples = PushArray(arena, F32, _AUD_MIX_FRAMES * AUD_CHANNELS);
-   _aud_state->device = AUD_DeviceOpen(arena, _AUD_Mix, _aud_state);
+   _aud_state->device = Audio_DeviceOpen(arena, _Audio_Mix, _aud_state);
 }
 
 void
-AUD_Shutdown(void) {
+Audio_Shutdown(void) {
    if (_aud_state == 0) {
       return;
    }
-   AUD_DeviceClose(_aud_state->device);
+   Audio_DeviceClose(_aud_state->device);
    MutexRelease(_aud_state->mutex);
    ArenaRelease(_aud_state->arena);
    _aud_state = 0;
 }
 
-AUD_Voice*
-AUD_VoiceAdd(AUD_VoiceFunction* function, void* user) {
-   AUD_Voice* result = 0;
+Audio_Voice*
+Audio_VoiceAdd(Audio_VoiceFunction* function, void* user) {
+   Audio_Voice* result = 0;
    if (_aud_state != 0 && function != 0) {
       MutexTake(_aud_state->mutex);
       for (U64 i = 0; i < AUD_MAX_VOICES; i += 1) {
@@ -113,7 +113,7 @@ AUD_VoiceAdd(AUD_VoiceFunction* function, void* user) {
 }
 
 void
-AUD_VoiceRemove(AUD_Voice* voice) {
+Audio_VoiceRemove(Audio_Voice* voice) {
    if (_aud_state != 0 && voice != 0) {
       MutexTake(_aud_state->mutex);
       voice->function = 0;
@@ -123,7 +123,7 @@ AUD_VoiceRemove(AUD_Voice* voice) {
 }
 
 B32
-AUD_IsMuted(void) {
+Audio_IsMuted(void) {
    B32 result = 0;
    if (_aud_state != 0) {
       MutexTake(_aud_state->mutex);
@@ -134,7 +134,7 @@ AUD_IsMuted(void) {
 }
 
 void
-AUD_SetMuted(B32 muted) {
+Audio_SetMuted(B32 muted) {
    if (_aud_state != 0) {
       MutexTake(_aud_state->mutex);
       _aud_state->muted = muted;

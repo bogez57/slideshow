@@ -5,13 +5,13 @@
 //
 // A thread decodes ahead of what is shown and heard: frames into a queue
 // of a few, sound into a ring of a couple of seconds. The main thread, once
-// a frame (VID_Update), moves the clock on and takes from the queue the
+// a frame (Video_Update), moves the clock on and takes from the queue the
 // frame whose time has come. The audio thread, whenever the sound card
-// wants more (_VID_Voice), takes sound from the ring:
+// wants more (_Video_Voice), takes sound from the ring:
 //
 //    decode thread                            main thread
-//    VID_DecoderNextFrame --> [frame queue] --> VID_Update --> texture
-//    VID_DecoderNextSound --> [sound ring]  --> _VID_Voice --> speakers
+//    Video_DecoderNextFrame --> [frame queue] --> Video_Update --> texture
+//    Video_DecoderNextSound --> [sound ring]  --> _Video_Voice --> speakers
 //                                               audio thread
 //
 // The queue and the ring are all the threads share, and they are under the
@@ -37,8 +37,8 @@
 
 #define _VID_QUEUE_CAP 4
 
-typedef struct _VID_Frame _VID_Frame;
-struct _VID_Frame {
+typedef struct _Video_Frame _Video_Frame;
+struct _Video_Frame {
    U8* pixels; // the video's size, RGBA: on the video's arena
    F64 time_s;
 };
@@ -50,11 +50,11 @@ struct _VID_Frame {
 // The most sound decoded in one go, in frames.
 #define _VID_SOUND_CHUNK 4096
 
-struct VID_Video {
+struct Video_Video {
    Arena*          arena;
    String8         path;
-   VID_Decoder*    decoder;
-   VID_DecoderInfo info;
+   Video_Decoder*    decoder;
+   Video_DecoderInfo info;
    R_Handle        texture;
 
    Thread  thread;
@@ -62,7 +62,7 @@ struct VID_Video {
    CondVar wake_decode; // room in the queue, a seek, or quit
 
    //- bgz: under the mutex
-   _VID_Frame queue[_VID_QUEUE_CAP];
+   _Video_Frame queue[_VID_QUEUE_CAP];
    U64        queue_first;
    U64        queue_count;
    B32        quit;
@@ -80,7 +80,7 @@ struct VID_Video {
    F64  ring_time_s;
    B32  sound_at_end; // the decoder has no more sound, since the last seek
    B32  sound_on;     // the audio thread takes from the ring: playing, and the picture is there
-   B32  sound_muted;  // what it takes is not heard (VID_SetMuted)
+   B32  sound_muted;  // what it takes is not heard (Video_SetMuted)
    // The note the audio thread leaves: the sound that is heard at
    // heard_us (NowTimeUS) is the video's at heard_time_s. heard_us 0: no
    // note, since the last seek or pause.
@@ -90,20 +90,20 @@ struct VID_Video {
    //- bgz: the main thread's
    B32 playing;
    F64 position_s;
-   U64 updated_us;  // when VID_Update last ran. 0: not yet
+   U64 updated_us;  // when Video_Update last ran. 0: not yet
    B32 need_frame;  // show the next frame decoded, whatever its time: the first, and after a seek
    B32 ended;       // stopped at its end: playing starts it over
 
    B32        has_sound;
-   AUD_Voice* voice;        // how the ring gets to the speakers. 0: no sound
+   Audio_Voice* voice;        // how the ring gets to the speakers. 0: no sound
    F32*       sound_chunk;  // the decode thread's: sound on its way into the ring
 };
 
 // The audio thread, wanting more sound: from the ring, as much as there is.
 // What it does not write stays silence.
 PRIVATE void
-_VID_Voice(void* user, F32* samples, U64 frame_count, F64 delay_s) {
-   VID_Video* video = (VID_Video*)user;
+_Video_Voice(void* user, F32* samples, U64 frame_count, F64 delay_s) {
+   Video_Video* video = (Video_Video*)user;
 
    MutexTake(video->mutex);
    U64 taken = 0;
@@ -133,7 +133,7 @@ _VID_Voice(void* user, F32* samples, U64 frame_count, F64 delay_s) {
 }
 
 B32
-VID_NameIsVideo(String8 name) {
+Video_NameIsVideo(String8 name) {
    B32 result = 0;
 
    String8 extensions[] = {Str8Lit("mp4"), Str8Lit("m4v"), Str8Lit("mov"), Str8Lit("mkv"), Str8Lit("webm"),
@@ -153,8 +153,8 @@ VID_NameIsVideo(String8 name) {
 }
 
 PRIVATE void
-_VID_DecodeThread(void* p) {
-   VID_Video* video = (VID_Video*)p;
+_Video_DecodeThread(void* p) {
+   Video_Video* video = (Video_Video*)p;
    SetThreadNameF("video decode");
 
    U64 serial = 0;      // the seek this thread is on
@@ -208,7 +208,7 @@ _VID_DecodeThread(void* p) {
       }
 
       if (do_seek) {
-         VID_DecoderSeek(video->decoder, seek_time_s);
+         Video_DecoderSeek(video->decoder, seek_time_s);
          skip_before = seek_time_s;
       }
 
@@ -216,7 +216,7 @@ _VID_DecodeThread(void* p) {
          //- bgz: decode some sound, and put it in the ring
          F64  time_s = 0;
          F32* chunk = video->sound_chunk;
-         U64  count = VID_DecoderNextSound(video->decoder, chunk, _VID_SOUND_CHUNK, &time_s);
+         U64  count = Video_DecoderNextSound(video->decoder, chunk, _VID_SOUND_CHUNK, &time_s);
 
          // The part of it from before the time asked for is cut off.
          if (count != 0 && time_s < skip_before) {
@@ -250,7 +250,7 @@ _VID_DecodeThread(void* p) {
       } else {
          //- bgz: decode one frame
          F64 time_s = 0;
-         B32 got_frame = VID_DecoderNextFrame(video->decoder, pixels, &time_s);
+         B32 got_frame = Video_DecoderNextFrame(video->decoder, pixels, &time_s);
 
          // Half a frame's leeway: the frame that is showing at the time
          // asked for began a little before it.
@@ -277,23 +277,23 @@ _VID_DecodeThread(void* p) {
    }
 }
 
-VID_Video*
-VID_Open(String8 path) {
-   VID_Video* result = 0;
+Video_Video*
+Video_Open(String8 path) {
+   Video_Video* result = 0;
 
    Arena*          arena = ArenaAlloc();
-   VID_DecoderInfo info = {0};
-   VID_Decoder*    decoder = VID_DecoderOpen(arena, path, VID_MAX_DIM, AUD_SAMPLE_RATE, &info);
+   Video_DecoderInfo info = {0};
+   Video_Decoder*    decoder = Video_DecoderOpen(arena, path, VID_MAX_DIM, AUD_SAMPLE_RATE, &info);
    if (decoder != 0 && (info.size.x <= 0 || info.size.y <= 0)) {
       LogUserErrorF("%S has no picture to show\n", path);
-      VID_DecoderClose(decoder);
+      Video_DecoderClose(decoder);
       decoder = 0;
    }
 
    if (decoder == 0) {
       ArenaRelease(arena);
    } else {
-      VID_Video* video = PushArray(arena, VID_Video, 1);
+      Video_Video* video = PushArray(arena, Video_Video, 1);
       video->arena = arena;
       video->path = PushStr8Copy(arena, path);
       video->decoder = decoder;
@@ -324,11 +324,11 @@ VID_Open(String8 path) {
          video->ring_cap = (U64)AUD_SAMPLE_RATE * _VID_RING_SECONDS;
          video->ring = PushArrayNoZero(arena, F32, video->ring_cap * AUD_CHANNELS);
          video->sound_chunk = PushArrayNoZero(arena, F32, _VID_SOUND_CHUNK * AUD_CHANNELS);
-         video->voice = AUD_VoiceAdd(_VID_Voice, video);
+         video->voice = Audio_VoiceAdd(_Video_Voice, video);
          video->has_sound = (video->voice != 0);
       }
 
-      video->thread = ThreadLaunch(_VID_DecodeThread, video);
+      video->thread = ThreadLaunch(_Video_DecodeThread, video);
 
       LogInfoF("Video %S: %d x %d, %.1f s, %.2f frames a second, %s\n", path, info.size.x, info.size.y, info.duration_s,
                info.frames_per_second, video->has_sound ? "with sound" : "no sound");
@@ -339,14 +339,14 @@ VID_Open(String8 path) {
 }
 
 void
-VID_Close(VID_Video* video) {
+Video_Close(Video_Video* video) {
    if (video == 0) {
       return;
    }
 
-   // The voice first: after this the audio thread is not in _VID_Voice and
+   // The voice first: after this the audio thread is not in _Video_Voice and
    // never will be again.
-   AUD_VoiceRemove(video->voice);
+   Audio_VoiceRemove(video->voice);
 
    MutexTake(video->mutex);
    video->quit = 1;
@@ -354,7 +354,7 @@ VID_Close(VID_Video* video) {
    CondVarBroadcast(video->wake_decode);
    ThreadJoin(video->thread, max_U64);
 
-   VID_DecoderClose(video->decoder);
+   Video_DecoderClose(video->decoder);
    Core_R_Tex2DRelease(video->texture);
    CondVarRelease(video->wake_decode);
    MutexRelease(video->mutex);
@@ -362,44 +362,44 @@ VID_Close(VID_Video* video) {
 }
 
 R_Handle
-VID_Texture(VID_Video* video) {
+Video_Texture(Video_Video* video) {
    return video->texture;
 }
 
 Vec2S32
-VID_Size(VID_Video* video) {
+Video_Size(Video_Video* video) {
    return video->info.size;
 }
 
 F64
-VID_Duration(VID_Video* video) {
+Video_Duration(Video_Video* video) {
    return video->info.duration_s;
 }
 
 F64
-VID_Position(VID_Video* video) {
+Video_Position(Video_Video* video) {
    return video->position_s;
 }
 
 B32
-VID_IsPlaying(VID_Video* video) {
+Video_IsPlaying(Video_Video* video) {
    return video->playing;
 }
 
 B32
-VID_HasEnded(VID_Video* video) {
+Video_HasEnded(Video_Video* video) {
    return video->ended;
 }
 
 void
-VID_SetMuted(VID_Video* video, B32 muted) {
+Video_SetMuted(Video_Video* video, B32 muted) {
    MutexTake(video->mutex);
    video->sound_muted = muted;
    MutexDrop(video->mutex);
 }
 
 void
-VID_Seek(VID_Video* video, F64 time_s) {
+Video_Seek(Video_Video* video, F64 time_s) {
    if (video->info.duration_s > 0) {
       time_s = Min(time_s, video->info.duration_s);
    }
@@ -424,13 +424,13 @@ VID_Seek(VID_Video* video, F64 time_s) {
 }
 
 void
-VID_SetPlaying(VID_Video* video, B32 playing) {
+Video_SetPlaying(Video_Video* video, B32 playing) {
    if (playing && video->ended) {
-      VID_Seek(video, 0);
+      Video_Seek(video, 0);
    }
    video->playing = playing;
    if (!playing) {
-      // At once, not at the next VID_Update: sound that goes on after
+      // At once, not at the next Video_Update: sound that goes on after
       // Pause is heard.
       MutexTake(video->mutex);
       video->sound_on = 0;
@@ -440,7 +440,7 @@ VID_SetPlaying(VID_Video* video, B32 playing) {
 }
 
 void
-VID_Update(VID_Video* video) {
+Video_Update(Video_Video* video) {
    U64 now_us = NowTimeUS();
    F64 dt_s = (video->updated_us != 0) ? (F64)(now_us - video->updated_us) / 1000000.0 : 0;
    video->updated_us = now_us;
@@ -482,7 +482,7 @@ VID_Update(VID_Video* video) {
    // passed over.
    U8* due = 0;
    while (video->queue_count != 0) {
-      _VID_Frame* frame = &video->queue[video->queue_first];
+      _Video_Frame* frame = &video->queue[video->queue_first];
       if (video->need_frame) {
          // The first frame after a start or a seek. Stopped, or with no
          // sound to go by, it is shown at once. Playing by sound, its sound

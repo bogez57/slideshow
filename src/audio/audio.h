@@ -30,21 +30,21 @@
 // which is silence already, and return - quickly: no files, no waiting on
 // anything slow. delay_s is how long from now the first of these frames
 // will be heard, for a voice that keeps time by what is heard.
-typedef void AUD_VoiceFunction(void* user, F32* samples, U64 frame_count, F64 delay_s);
+typedef void Audio_VoiceFunction(void* user, F32* samples, U64 frame_count, F64 delay_s);
 
-typedef struct AUD_Voice AUD_Voice;
+typedef struct Audio_Voice Audio_Voice;
 
 // Starts the device. Before any voice is added. With no sound card, or one
 // that can't be opened, everything works as it does with one - voices are
 // called at the same pace - and nothing is heard.
-void AUD_Init(void);
-void AUD_Shutdown(void);
+void Audio_Init(void);
+void Audio_Shutdown(void);
 
 // 0 if there are too many voices already (AUD_MAX_VOICES).
-AUD_Voice* AUD_VoiceAdd(AUD_VoiceFunction* function, void* user);
+Audio_Voice* Audio_VoiceAdd(Audio_VoiceFunction* function, void* user);
 // When this returns the function is not running and will not be called again.
-void AUD_VoiceRemove(AUD_Voice* voice);
+void Audio_VoiceRemove(Audio_Voice* voice);
 
 // Everything, at once. Muted, voices are still called: they keep their time.
-B32  AUD_IsMuted(void);
-void AUD_SetMuted(B32 muted);
+B32  Audio_IsMuted(void);
+void Audio_SetMuted(B32 muted);

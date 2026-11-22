@@ -13,14 +13,14 @@
 // It does not have to be fast to seek or exact about it - the player throws
 // away frames from before the time it asked for.
 
-typedef struct VID_Decoder VID_Decoder; // the decoder's own
+typedef struct Video_Decoder Video_Decoder; // the decoder's own
 
-typedef struct VID_DecoderInfo VID_DecoderInfo;
-struct VID_DecoderInfo {
-   Vec2S32 size;              // of the frames VID_DecoderNextFrame writes
+typedef struct Video_DecoderInfo Video_DecoderInfo;
+struct Video_DecoderInfo {
+   Vec2S32 size;              // of the frames Video_DecoderNextFrame writes
    F64     duration_s;        // 0: not known
    F64     frames_per_second; // 0: not known
-   B32     has_sound;         // VID_DecoderNextSound has something to give
+   B32     has_sound;         // Video_DecoderNextSound has something to give
 };
 
 // Opens the file. Frames come out no longer than max_dim on their longer
@@ -29,14 +29,14 @@ struct VID_DecoderInfo {
 // frames a second, whatever the file's own is. What the decoder itself needs
 // for as long as it is open may be pushed on arena. 0 if the file could not
 // be opened as a video, and why is logged (LogUserErrorF).
-VID_Decoder* VID_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, VID_DecoderInfo* info_out);
-void         VID_DecoderClose(VID_Decoder* decoder);
+Video_Decoder* Video_DecoderOpen(Arena* arena, String8 path, S32 max_dim, S32 sound_rate, Video_DecoderInfo* info_out);
+void         Video_DecoderClose(Video_Decoder* decoder);
 
 // Decodes the next frame into pixels: info.size.x * info.size.y * 4 bytes,
 // rows from the top, each pixel red, green, blue, alpha. time_s_out gets when
 // it is shown, in seconds from the video's start. 0 at the end of the video,
 // or when it can't be decoded further.
-B32 VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out);
+B32 Video_DecoderNextFrame(Video_Decoder* decoder, U8* pixels, F64* time_s_out);
 
 // Decodes the next of the video's sound into samples: up to frame_cap
 // frames, each a left and a right F32. Returns how many, and time_s_out gets
@@ -45,8 +45,8 @@ B32 VID_DecoderNextFrame(VID_Decoder* decoder, U8* pixels, F64* time_s_out);
 //
 // Frames and sound are asked for separately and in any order: the decoder
 // keeps what it has read of the one while it is asked for the other.
-U64 VID_DecoderNextSound(VID_Decoder* decoder, F32* samples, U64 frame_cap, F64* time_s_out);
+U64 Video_DecoderNextSound(Video_Decoder* decoder, F32* samples, U64 frame_cap, F64* time_s_out);
 
 // The next frame and the next sound decoded will be at or before time_s - as near before
 // it as the decoder can seek without decoding.
-void VID_DecoderSeek(VID_Decoder* decoder, F64 time_s);
+void Video_DecoderSeek(Video_Decoder* decoder, F64 time_s);

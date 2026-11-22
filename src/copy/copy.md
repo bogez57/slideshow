@@ -4,15 +4,15 @@ Files copied into the deck's folder in the background. A video dropped on the ed
 
 ## State
 
-- `App_State`'s `first_copy`: the copies under way, a `COPY_Job` each (its fields are copy.c's), each with a thread.
+- `App_State`'s `first_copy`: the copies under way, a `Copy_Job` each (its fields are copy.c's), each with a thread.
 - `quit_warned_copy`: closing while one is under way has been warned about once.
 
 ## Functions
 
-- `COPY_Start`: starts copying a file into the deck's folder.
-- `COPY_IsCopyingTo`, `COPY_IsBusy`.
-- `COPY_Update`: once a frame, moves slides over to copies that are whole, and says what failed.
-- `COPY_CancelAll`: at the end of the run.
+- `Copy_Start`: starts copying a file into the deck's folder.
+- `Copy_IsCopyingTo`, `Copy_IsBusy`.
+- `Copy_Update`: once a frame, from `_FR_UpdateAppState`, moves slides over to copies that are whole, and says what failed.
+- `Copy_CancelAll`: at the end of the run.
 
 ## Used by
 

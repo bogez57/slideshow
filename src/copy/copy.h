@@ -11,10 +11,10 @@ typedef struct App_State App_State;
 
 // One file on its way, in app_state->first_copy's list. Its fields are
 // copy.c's own.
-typedef struct COPY_Job COPY_Job;
+typedef struct Copy_Job Copy_Job;
 
-B32  COPY_IsCopyingTo(App_State* app_state, String8 dst);
-void COPY_Start(App_State* app_state, String8 src, String8 dst);
-B32  COPY_IsBusy(App_State* app_state);
-void COPY_Update(App_State* app_state);
-void COPY_CancelAll(App_State* app_state);
+B32  Copy_IsCopyingTo(const App_State* app_state, String8 dst);
+void Copy_Start(App_State* app_state, String8 src, String8 dst);
+B32  Copy_IsBusy(const App_State* app_state);
+void Copy_Update(App_State* app_state);
+void Copy_CancelAll(App_State* app_state);

@@ -17,30 +17,30 @@
 #define _VIEW_BEHIND_SCRIM 0.62f
 
 //- bgz: colors
-VIEW_Colors
-VIEW_ColorsFromTheme(DECK_Theme theme) {
-   VIEW_Colors result = {0};
+View_Colors
+View_ColorsFromTheme(Deck_Theme theme) {
+   View_Colors result = {0};
    switch (theme) {
       default:
-      case DECK_Theme_Dark: {
+      case Deck_Theme_Dark: {
          result.background = V4F32(0.05f, 0.05f, 0.06f, 1.0f);
          result.title = V4F32(1.00f, 1.00f, 1.00f, 1.0f);
          result.body = V4F32(0.88f, 0.89f, 0.92f, 1.0f);
          result.accent = V4F32(0.36f, 0.66f, 1.00f, 1.0f);
       } break;
-      case DECK_Theme_Light: {
+      case Deck_Theme_Light: {
          result.background = V4F32(0.97f, 0.97f, 0.96f, 1.0f);
          result.title = V4F32(0.09f, 0.10f, 0.13f, 1.0f);
          result.body = V4F32(0.22f, 0.24f, 0.28f, 1.0f);
          result.accent = V4F32(0.10f, 0.45f, 0.90f, 1.0f);
       } break;
-      case DECK_Theme_Blue: {
+      case Deck_Theme_Blue: {
          result.background = V4F32(0.05f, 0.10f, 0.21f, 1.0f);
          result.title = V4F32(1.00f, 1.00f, 1.00f, 1.0f);
          result.body = V4F32(0.84f, 0.89f, 0.97f, 1.0f);
          result.accent = V4F32(1.00f, 0.78f, 0.30f, 1.0f);
       } break;
-      case DECK_Theme_Paper: {
+      case Deck_Theme_Paper: {
          result.background = V4F32(0.96f, 0.93f, 0.86f, 1.0f);
          result.title = V4F32(0.20f, 0.14f, 0.09f, 1.0f);
          result.body = V4F32(0.31f, 0.25f, 0.19f, 1.0f);
@@ -52,21 +52,21 @@ VIEW_ColorsFromTheme(DECK_Theme theme) {
 
 // color, showing through by alpha as well as by its own.
 PRIVATE Vec4F32
-_VIEW_Faded(Vec4F32 color, F32 alpha) {
+_View_Faded(Vec4F32 color, F32 alpha) {
    color.w *= alpha;
    return color;
 }
 
 F32
-VIEW_ScaleFromDim(Vec2F32 dim) {
+View_ScaleFromDim(Vec2F32 dim) {
    F32 result = Min(dim.x / VIEW_PAGE_W, dim.y / VIEW_PAGE_H);
    return result;
 }
 
 Rng2F32
-VIEW_PageRectFromRect(Rng2F32 rect) {
+View_PageRectFromRect(Rng2F32 rect) {
    Vec2F32 dim = Dim2F32(rect);
-   F32     scale = VIEW_ScaleFromDim(dim);
+   F32     scale = View_ScaleFromDim(dim);
    F32     x = rect.min.x + (dim.x - VIEW_PAGE_W * scale) * 0.5f;
    F32     y = rect.min.y + (dim.y - VIEW_PAGE_H * scale) * 0.5f;
    return R2F32P(x, y, x + VIEW_PAGE_W * scale, y + VIEW_PAGE_H * scale);
@@ -75,27 +75,27 @@ VIEW_PageRectFromRect(Rng2F32 rect) {
 // Where a picture that could not be loaded would have been: a box, with the
 // file's name, so a wrong path can be seen and read.
 PRIVATE void
-_VIEW_DrawMissingPicture(TXT_Fonts* fonts, VIEW_Colors* colors, String8 path, Rng2F32 rect, F32 scale, F32 alpha) {
+_View_DrawMissingPicture(const Text_Fonts* fonts, View_Colors* colors, String8 path, Rng2F32 rect, F32 scale, F32 alpha) {
    Vec2F32 dim = Dim2F32(rect);
    if (dim.x > 0 && dim.y > 0) {
-      Core_D_Rect(rect, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.07f * alpha));
+      Core_D_Rect(rect, R2F32P(0, 0, 1, 1), _View_Faded(colors->body, 0.07f * alpha));
 
       String8 lines[] = {Str8Lit("Picture not found"), Str8SkipLastSlash(path)};
       F32     px = 22.0f * scale;
-      F32     line_height = TXT_LineHeight(fonts->regular, px);
+      F32     line_height = Text_LineHeight(fonts->regular, px);
       F32     y = rect.min.y + (dim.y - line_height * (F32)ArrayCount(lines)) * 0.5f;
       for (U64 i = 0; i < ArrayCount(lines); i += 1) {
-         F32 w = TXT_Width(fonts->regular, px, lines[i]);
-         TXT_Draw(fonts->regular, px, V2F32(rect.min.x + (dim.x - w) * 0.5f, y), _VIEW_Faded(colors->body, 0.6f * alpha), lines[i]);
+         F32 w = Text_Width(fonts->regular, px, lines[i]);
+         Text_Draw(fonts->regular, px, V2F32(rect.min.x + (dim.x - w) * 0.5f, y), _View_Faded(colors->body, 0.6f * alpha), lines[i]);
          y += line_height;
       }
    }
 }
 
-// Where VIEW_DrawImageFit draws the image in rect. Nothing of a rect - all
+// Where View_DrawImageFit draws the image in rect. Nothing of a rect - all
 // zero - for an image or a rect with no size.
 PRIVATE Rng2F32
-_VIEW_FitRect(IMG_Image* image, Rng2F32 rect) {
+_View_FitRect(Image_Image* image, Rng2F32 rect) {
    Rng2F32 result = {0};
    Vec2F32 rect_dim = Dim2F32(rect);
    F32     image_w = (F32)image->size.x;
@@ -113,8 +113,8 @@ _VIEW_FitRect(IMG_Image* image, Rng2F32 rect) {
 }
 
 void
-VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha) {
-   Rng2F32 fit = _VIEW_FitRect(image, rect);
+View_DrawImageFit(Image_Image* image, Rng2F32 rect, F32 alpha) {
+   Rng2F32 fit = _View_FitRect(image, rect);
    if (fit.max.x > fit.min.x) {
       // The source rect is in the image's own pixels.
       Core_D_Img(fit, R2F32P(0, 0, (F32)image->size.x, (F32)image->size.y), image->texture, V4F32(1, 1, 1, alpha));
@@ -124,7 +124,7 @@ VIEW_DrawImageFit(IMG_Image* image, Rng2F32 rect, F32 alpha) {
 // The image filling rect with its shape kept: what does not fit, at the
 // sides or at the top and bottom, is left out.
 PRIVATE void
-_VIEW_DrawImageFill(IMG_Image* image, Rng2F32 rect, F32 alpha) {
+_View_DrawImageFill(Image_Image* image, Rng2F32 rect, F32 alpha) {
    Vec2F32 rect_dim = Dim2F32(rect);
    F32     image_w = (F32)image->size.x;
    F32     image_h = (F32)image->size.y;
@@ -141,9 +141,9 @@ _VIEW_DrawImageFill(IMG_Image* image, Rng2F32 rect, F32 alpha) {
 }
 
 PRIVATE void
-_VIEW_PushHit(Arena* arena, VIEW_HitList* hits, Rng2F32 rect, Rng1U64 text_range) {
+_View_PushHit(Arena* arena, View_HitList* hits, Rng2F32 rect, Rng1U64 text_range) {
    if (hits != 0 && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
-      VIEW_Hit* hit = PushArray(arena, VIEW_Hit, 1);
+      View_Hit* hit = PushArray(arena, View_Hit, 1);
       hit->rect = rect;
       hit->text_range = text_range;
       SLLQueuePush(hits->first, hits->last, hit);
@@ -151,13 +151,13 @@ _VIEW_PushHit(Arena* arena, VIEW_HitList* hits, Rng2F32 rect, Rng1U64 text_range
    }
 }
 
-// Whose runs of letters are being drawn, for VIEW_HitList's runs: the
+// Whose runs of letters are being drawn, for View_HitList's runs: the
 // title's or a block's, and where in the deck's text the first letter of
 // the text being drawn is.
-typedef struct _VIEW_RunsOf _VIEW_RunsOf;
-struct _VIEW_RunsOf {
-   VIEW_HitList*  hits;
-   DECK_PlaceKind kind;
+typedef struct _View_RunsOf _View_RunsOf;
+struct _View_RunsOf {
+   View_HitList*  hits;
+   Deck_PlaceKind kind;
    U64            idx;
    U64            text_pos;
 };
@@ -165,11 +165,11 @@ struct _VIEW_RunsOf {
 // letters is a part of text, drawn at x, y in font at px. Nothing with
 // runs_of 0, or no hits to add to.
 PRIVATE void
-_VIEW_PushRun(Arena* arena, _VIEW_RunsOf* runs_of, FNT_Tag font, F32 px, String8 text, String8 letters, F32 x, F32 y, F32 width) {
+_View_PushRun(Arena* arena, _View_RunsOf* runs_of, FNT_Tag font, F32 px, String8 text, String8 letters, F32 x, F32 y, F32 width) {
    if (runs_of != 0 && runs_of->hits != 0) {
-      VIEW_Run* run = PushArray(arena, VIEW_Run, 1);
+      View_Run* run = PushArray(arena, View_Run, 1);
       U64       start = runs_of->text_pos + ((letters.size != 0) ? (U64)(letters.str - text.str) : 0);
-      run->rect = R2F32P(x, y, x + width, y + TXT_LineHeight(font, px));
+      run->rect = R2F32P(x, y, x + width, y + Text_LineHeight(font, px));
       run->text_range = R1U64(start, start + letters.size);
       run->font = font;
       run->px = px;
@@ -186,19 +186,19 @@ _VIEW_PushRun(Arena* arena, _VIEW_RunsOf* runs_of, FNT_Tag font, F32 px, String8
 // gets the width of the widest line drawn. runs_of, if not 0, is given a
 // run for each line drawn.
 PRIVATE F32
-_VIEW_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 max_width, Vec4F32 color, B32 do_draw,
-            B32 centered, F32* widest_out, _VIEW_RunsOf* runs_of) {
-   F32         line_height = TXT_LineHeight(font, px);
-   String8List lines = TXT_Wrap(arena, font, px, text, max_width);
+_View_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 max_width, Vec4F32 color, B32 do_draw,
+            B32 centered, F32* widest_out, _View_RunsOf* runs_of) {
+   F32         line_height = Text_LineHeight(font, px);
+   String8List lines = Text_Wrap(arena, font, px, text, max_width);
    F32         widest = 0;
 
    for (String8Node* node = lines.first; node != 0; node = node->next) {
       if (do_draw) {
-         F32 line_w = (centered || widest_out != 0 || runs_of != 0) ? TXT_Width(font, px, node->string) : 0;
+         F32 line_w = (centered || widest_out != 0 || runs_of != 0) ? Text_Width(font, px, node->string) : 0;
          // Centered: each line in the middle of the width it could have had.
          F32 line_x = centered ? x + (max_width - line_w) * 0.5f : x;
-         TXT_Draw(font, px, V2F32(line_x, y), color, node->string);
-         _VIEW_PushRun(arena, runs_of, font, px, text, node->string, line_x, y, line_w);
+         Text_Draw(font, px, V2F32(line_x, y), color, node->string);
+         _View_PushRun(arena, runs_of, font, px, text, node->string, line_x, y, line_w);
          widest = Max(widest, line_w);
       }
       y += line_height;
@@ -223,15 +223,15 @@ _VIEW_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 
 // is not a mark: it is drawn as written.
 
 enum {
-   _VIEW_Style_Bold = (1 << 0),
-   _VIEW_Style_Code = (1 << 1),
+   _View_Style_Bold = (1 << 0),
+   _View_Style_Code = (1 << 1),
 };
 
 // A run of letters drawn alike, with no space in it. A word is one, or
 // several end to end where the look changes inside it.
-typedef struct _VIEW_Piece _VIEW_Piece;
-struct _VIEW_Piece {
-   _VIEW_Piece* next;
+typedef struct _View_Piece _View_Piece;
+struct _View_Piece {
+   _View_Piece* next;
    String8      text;          // a part of the item's own text
    U32          style;
    U32          spaces_before; // 0: it goes on from the piece before, and is never parted from it
@@ -240,14 +240,14 @@ struct _VIEW_Piece {
    F32          width;         // the letters', with the room before and after them
 };
 
-typedef struct _VIEW_PieceList _VIEW_PieceList;
-struct _VIEW_PieceList {
-   _VIEW_Piece* first;
-   _VIEW_Piece* last;
+typedef struct _View_PieceList _View_PieceList;
+struct _View_PieceList {
+   _View_Piece* first;
+   _View_Piece* last;
 };
 
 PRIVATE B32
-_VIEW_HasLater(String8 text, U64 from, String8 mark) {
+_View_HasLater(String8 text, U64 from, String8 mark) {
    B32 result = 0;
    for (U64 i = from; i + mark.size <= text.size; i += 1) {
       if (MemoryMatch(text.str + i, mark.str, mark.size)) {
@@ -259,11 +259,11 @@ _VIEW_HasLater(String8 text, U64 from, String8 mark) {
 }
 
 PRIVATE FNT_Tag
-_VIEW_FontFromStyle(TXT_Fonts* fonts, U32 style) {
+_View_FontFromStyle(const Text_Fonts* fonts, U32 style) {
    FNT_Tag result = fonts->regular;
-   if (style & _VIEW_Style_Code) {
+   if (style & _View_Style_Code) {
       result = fonts->mono;
-   } else if (style & _VIEW_Style_Bold) {
+   } else if (style & _View_Style_Bold) {
       result = fonts->bold;
    }
    return result;
@@ -271,17 +271,17 @@ _VIEW_FontFromStyle(TXT_Fonts* fonts, U32 style) {
 
 // The room inside a code box, before and after its letters, as a part of the
 // text's size.
-#define _VIEW_CodePad 0.18f
+#define _View_CodePad 0.18f
 
 // Code is a little smaller: the letters of that font are wide.
 PRIVATE F32
-_VIEW_PxFromStyle(U32 style, F32 px) {
-   return (style & _VIEW_Style_Code) ? px * 0.9f : px;
+_View_PxFromStyle(U32 style, F32 px) {
+   return (style & _View_Style_Code) ? px * 0.9f : px;
 }
 
-PRIVATE _VIEW_PieceList
-_VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
-   _VIEW_PieceList result = {0};
+PRIVATE _View_PieceList
+_View_PiecesFromText(Arena* arena, const Text_Fonts* fonts, F32 px, String8 text) {
+   _View_PieceList result = {0};
 
    U32 style = 0;
    U32 spaces = 0;
@@ -299,20 +299,20 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
 
       if (i < text.size) {
          if (c == '`') {
-            if (style & _VIEW_Style_Code) {
-               new_style &= ~_VIEW_Style_Code;
+            if (style & _View_Style_Code) {
+               new_style &= ~_View_Style_Code;
                skip = 1;
-            } else if (_VIEW_HasLater(text, i + 1, Str8Lit("`"))) {
-               new_style |= _VIEW_Style_Code;
+            } else if (_View_HasLater(text, i + 1, Str8Lit("`"))) {
+               new_style |= _View_Style_Code;
                skip = 1;
                code_span += 1;
             }
-         } else if (c == '*' && !(style & _VIEW_Style_Code) && i + 1 < text.size && text.str[i + 1] == '*') {
-            if (style & _VIEW_Style_Bold) {
-               new_style &= ~_VIEW_Style_Bold;
+         } else if (c == '*' && !(style & _View_Style_Code) && i + 1 < text.size && text.str[i + 1] == '*') {
+            if (style & _View_Style_Bold) {
+               new_style &= ~_View_Style_Bold;
                skip = 2;
-            } else if (_VIEW_HasLater(text, i + 2, Str8Lit("**"))) {
-               new_style |= _VIEW_Style_Bold;
+            } else if (_View_HasLater(text, i + 2, Str8Lit("**"))) {
+               new_style |= _View_Style_Bold;
                skip = 2;
             }
          }
@@ -320,12 +320,12 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
 
       B32 is_space = (skip == 0 && c == ' ');
       if (in_piece && (is_space || skip != 0)) {
-         _VIEW_Piece* piece = PushArray(arena, _VIEW_Piece, 1);
+         _View_Piece* piece = PushArray(arena, _View_Piece, 1);
          piece->text = Str8Substr(text, R1U64(piece_start, i));
          piece->style = style;
          piece->spaces_before = is_first ? 0 : spaces;
-         piece->code_span = (style & _VIEW_Style_Code) ? code_span : 0;
-         piece->width = TXT_Width(_VIEW_FontFromStyle(fonts, style), _VIEW_PxFromStyle(style, px), piece->text);
+         piece->code_span = (style & _View_Style_Code) ? code_span : 0;
+         piece->width = Text_Width(_View_FontFromStyle(fonts, style), _View_PxFromStyle(style, px), piece->text);
          SLLQueuePush(result.first, result.last, piece);
          in_piece = 0;
          is_first = 0;
@@ -348,8 +348,8 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
 
    // A code span's box reaches a little past its letters at each end, and that
    // room is part of the width, so the words beside it are not touched.
-   F32 pad = px * _VIEW_CodePad;
-   for (_VIEW_Piece *piece = result.first, *prev = 0; piece != 0; prev = piece, piece = piece->next) {
+   F32 pad = px * _View_CodePad;
+   for (_View_Piece *piece = result.first, *prev = 0; piece != 0; prev = piece, piece = piece->next) {
       if (piece->code_span != 0) {
          if (prev == 0 || prev->code_span != piece->code_span) {
             piece->pad_before = pad;
@@ -364,24 +364,24 @@ _VIEW_PiecesFromText(Arena* arena, TXT_Fonts* fonts, F32 px, String8 text) {
    return result;
 }
 
-// As _VIEW_Lines, for text that may have words in bold and in code. A run
+// As _View_Lines, for text that may have words in bold and in code. A run
 // is given for each piece: every one as tall as the line, whatever its font.
 PRIVATE F32
-_VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, String8 text, F32 x, F32 y, F32 max_width,
-                Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out, _VIEW_RunsOf* runs_of) {
-   F32             line_height = TXT_LineHeight(fonts->regular, px);
-   F32             space_width = TXT_Width(fonts->regular, px, Str8Lit(" "));
-   _VIEW_PieceList pieces = _VIEW_PiecesFromText(arena, fonts, px, text);
+_View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 px, String8 text, F32 x, F32 y, F32 max_width,
+                Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out, _View_RunsOf* runs_of) {
+   F32             line_height = Text_LineHeight(fonts->regular, px);
+   F32             space_width = Text_Width(fonts->regular, px, Str8Lit(" "));
+   _View_PieceList pieces = _View_PiecesFromText(arena, fonts, px, text);
    F32             widest = 0;
 
    // A line at a time: first how many pieces go on it, then they are drawn.
-   for (_VIEW_Piece* line_first = pieces.first; line_first != 0;) {
-      _VIEW_Piece* line_end = line_first; // the first piece not on the line
+   for (_View_Piece* line_first = pieces.first; line_first != 0;) {
+      _View_Piece* line_end = line_first; // the first piece not on the line
       F32          line_w = 0;
       while (line_end != 0) {
          // A word: this piece and the ones that go on from it.
          F32          word_w = line_end->width;
-         _VIEW_Piece* word_end = line_end->next;
+         _View_Piece* word_end = line_end->next;
          while (word_end != 0 && word_end->spaces_before == 0) {
             word_w += word_end->width;
             word_end = word_end->next;
@@ -399,14 +399,14 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
          // Every piece stands on the regular font's baseline, whatever its
          // font and size. A code box reaches from a little above a capital
          // to a little under the baseline, around the letters of the line.
-         F32     baseline = TXT_Baseline(fonts->regular, px);
-         F32     cap_h = TXT_CapHeight(fonts->regular, px);
+         F32     baseline = Text_Baseline(fonts->regular, px);
+         F32     cap_h = Text_CapHeight(fonts->regular, px);
          F32     box_top = y + baseline - cap_h * 1.32f;
          F32     box_bottom = y + baseline + cap_h * 0.42f;
-         Vec4F32 box_color = _VIEW_Faded(colors->body, alpha * 0.13f);
+         Vec4F32 box_color = _View_Faded(colors->body, alpha * 0.13f);
 
          F32 piece_x = centered ? x + (max_width - line_w) * 0.5f : x;
-         for (_VIEW_Piece *piece = line_first, *prev = 0; piece != line_end; prev = piece, piece = piece->next) {
+         for (_View_Piece *piece = line_first, *prev = 0; piece != line_end; prev = piece, piece = piece->next) {
             // The space between two words of one piece of code is code too:
             // the box goes on under it, one box under them all.
             F32 box_x = piece_x;
@@ -418,16 +418,16 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
                }
             }
 
-            FNT_Tag font = _VIEW_FontFromStyle(fonts, piece->style);
-            F32     piece_px = _VIEW_PxFromStyle(piece->style, px);
-            F32     piece_y = y + baseline - TXT_Baseline(font, piece_px);
+            FNT_Tag font = _View_FontFromStyle(fonts, piece->style);
+            F32     piece_px = _View_PxFromStyle(piece->style, px);
+            F32     piece_y = y + baseline - Text_Baseline(font, piece_px);
             if (piece->code_span != 0) {
                Core_D_Rect(R2F32P(box_x, box_top, piece_x + piece->width, box_bottom), R2F32P(0, 0, 1, 1), box_color);
             }
-            TXT_Draw(font, piece_px, V2F32(piece_x + piece->pad_before, piece_y), color, piece->text);
+            Text_Draw(font, piece_px, V2F32(piece_x + piece->pad_before, piece_y), color, piece->text);
             if (runs_of != 0 && runs_of->hits != 0) {
-               F32 letters_w = TXT_Width(font, piece_px, piece->text);
-               _VIEW_PushRun(arena, runs_of, font, piece_px, text, piece->text, piece_x + piece->pad_before, y, letters_w);
+               F32 letters_w = Text_Width(font, piece_px, piece->text);
+               _View_PushRun(arena, runs_of, font, piece_px, text, piece->text, piece_x + piece->pad_before, y, letters_w);
                // As tall as the line, not as its own font.
                runs_of->hits->last_run->rect.max.y = y + line_height;
             }
@@ -451,18 +451,18 @@ _VIEW_RichLines(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, F32 px, Str
 // (@size). Returns the y under the last. The caller clips: the hits given
 // are only of what is inside shown, and the runs of everything.
 PRIVATE F32
-_VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, DECK_Box* box, U64 box_idx, Rng2F32 rect,
-           Rng2F32 shown, F32 scale, F32 alpha, VIEW_HitList* hits) {
-   B32 centered = (slide->layout == DECK_Layout_Center);
+_View_Body(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Slide* slide, Deck_Box* box, U64 box_idx, Rng2F32 rect,
+           Rng2F32 shown, F32 scale, F32 alpha, View_HitList* hits) {
+   B32 centered = (slide->layout == Deck_Layout_Center);
    F32 unit = scale * (box->look.has_size ? box->look.size : 1.0f);
    F32 y = rect.min.y;
 
-   _VIEW_RunsOf runs_of = {hits, DECK_PlaceKind_Text, box_idx, 0};
+   _View_RunsOf runs_of = {hits, Deck_PlaceKind_Text, box_idx, 0};
 
    // A colour of the block's own (@color) is the colour of all its words,
    // headings too - and of what is drawn from the words' colour, a code
    // box. The bullets' dots keep the theme's.
-   VIEW_Colors own_colors = *colors;
+   View_Colors own_colors = *colors;
    Vec4F32     heading_color = colors->accent;
    Vec4F32     dot_color = colors->accent;
    if (box->look.has_color) {
@@ -472,15 +472,15 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
    colors = &own_colors;
 
    F32 body_px = _VIEW_BODY_PX * unit;
-   F32 body_line_height = TXT_LineHeight(fonts->regular, body_px);
+   F32 body_line_height = Text_LineHeight(fonts->regular, body_px);
 
-   DECK_Item* item = box->first_item;
+   Deck_Item* item = box->first_item;
    for (U64 item_idx = 0; item_idx < box->item_count && item != 0; item_idx += 1, item = item->next) {
       // Room between items: a little always, more where the file had an empty
       // line - and above a heading, which belongs to what is under it.
       if (item != box->first_item) {
          y += body_line_height * 0.30f;
-         if (item->gap_before || item->kind == DECK_ItemKind_Heading) {
+         if (item->gap_before || item->kind == Deck_ItemKind_Heading) {
             y += body_line_height * 0.45f;
          }
       }
@@ -495,12 +495,12 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
       runs_of.text_pos = item->text_range.min;
 
       switch (item->kind) {
-      case DECK_ItemKind_Heading: {
-         y = _VIEW_Lines(arena, fonts->bold, _VIEW_HEADING_PX * unit, item->text, rect.min.x, y, Dim2F32(rect).x,
-                         _VIEW_Faded(heading_color, alpha), 1, centered, widest_out, &runs_of);
+      case Deck_ItemKind_Heading: {
+         y = _View_Lines(arena, fonts->bold, _VIEW_HEADING_PX * unit, item->text, rect.min.x, y, Dim2F32(rect).x,
+                         _View_Faded(heading_color, alpha), 1, centered, widest_out, &runs_of);
       } break;
 
-      case DECK_ItemKind_Bullet: {
+      case Deck_ItemKind_Bullet: {
          // Inner levels are a little smaller.
          F32 px = body_px * (item->level == 0 ? 1.0f : 0.88f);
          F32 indent = _VIEW_BULLET_INDENT * unit;
@@ -518,10 +518,10 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
             // 4 pixels across, or in the small preview it all but vanishes.
             F32 dot = Max(px * 0.28f, 4.0f);
             F32 dot_x = (F32)(S32)(text_x - indent * 0.62f);
-            F32 dot_y = (F32)(S32)(y + TXT_LineHeight(fonts->regular, px) * 0.54f - dot * 0.5f);
+            F32 dot_y = (F32)(S32)(y + Text_LineHeight(fonts->regular, px) * 0.54f - dot * 0.5f);
 
             R_Rect2DInst* inst = Core_D_Rect(R2F32P(dot_x, dot_y, dot_x + dot, dot_y + dot), R2F32P(0, 0, 1, 1),
-                                             _VIEW_Faded(dot_color, alpha));
+                                             _View_Faded(dot_color, alpha));
             for (U64 i = 0; i < ArrayCount(inst->corner_radii); i += 1) {
                inst->corner_radii[i] = dot * 0.5f;
             }
@@ -534,16 +534,16 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
          // run with no letters: where the first will go.
          if (item->text.size == 0) {
             F32 empty_x = centered ? (rect.min.x + rect.max.x) * 0.5f : text_x;
-            _VIEW_PushRun(arena, &runs_of, fonts->regular, px, item->text, item->text, empty_x, y, 0);
-            y += TXT_LineHeight(fonts->regular, px);
+            _View_PushRun(arena, &runs_of, fonts->regular, px, item->text, item->text, empty_x, y, 0);
+            y += Text_LineHeight(fonts->regular, px);
          }
-         y = _VIEW_RichLines(arena, fonts, colors, px, item->text, text_x, y, rect.max.x - text_x,
-                             _VIEW_Faded(colors->body, alpha), alpha, 1, centered, widest_out, &runs_of);
+         y = _View_RichLines(arena, fonts, colors, px, item->text, text_x, y, rect.max.x - text_x,
+                             _View_Faded(colors->body, alpha), alpha, 1, centered, widest_out, &runs_of);
       } break;
 
       default: {
-         y = _VIEW_RichLines(arena, fonts, colors, body_px, item->text, rect.min.x, y, Dim2F32(rect).x,
-                             _VIEW_Faded(colors->body, alpha), alpha, 1, centered, widest_out, &runs_of);
+         y = _View_RichLines(arena, fonts, colors, body_px, item->text, rect.min.x, y, Dim2F32(rect).x,
+                             _View_Faded(colors->body, alpha), alpha, 1, centered, widest_out, &runs_of);
       } break;
       }
 
@@ -556,7 +556,7 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
             F32 middle = (rect.min.x + rect.max.x) * 0.5f;
             hit_rect = R2F32P(middle - hit_w * 0.5f, item_y, middle + hit_w * 0.5f, y);
          }
-         _VIEW_PushHit(arena, hits, Intersect2F32(hit_rect, shown), item->text_range);
+         _View_PushHit(arena, hits, Intersect2F32(hit_rect, shown), item->text_range);
       }
    }
 
@@ -565,12 +565,12 @@ _VIEW_Body(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slid
 
 // The room between two blocks of the body that share the body's room, at
 // unit (the scale): a line of the body's words. More than the most
-// _VIEW_Body leaves between two of its lines - three quarters of one, at an
+// _View_Body leaves between two of its lines - three quarters of one, at an
 // empty line or a heading - so that where one block ends and the next
 // begins can be seen, and not so much that they stop reading as one body.
 PRIVATE F32
-_VIEW_BlockGap(TXT_Fonts* fonts, F32 unit) {
-   return TXT_LineHeight(fonts->regular, _VIEW_BODY_PX * unit);
+_View_BlockGap(const Text_Fonts* fonts, F32 unit) {
+   return Text_LineHeight(fonts->regular, _VIEW_BODY_PX * unit);
 }
 
 // The scroll bar of a room with more words than fit it: beside its right
@@ -580,7 +580,7 @@ _VIEW_BlockGap(TXT_Fonts* fonts, F32 unit) {
 // put on the box hits has last been given, if there are more words than
 // room; nothing if they fit.
 PRIVATE void
-_VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 page, F32 words_height, F32 scroll, F32 scale,
+_View_ScrollBar(View_HitList* hits, View_Colors* colors, Rng2F32 room, Rng2F32 page, F32 words_height, F32 scroll, F32 scale,
                 F32 alpha) {
    F32 room_h = room.max.y - room.min.y;
    if (room_h > 0 && words_height > room_h + 0.5f) {
@@ -603,8 +603,8 @@ _VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 p
       Rng2F32 thumb = R2F32P(track.min.x, thumb_y, track.max.x, thumb_y + thumb_h);
 
       if (hits == 0 || !hits->bars_by_caller) {
-         R_Rect2DInst* track_inst = Core_D_Rect(track, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.2f * alpha));
-         R_Rect2DInst* thumb_inst = Core_D_Rect(thumb, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors->body, 0.55f * alpha));
+         R_Rect2DInst* track_inst = Core_D_Rect(track, R2F32P(0, 0, 1, 1), _View_Faded(colors->body, 0.2f * alpha));
+         R_Rect2DInst* thumb_inst = Core_D_Rect(thumb, R2F32P(0, 0, 1, 1), _View_Faded(colors->body, 0.55f * alpha));
          for (U64 i = 0; i < ArrayCount(thumb_inst->corner_radii); i += 1) {
             track_inst->corner_radii[i] = width * 0.5f;
             thumb_inst->corner_radii[i] = width * 0.5f;
@@ -612,7 +612,7 @@ _VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 p
       }
 
       if (hits != 0 && hits->box_count != 0) {
-         VIEW_Box* box = &hits->boxes[hits->box_count - 1];
+         View_Box* box = &hits->boxes[hits->box_count - 1];
          box->bar_track = track;
          box->bar_thumb = thumb;
          box->words_height = words_height;
@@ -621,9 +621,9 @@ _VIEW_ScrollBar(VIEW_HitList* hits, VIEW_Colors* colors, Rng2F32 room, Rng2F32 p
 }
 
 PRIVATE void
-_VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F32 text_size, Rng2F32 room, F32 words_max_y) {
+_View_PushBox(View_HitList* hits, Deck_PlaceKind kind, U64 idx, Rng2F32 rect, F32 text_size, Rng2F32 room, F32 words_max_y) {
    if (hits != 0 && hits->box_count < ArrayCount(hits->boxes) && rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
-      VIEW_Box* box = &hits->boxes[hits->box_count];
+      View_Box* box = &hits->boxes[hits->box_count];
       hits->box_count += 1;
       box->kind = kind;
       box->idx = idx;
@@ -636,7 +636,7 @@ _VIEW_PushBox(VIEW_HitList* hits, DECK_PlaceKind kind, U64 idx, Rng2F32 rect, F3
 
 // An @place line's rect, from parts of the page to pixels.
 PRIVATE Rng2F32
-_VIEW_PlacedRect(Rng2F32 page, DECK_Place* place) {
+_View_PlacedRect(Rng2F32 page, Deck_Place* place) {
    Vec2F32 page_dim = Dim2F32(page);
    return R2F32P(page.min.x + place->rect.min.x * page_dim.x, page.min.y + place->rect.min.y * page_dim.y,
                  page.min.x + place->rect.max.x * page_dim.x, page.min.y + place->rect.max.y * page_dim.y);
@@ -646,9 +646,9 @@ _VIEW_PlacedRect(Rng2F32 page, DECK_Place* place) {
 // not loaded - not yet, or not found - is taken to be 4:3, the shape of the
 // box that says it is missing.
 PRIVATE F32
-_VIEW_AspectOf(DECK_Picture* picture) {
+_View_AspectOf(Deck_Picture* picture) {
    F32 result = 4.0f / 3.0f;
-   if (IMG_IsLoaded(&picture->image) && picture->image.size.x > 0 && picture->image.size.y > 0) {
+   if (Image_IsLoaded(&picture->image) && picture->image.size.x > 0 && picture->image.size.y > 0) {
       result = (F32)picture->image.size.x / (F32)picture->image.size.y;
    }
    return result;
@@ -667,7 +667,7 @@ _VIEW_AspectOf(DECK_Picture* picture) {
 // one picture is. A row with fewer pictures than the others has them in the
 // middle.
 PRIVATE void
-_VIEW_PictureGrid(Rng2F32 room, F32* aspects, U64 count, F32 gap, B32 from_top, Rng2F32* out) {
+_View_PictureGrid(Rng2F32 room, F32* aspects, U64 count, F32 gap, B32 from_top, Rng2F32* out) {
    Vec2F32 dim = Dim2F32(room);
    if (count == 0 || dim.x <= 0 || dim.y <= 0) {
       for (U64 i = 0; i < count; i += 1) {
@@ -739,23 +739,23 @@ _VIEW_PictureGrid(Rng2F32 room, F32* aspects, U64 count, F32 gap, B32 from_top, 
 // 0 it is drawn, with the bar under it, and its hit and its box are given.
 // Returns the y under the bar.
 PRIVATE F32
-_VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* slide, Rng2F32 rect, F32 scale, B32 is_big,
-            B32 centered, F32 alpha, B32 measure, VIEW_HitList* hits) {
+_View_Title(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Slide* slide, Rng2F32 rect, F32 scale, B32 is_big,
+            B32 centered, F32 alpha, B32 measure, View_HitList* hits) {
    // Its words at a size and in a colour of their own, where the slide says
    // (@size title, @color title). The bar under it stays as it is.
-   DECK_Look* look = &slide->title_look;
+   Deck_Look* look = &slide->title_look;
    F32        size = look->has_size ? look->size : 1.0f;
    Vec4F32    color = look->has_color ? look->color : colors->title;
    F32        px = (is_big ? _VIEW_BIG_TITLE_PX : _VIEW_TITLE_PX) * scale * size;
    F32        width = Dim2F32(rect).x;
-   F32 line_height = TXT_LineHeight(fonts->bold, px);
+   F32 line_height = Text_LineHeight(fonts->bold, px);
    F32 widest = 0;
-   _VIEW_RunsOf runs_of = {measure ? 0 : hits, DECK_PlaceKind_Title, 0, slide->title_range.min};
-   F32 y = _VIEW_Lines(arena, fonts->bold, px, slide->title, rect.min.x, rect.min.y, width, _VIEW_Faded(color, alpha),
+   _View_RunsOf runs_of = {measure ? 0 : hits, Deck_PlaceKind_Title, 0, slide->title_range.min};
+   F32 y = _View_Lines(arena, fonts->bold, px, slide->title, rect.min.x, rect.min.y, width, _View_Faded(color, alpha),
                        !measure, centered, &widest, &runs_of);
    if (slide->title.size == 0) {
       // No words yet: a run with no letters, where the first will go.
-      _VIEW_PushRun(arena, &runs_of, fonts->bold, px, slide->title, slide->title, centered ? rect.min.x + width * 0.5f : rect.min.x,
+      _View_PushRun(arena, &runs_of, fonts->bold, px, slide->title, slide->title, centered ? rect.min.x + width * 0.5f : rect.min.x,
                     rect.min.y, 0);
    }
    y = Max(y, rect.min.y + line_height); // a title with no words yet still has its line
@@ -767,32 +767,32 @@ _VIEW_Title(Arena* arena, TXT_Fonts* fonts, VIEW_Colors* colors, DECK_Slide* sli
       // A title with no words yet is still something to click.
       widest = Max(widest, px * 2.0f);
       F32 title_x = centered ? rect.min.x + (width - widest) * 0.5f : rect.min.x;
-      _VIEW_PushHit(arena, hits, R2F32P(title_x, rect.min.y, title_x + widest, y), slide->title_range);
+      _View_PushHit(arena, hits, R2F32P(title_x, rect.min.y, title_x + widest, y), slide->title_range);
 
       // The box to move it by: placed, as wide as the place. Not placed, as
       // wide as the words and a little over, so that they wrap the same
       // once it is.
       Rng2F32 box = R2F32P(rect.min.x, rect.min.y, rect.max.x, y);
-      if (!slide->places[DECK_PlaceKind_Title].is_set) {
+      if (!slide->places[Deck_PlaceKind_Title].is_set) {
          F32 slack = 8.0f * scale;
          box.min.x = Max(title_x - (centered ? slack : 0), rect.min.x);
          box.max.x = Min(title_x + widest + slack, rect.max.x);
       }
       // Its room: the width its words wrap at. Its height is theirs: a
       // title is all shown, however long.
-      _VIEW_PushBox(hits, DECK_PlaceKind_Title, 0, box, size, R2F32P(rect.min.x, rect.min.y, rect.max.x, y), y);
+      _View_PushBox(hits, Deck_PlaceKind_Title, 0, box, size, R2F32P(rect.min.x, rect.min.y, rect.max.x, y), y);
 
       // The bar under it is under its start - or its middle, when centered.
       F32 bar_x = centered ? rect.min.x + (width - bar_w) * 0.5f : rect.min.x;
       Core_D_Rect(R2F32P(bar_x, y + bar_gap, bar_x + bar_w, y + bar_gap + bar_h), R2F32P(0, 0, 1, 1),
-                  _VIEW_Faded(colors->accent, alpha));
+                  _View_Faded(colors->accent, alpha));
    }
    return y + bar_gap + bar_h;
 }
 
 void
-VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* slide, Rng2F32 rect, F32 alpha,
-               VIEW_HitList* hits) {
+View_DrawSlide(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Slide* slide, Rng2F32 rect, F32 alpha,
+               View_HitList* hits) {
    Vec2F32 rect_dim = Dim2F32(rect);
    if (rect_dim.x <= 0 || rect_dim.y <= 0) {
       return;
@@ -800,16 +800,16 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
 
    Core_D_PushClip(rect);
 
-   F32     scale = VIEW_ScaleFromDim(rect_dim);
-   Rng2F32 page = VIEW_PageRectFromRect(rect);
+   F32     scale = View_ScaleFromDim(rect_dim);
+   Rng2F32 page = View_PageRectFromRect(rect);
    if (hits != 0) {
       hits->page = page;
    }
 
-   VIEW_Colors colors = VIEW_ColorsFromTheme(theme);
-   B32         has_text = DECK_SlideHasText(slide);
-   B32         centered = (slide->layout == DECK_Layout_Center);
-   DECK_Place* title_place = &slide->places[DECK_PlaceKind_Title];
+   View_Colors colors = View_ColorsFromTheme(theme);
+   B32         has_text = Deck_SlideHasText(slide);
+   B32         centered = (slide->layout == Deck_Layout_Center);
+   Deck_Place* title_place = &slide->places[Deck_PlaceKind_Title];
 
    //- bgz: which pictures go where
    //
@@ -821,7 +821,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    // every picture, placed or not: the title and the body do not move when
    // a picture does, and a drag that has only just started does not shift
    // the words under the mouse.
-   U64 behind_idx = (slide->picture_count != 0 && slide->layout == DECK_Layout_PictureBehind && has_text) ? 0 : max_U64;
+   U64 behind_idx = (slide->picture_count != 0 && slide->layout == Deck_Layout_PictureBehind && has_text) ? 0 : max_U64;
    U64 beside_count = 0; // every picture not behind
    U64 shared_count = 0; // of those, the ones not placed
    for (U64 i = 0; i < slide->picture_count; i += 1) {
@@ -834,12 +834,12 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    //- bgz: the picture behind the words: all of the page, under a wash of
    // the background's colour, and no hit of its own - it is under everything
    if (behind_idx != max_U64) {
-      DECK_Picture* picture = &slide->pictures[behind_idx];
-      if (IMG_IsLoaded(&picture->image)) {
-         _VIEW_DrawImageFill(&picture->image, page, alpha);
-         Core_D_Rect(page, R2F32P(0, 0, 1, 1), _VIEW_Faded(colors.background, _VIEW_BEHIND_SCRIM * alpha));
+      Deck_Picture* picture = &slide->pictures[behind_idx];
+      if (Image_IsLoaded(&picture->image)) {
+         _View_DrawImageFill(&picture->image, page, alpha);
+         Core_D_Rect(page, R2F32P(0, 0, 1, 1), _View_Faded(colors.background, _VIEW_BEHIND_SCRIM * alpha));
       } else if (picture->load_failed) {
-         _VIEW_DrawMissingPicture(fonts, &colors, picture->path, page, scale, alpha);
+         _View_DrawMissingPicture(fonts, &colors, picture->path, page, scale, alpha);
       }
    }
 
@@ -863,13 +863,13 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    if (has_title) {
       if (title_is_big) {
          // Its words are what is in the middle: the bar is under that.
-         F32 height = _VIEW_Title(arena, fonts, &colors, slide, content, scale, 1, 1, alpha, 1, 0) - content.min.y - 19.0f * scale;
+         F32 height = _View_Title(arena, fonts, &colors, slide, content, scale, 1, 1, alpha, 1, 0) - content.min.y - 19.0f * scale;
          title_rect.min.y = Max((content.min.y + content.max.y - height) * 0.5f, content.min.y);
       }
-      y = _VIEW_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 1, 0);
+      y = _View_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 1, 0);
       y += 30.0f * scale;
       if (title_place->is_set) {
-         title_rect = _VIEW_PlacedRect(page, title_place);
+         title_rect = _View_PlacedRect(page, title_place);
       }
    }
 
@@ -888,7 +888,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
                                                          page.max.y - gutter);
    } else if (beside_count != 0 && slide->item_count != 0) {
       F32 middle = (content.min.x + content.max.x) * 0.5f;
-      if (slide->layout == DECK_Layout_PictureLeft) {
+      if (slide->layout == Deck_Layout_PictureLeft) {
          picture_rect.max.x = middle - gutter * 0.5f;
          body_rect.min.x = middle + gutter * 0.5f;
       } else {
@@ -906,23 +906,23 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
       F32 aspects[DECK_MAX_PICTURES] = {0};
       for (U64 i = 0, cell_idx = 0; i < slide->picture_count && cell_idx < DECK_MAX_PICTURES; i += 1) {
          if (i != behind_idx && !slide->pictures[i].place.is_set) {
-            aspects[cell_idx] = _VIEW_AspectOf(&slide->pictures[i]);
+            aspects[cell_idx] = _View_AspectOf(&slide->pictures[i]);
             cell_idx += 1;
          }
       }
-      _VIEW_PictureGrid(picture_rect, aspects, Min(shared_count, DECK_MAX_PICTURES), gutter * 0.5f, slide->item_count != 0,
+      _View_PictureGrid(picture_rect, aspects, Min(shared_count, DECK_MAX_PICTURES), gutter * 0.5f, slide->item_count != 0,
                         cells);
    }
    for (U64 i = 0, cell_idx = 0; i < slide->picture_count; i += 1) {
       if (i == behind_idx) {
          continue;
       }
-      DECK_Picture* picture = &slide->pictures[i];
+      Deck_Picture* picture = &slide->pictures[i];
       B32           is_placed = picture->place.is_set;
-      B32           is_loaded = IMG_IsLoaded(&picture->image);
+      B32           is_loaded = Image_IsLoaded(&picture->image);
       Rng2F32       room = picture_rect;
       if (is_placed) {
-         room = _VIEW_PlacedRect(page, &picture->place);
+         room = _View_PlacedRect(page, &picture->place);
       } else if (shared_count > 1) {
          room = cells[Min(cell_idx, DECK_MAX_PICTURES - 1)];
          cell_idx += 1;
@@ -941,25 +941,25 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
 
       Rng2F32 drawn = room;
       if (is_loaded) {
-         VIEW_DrawImageFit(&picture->image, room, alpha);
-         drawn = _VIEW_FitRect(&picture->image, room);
+         View_DrawImageFit(&picture->image, room, alpha);
+         drawn = _View_FitRect(&picture->image, room);
       } else if (picture->load_failed) {
          // In the page, for the one picture that would fill the window.
          if (!has_text && !is_placed && beside_count == 1) {
             drawn = page;
          }
-         _VIEW_DrawMissingPicture(fonts, &colors, picture->path, drawn, scale, alpha);
+         _View_DrawMissingPicture(fonts, &colors, picture->path, drawn, scale, alpha);
       }
       // A placed picture's hit is the picture as drawn. One that is not
       // placed keeps all of its room, as before there were places - which,
       // in a grid, is the picture as drawn too.
-      _VIEW_PushHit(arena, hits, is_placed ? drawn : room, picture->range);
-      _VIEW_PushBox(hits, DECK_PlaceKind_Picture, i, drawn, 0, drawn, 0);
+      _View_PushHit(arena, hits, is_placed ? drawn : room, picture->range);
+      _View_PushBox(hits, Deck_PlaceKind_Picture, i, drawn, 0, drawn, 0);
    }
 
    //- bgz: the title
    if (has_title) {
-      _VIEW_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 0, hits);
+      _View_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 0, hits);
    }
 
    //- bgz: the body, a block at a time
@@ -970,7 +970,7 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
    //
    // The words stay the size they are. What does not fit a block's room -
    // its place, or the body's room for those that share it - is not shown,
-   // and the block's scroll (DECK_Box's, or the slide's body_scroll for the
+   // and the block's scroll (Deck_Box's, or the slide's body_scroll for the
    // ones that share) says how far down its words the room shows.
    if (slide->item_count != 0) {
       U64 last_shared = max_U64; // the last block that is not placed
@@ -982,28 +982,28 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
 
       F32 y_at = body_rect.min.y - slide->body_scroll * scale;
       for (U64 i = 0; i < slide->box_count; i += 1) {
-         DECK_Box* block = &slide->boxes[i];
+         Deck_Box* block = &slide->boxes[i];
          if (block->item_count == 0) {
             continue;
          }
          F32 text_size = block->look.has_size ? block->look.size : 1.0f;
          if (block->place.is_set) {
-            Rng2F32 room = _VIEW_PlacedRect(page, &block->place);
+            Rng2F32 room = _View_PlacedRect(page, &block->place);
             Rng2F32 shown = Intersect2F32(room, rect);
             Rng2F32 block_rect = room;
             block_rect.min.y -= block->scroll * scale;
             Core_D_PushClip(shown);
-            F32 end_y = _VIEW_Body(arena, fonts, &colors, slide, block, i, block_rect, shown, scale, alpha, hits);
+            F32 end_y = _View_Body(arena, fonts, &colors, slide, block, i, block_rect, shown, scale, alpha, hits);
             Core_D_PopClip();
-            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, room, text_size, room, end_y);
-            _VIEW_ScrollBar(hits, &colors, room, page, end_y - block_rect.min.y, block->scroll * scale, scale, alpha);
+            _View_PushBox(hits, Deck_PlaceKind_Text, i, room, text_size, room, end_y);
+            _View_ScrollBar(hits, &colors, room, page, end_y - block_rect.min.y, block->scroll * scale, scale, alpha);
          } else {
             Rng2F32 shown = Intersect2F32(body_rect, rect);
             Rng2F32 block_rect = R2F32P(body_rect.min.x, y_at, body_rect.max.x, body_rect.max.y);
             Core_D_PushClip(shown);
-            F32 end_y = _VIEW_Body(arena, fonts, &colors, slide, block, i, block_rect, shown, scale, alpha, hits);
+            F32 end_y = _View_Body(arena, fonts, &colors, slide, block, i, block_rect, shown, scale, alpha, hits);
             Core_D_PopClip();
-            y_at = end_y + _VIEW_BlockGap(fonts, scale);
+            y_at = end_y + _View_BlockGap(fonts, scale);
 
             // The box to move it by: as tall as the words, not all the room
             // down to the bottom margin - that box would be mostly empty,
@@ -1018,11 +1018,11 @@ VIEW_DrawSlide(Arena* arena, TXT_Fonts* fonts, DECK_Theme theme, DECK_Slide* sli
             if (i == last_shared) {
                room.max.y = Max(body_rect.max.y, box.max.y);
             }
-            _VIEW_PushBox(hits, DECK_PlaceKind_Text, i, box, text_size, room, end_y);
+            _View_PushBox(hits, Deck_PlaceKind_Text, i, box, text_size, room, end_y);
             if (i == last_shared) {
                // The one bar of the blocks that share the body's room.
                F32 scroll = slide->body_scroll * scale;
-               _VIEW_ScrollBar(hits, &colors, body_rect, page, end_y - (body_rect.min.y - scroll), scroll, scale, alpha);
+               _View_ScrollBar(hits, &colors, body_rect, page, end_y - (body_rect.min.y - scroll), scroll, scale, alpha);
             }
          }
       }

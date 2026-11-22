@@ -28,13 +28,6 @@
 // bgz lib
 #include "bgz_inc.h"
 
-// A layer's own functions and variables, which no other layer uses, are
-// PRIVATE and start with _: PRIVATE String8 _DECK_Trim(...). What other
-// layers use has no _ and is declared in the layer's header. The editor
-// project defines PRIVATE in its state_ops.h; the slideshow has no state ops,
-// so it is here, ahead of everything that uses it.
-#define PRIVATE static
-
 // The UI library - the editor project's own (src\editor\ui there), copied in
 // as app code and built on bgz's draw and font cache.
 #include "ui/ui_inc.h"
@@ -42,6 +35,7 @@
 ////////////////////////////////
 //~ bgz: headers / public types
 
+#include "state_ops/state_ops.h"
 #include "image/image.h"
 #include "audio/audio.h"
 #include "audio/audio_device.h"
@@ -63,12 +57,30 @@
 #include "frame.h"
 
 ////////////////////////////////
-//~ bgz: the UI library
+//~ bgz: layers
 //
-// Ahead of the layers, not among them: caret.c draws its scroll bars' thumbs
-// with the UI's own _UI_DrawScrollThumb, which is private to the UI and in
-// none of its headers. The UI's files are the editor's, kept as they are.
-//
+// Every layer, alphabetically - the UI library among them. A layer uses
+// another only through its header, so the order never matters. A layer in
+// more than one .c includes the others from its own (audio.c, video.c). A new
+// layer: a folder, its .c here, and its .h above if other layers call it.
+// app_state.c, the state ops that are no layer's, is first.
+
+#include "app_state.c"
+#include "audio/audio.c"
+#include "caret/caret.c"
+#include "copy/copy.c"
+#include "deck/deck.c"
+#include "edit/edit.c"
+#include "editor/editor.c"
+#include "image/image.c"
+#include "look/look.c"
+#include "open/open.c"
+#include "place/place.c"
+#include "presenter/presenter.c"
+#include "slide_video/slide_video.c"
+#include "state_ops/state_ops.c"
+#include "text/text.c"
+
 // The UI times its passes with raddebugger's ProfScope. With no profiler
 // built in - the slideshow has none - that is DeferLoop((0), ProfEnd()), and
 // the (0) is an unused value. The editor builds with Spall, so it never sees
@@ -82,27 +94,6 @@
 # pragma clang diagnostic pop
 #endif
 
-////////////////////////////////
-//~ bgz: layers
-//
-// Every layer, alphabetically. A layer uses another only through its header,
-// so the order never matters. A layer in more than one .c includes the others
-// from its own (audio.c, video.c). A new layer: a folder, its .c here, and
-// its .h above if other layers call it.
-
-#include "audio/audio.c"
-#include "caret/caret.c"
-#include "copy/copy.c"
-#include "deck/deck.c"
-#include "edit/edit.c"
-#include "editor/editor.c"
-#include "image/image.c"
-#include "look/look.c"
-#include "open/open.c"
-#include "place/place.c"
-#include "presenter/presenter.c"
-#include "slide_video/slide_video.c"
-#include "text/text.c"
 #include "video/video.c"
 #include "view/view.c"
 
@@ -143,7 +134,7 @@ _Main_RunFrame(App_State* app_state) {
    // FrameWork left showing.
    if (app_state->presenter_open) {
       Core_R_WindowBeginFrame(app_state->presenter_window, app_state->presenter_window_eqp);
-      PRES_Draw(app_state);
+      Presenter_Draw(app_state);
       Core_R_WindowEndFrame(app_state->presenter_window, app_state->presenter_window_eqp);
    }
    Core_R_EndFrame();
@@ -172,12 +163,12 @@ _Main_RepaintFrame(void) {
       Core_R_WaitForFrame();
 
       Temp         temp = TempBegin(app_state->frame_arena);
-      WM_EventList events = app_state->events;
+      WM_EventList events = *app_state->events;
 
-      MemoryZeroStruct(&app_state->events);
+      MemoryZeroStruct(app_state->events);
       _Main_RunFrame(app_state);
 
-      app_state->events = events;
+      *app_state->events = events;
       TempEnd(temp);
    }
 
@@ -194,15 +185,25 @@ _EntryPoint(CmdLine* cmdline) {
    App_State app_state = {0};
    app_state.frame_arena = ArenaAlloc();
 
+   // The queue of state ops: what changes app_state, run by the frame
+   // (_FR_UpdateAppState, frame.c).
+   StateOp_List state_ops;
+   StateOp_Init(&state_ops);
+   app_state.op_list = &state_ops;
+
+   // This frame's events: the list app_state points at.
+   WM_EventList events = {0};
+   app_state.events = &events;
+
    // The log, before anything that can have something to say. What is
    // logged before the first frame is written just ahead of it, and after
    // that each frame writes its own (FrameWork).
    app_state.log = LogAlloc();
    LogSelect(app_state.log);
    LogScopeBegin();
-   FR_OpenLogFile(&app_state);
+   FR_OpenLogFile();
 
-   app_state.fonts = TXT_OpenFonts();
+   app_state.fonts = Text_OpenFonts();
 
    // The UI layer's state, selected for the rest of the run: there is only
    // the one. The icon font is found beside the program, not from the
@@ -221,7 +222,7 @@ _EntryPoint(CmdLine* cmdline) {
    // deck that was open last. And with no such deck - the first run - an
    // empty one, under the open screen.
    // Sound, before any deck: a deck's videos take a voice each as they open.
-   AUD_Init();
+   Audio_Init();
 
    FR_LoadRecents(&app_state);
    if (cmdline->inputs.first != 0) {
@@ -232,8 +233,8 @@ _EntryPoint(CmdLine* cmdline) {
       FR_OpenPath(&app_state, last);
       ScratchEnd(scratch);
    } else {
-      app_state.deck = DECK_OpenFolder(Str8Zero());
-      OPEN_Show(&app_state);
+      app_state.deck = Deck_OpenFolder(Str8Zero());
+      StateOp_Open_Show(app_state.op_list); // run by the first frame
    }
 
    // UseDefaultPosition: where Windows puts a new window - only the rect's
@@ -246,7 +247,7 @@ _EntryPoint(CmdLine* cmdline) {
    // draws until the loop handles the WM_PAINT that showing it sends.
    {
       Temp temp = TempBegin(app_state.frame_arena);
-      FR_WriteLogs(&app_state, LogScopeEnd(app_state.frame_arena));
+      FR_WriteLogs(LogScopeEnd(app_state.frame_arena));
       TempEnd(temp);
    }
 
@@ -259,7 +260,7 @@ _EntryPoint(CmdLine* cmdline) {
    while (!app_state.quit) {
       Core_R_WaitForFrame(); // vsync
 
-      app_state.events = Core_WM_GetEvents(app_state.frame_arena, 0);
+      events = Core_WM_GetEvents(app_state.frame_arena, 0);
       _Main_RunFrame(&app_state);
 
       // Between frames, not from inside one: the change of size makes Windows
@@ -275,7 +276,7 @@ _EntryPoint(CmdLine* cmdline) {
       // its frames is being drawn.
       if (app_state.toggle_presenter) {
          app_state.toggle_presenter = 0;
-         PRES_Toggle(&app_state);
+         Presenter_Toggle(&app_state);
       }
 
       ArenaClear(app_state.frame_arena);
@@ -284,14 +285,14 @@ _EntryPoint(CmdLine* cmdline) {
    _repaint_app_state = 0;
 
    if (app_state.presenter_open) {
-      PRES_Toggle(&app_state);
+      Presenter_Toggle(&app_state);
    }
-   COPY_CancelAll(&app_state);
-   AUD_Shutdown();
+   Copy_CancelAll(&app_state);
+   Audio_Shutdown();
    if (app_state.deck_watch != 0) {
       FileWatchClose(app_state.deck_watch);
    }
-   FileClose(app_state.log_file);
+   FR_CloseLogFile();
 
    Core_R_Shutdown();
 }

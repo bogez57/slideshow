@@ -2,10 +2,20 @@
 //~ bgz: one frame's work
 //
 // FrameWork is everything between the renderer's begin and end of a frame
-// (main.c): read this frame's input and the clock, build the UI layer's tree
-// (the open screen, and the whole of the screen that is up: the edit screen,
-// edit\edit.c, or the presentation, which is in this file), then draw it. It also runs with no events at
-// all, when Windows asks for a repaint during a resize - see
+// (main.c), in the editor project's order:
+//
+//    1. _FR_UpdateAppState   runs the state ops the UI build pushed last frame
+//    2. the input            of the screen that is up, which pushes ops
+//    3. _FR_UpdateAppState   runs those, so a key is drawn the frame it is pressed
+//    4. the UI build         the open screen, and the whole of the screen that
+//                            is up: the edit screen (edit\edit.c), or the
+//                            presentation, which is in this file. Its clicks
+//                            push ops, for step 1 of the next frame
+//    5. the draw
+//
+// App state is written in _FR_UpdateAppState only (state_ops\state_ops.h):
+// every other step is handed a const App_State. It also runs with no events
+// at all, when Windows asks for a repaint during a resize - see
 // _Main_RepaintFrame in main.c.
 
 ////////////////////////////////
@@ -20,35 +30,56 @@
 // the watch missed.
 #define _FR_RELOAD_CHECK_SECONDS 2.0f
 
-void
-FR_Notice(App_State* app_state, String8 notice) {
-   app_state->notice = notice;
-   app_state->notice_us = NowTimeUS();
+// What a frame remembers from one frame to the next that is not app state:
+// it matters for a few frames, and nothing is lost with it. Written by this
+// file only, with no state op.
+typedef struct FR_State FR_State;
+struct FR_State {
+   // Presenting: mouse wheel movement not yet enough for a slide.
+   F32 scroll_left_over;
+
+   // Presenting: when one of the video's keys was last pressed - its strip
+   // of controls shows for a moment after. 0: never.
+   U64 video_key_us;
+
+   // The window's size when the font cache was last emptied (_FR_BeginText).
+   Vec2F32 text_window_dim;
+
+   // When the main window's last UI build began, for its animations. 0: none
+   // yet.
+   U64 ui_last_frame_us;
+
+   // When the text deck's file was last looked at for changes from outside
+   // (FR_SyncDeck).
+   U64 reload_checked_us;
+
+   // The fade of a change of slide: the change it is of (app_state's
+   // slide_changed_us), when it was first drawn, and the change whose fade
+   // is over.
+   U64 fade_of_us;
+   U64 fade_start_us;
+   U64 fade_done_of_us;
+
+   // The log's file, and how much has been written to it.
+   File log_file;
+   U64  log_file_off;
+};
+
+PRIVATE FR_State _frame_state;
+
+B32
+FR_IsFading(const App_State* app_state) {
+   return (app_state->fade_active && _frame_state.fade_done_of_us != app_state->slide_changed_us);
 }
 
 String8
-FR_CurrentNotice(App_State* app_state) {
+FR_CurrentNotice(const App_State* app_state) {
    String8 result = {0};
    U64     notice_us = (U64)(FR_NOTICE_SECONDS * 1000000.0f);
    if (app_state->notice.size != 0 && NowTimeUS() - app_state->notice_us < notice_us) {
       result = app_state->notice;
    }
    return result;
-}
-
-void
-FR_RequestQuit(App_State* app_state) {
-   B32 has_unsaved = (app_state->editor != 0 && ED_HasUnsavedChanges(app_state->editor));
-   if (has_unsaved && !app_state->quit_warned) {
-      app_state->quit_warned = 1;
-      FR_Notice(app_state, Str8Lit("Unsaved changes. Ctrl+S saves. Close again to quit without saving."));
-   } else if (COPY_IsBusy(app_state) && !app_state->quit_warned_copy) {
-      // Its slide names the file as it will be in the deck's folder.
-      app_state->quit_warned_copy = 1;
-      FR_Notice(app_state, Str8Lit("Still copying a video into the deck's folder. Close again to quit anyway."));
-   } else {
-      app_state->quit = 1;
-   }
 }
 
 String8
@@ -100,7 +131,7 @@ FR_LocalFolder(Arena* arena) {
 }
 
 void
-FR_OpenLogFile(App_State* app_state) {
+FR_OpenLogFile(void) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 folder = PushStr8F(scratch.arena, "%S\\logs", FR_LocalFolder(scratch.arena));
    if (!FilePathExists(folder)) {
@@ -115,14 +146,19 @@ FR_OpenLogFile(App_State* app_state) {
    }
 
    // ShareRead: it can be read while the program runs.
-   app_state->log_file = FileOpen(AccessFlag_Write | AccessFlag_ShareRead, path);
-   app_state->log_file_off = 0;
+   _frame_state.log_file = FileOpen(AccessFlag_Write | AccessFlag_ShareRead, path);
+   _frame_state.log_file_off = 0;
 
    ScratchEnd(scratch);
 }
 
 void
-FR_WriteLogs(App_State* app_state, LogScopeResult logs) {
+FR_CloseLogFile(void) {
+   FileClose(_frame_state.log_file);
+}
+
+void
+FR_WriteLogs(LogScopeResult logs) {
    Temp scratch = ScratchBegin(0, 0);
 
    char* prefixes[LogMsgKind_COUNT] = {0};
@@ -144,9 +180,9 @@ FR_WriteLogs(App_State* app_state, LogScopeResult logs) {
          }
 
          String8 out = PushStr8F(scratch.arena, "%s%S\n", prefixes[kind], line);
-         if (!FileMatch(app_state->log_file, FileZero())) {
-            app_state->log_file_off +=
-                FileWrite(app_state->log_file, R1U64(app_state->log_file_off, app_state->log_file_off + out.size), out.str);
+         if (!FileMatch(_frame_state.log_file, FileZero())) {
+            _frame_state.log_file_off +=
+                FileWrite(_frame_state.log_file, R1U64(_frame_state.log_file_off, _frame_state.log_file_off + out.size), out.str);
          }
          // And to the console, for a run started from one.
          printf("%.*s", Str8VArg(out));
@@ -239,31 +275,31 @@ _FR_RememberRecent(App_State* app_state, String8 path) {
 
 B32
 FR_OpenPath(App_State* app_state, String8 path) {
-   if (app_state->editor != 0 && ED_HasUnsavedChanges(app_state->editor)) {
-      FR_Notice(app_state, Str8Lit("Unsaved changes. Save (Ctrl+S) before opening something else."));
+   if (app_state->editor != 0 && Editor_HasUnsavedChanges(app_state->editor)) {
+      StateOp_App_Notice(app_state->op_list)->notice = Str8Lit("Unsaved changes. Save (Ctrl+S) before opening something else.");
       return 0;
    }
 
    U64        first_slide = 0;
-   DECK_Deck* deck = DECK_OpenPath(path, &first_slide);
+   Deck_Deck* deck = Deck_OpenPath(path, &first_slide);
    B32        is_text = (deck->file.size != 0);
 
    // A text file with no slides yet is a deck to be written. Anything else
    // with no slides is nothing to show, and the deck that is open stays.
    if (!is_text && deck->slide_count == 0 && app_state->deck != 0) {
       LogUserErrorF("Nothing to show in %S: no images, and not a text deck (.md, .txt)\n", path);
-      FR_Notice(app_state, Str8Lit("Nothing to show there: no images, and not a text deck (.md, .txt)."));
-      DECK_Close(deck);
+      StateOp_App_Notice(app_state->op_list)->notice = Str8Lit("Nothing to show there: no images, and not a text deck (.md, .txt).");
+      Deck_Close(deck);
       return 0;
    }
 
    LogInfoF("Opened %S: %llu slides\n", is_text ? deck->file : deck->folder, (unsigned long long)deck->slide_count);
 
    if (app_state->deck != 0) {
-      DECK_Close(app_state->deck);
+      Deck_Close(app_state->deck);
    }
    if (app_state->editor != 0) {
-      ED_Close(app_state->editor);
+      Editor_Close(app_state->editor);
       app_state->editor = 0;
    }
    if (app_state->deck_watch != 0) {
@@ -280,12 +316,18 @@ FR_OpenPath(App_State* app_state, String8 path) {
    app_state->quit_warned = 0;
    // The slide numbers are the new deck's: none of its videos was started.
    app_state->video_auto_slide = 0;
-   app_state->video_key_us = 0;
+   _frame_state.video_key_us = 0;
+   // Nor is what the edit screen kept of the old deck's slide the new one's:
+   // where its pieces were laid out, and a piece held by the mouse.
+   g_edit_view.hit_count = 0;
+   g_edit_view.run_count = 0;
+   g_edit_view.box_count = 0;
+   Place_GiveUp();
 
    // A text deck opens on the edit screen. Its deck is made again from the
    // editor's text at the next FR_SyncDeck: 0 is no edit_count an editor has.
    if (is_text) {
-      app_state->editor = ED_Open(deck->file);
+      app_state->editor = Editor_Open(deck->file);
       app_state->parsed_edit_count = 0;
 
       // Its folder is watched, to know at once when something else writes
@@ -309,7 +351,6 @@ FR_OpenPath(App_State* app_state, String8 path) {
    // over the background.
    app_state->fade_active = 1;
    app_state->fade_from_idx = deck->slide_count;
-   app_state->fade_start_us = 0;
 
    // Remembered, to be opened again at the next start - if it is there: a
    // text deck that has not been saved yet is not.
@@ -323,7 +364,7 @@ FR_OpenPath(App_State* app_state, String8 path) {
 
 void
 FR_SyncDeck(App_State* app_state) {
-   ED_Editor* editor = app_state->editor;
+   Editor_Editor* editor = app_state->editor;
    if (editor == 0) {
       return;
    }
@@ -334,7 +375,7 @@ FR_SyncDeck(App_State* app_state) {
    // changes the text here wins, and saving it writes over the file.
    //
    // The watch only says that something in the folder changed - when to
-   // look. What is looked at is the file's own time (ED_FileHasChanged).
+   // look. What is looked at is the file's own time (Editor_FileHasChanged).
    B32 look_now = 0;
    if (app_state->deck_watch != 0) {
       Temp        scratch = ScratchBegin(0, 0);
@@ -344,10 +385,10 @@ FR_SyncDeck(App_State* app_state) {
    }
    U64 now_us = NowTimeUS();
    U64 check_us = (U64)(_FR_RELOAD_CHECK_SECONDS * 1000000.0f);
-   if (look_now || now_us - app_state->reload_checked_us >= check_us) {
-      app_state->reload_checked_us = now_us;
-      if (ED_FileHasChanged(editor) && !ED_HasUnsavedChanges(editor)) {
-         ED_Reload(editor);
+   if (look_now || now_us - _frame_state.reload_checked_us >= check_us) {
+      _frame_state.reload_checked_us = now_us;
+      if (Editor_FileHasChanged(editor) && !Editor_HasUnsavedChanges(editor)) {
+         Editor_Reload(editor);
          LogInfoF("%S was written by something else: read again\n", editor->file);
       }
    }
@@ -358,9 +399,9 @@ FR_SyncDeck(App_State* app_state) {
 
       // Pictures already loaded go over to the new deck, or every key typed
       // would decode the slide's picture again.
-      DECK_Deck* deck = DECK_OpenText(ED_Text(editor), editor->file);
-      DECK_TakeImages(deck, app_state->deck);
-      DECK_Close(app_state->deck);
+      Deck_Deck* deck = Deck_OpenText(Editor_Text(editor), editor->file);
+      Deck_TakeImages(deck, app_state->deck);
+      Deck_Close(app_state->deck);
       app_state->deck = deck;
 
       if (app_state->slide_idx >= deck->slide_count) {
@@ -392,61 +433,58 @@ FR_SyncDeck(App_State* app_state) {
 //    quit             Esc (a folder of images), or closing the window
 
 PRIVATE void
-_FR_PresentInput(App_State* app_state) {
-   WM_EventList* events = &app_state->events;
+_FR_PresentInput(const App_State* app_state, FR_State* frame, StateOp_List* ops) {
+   WM_EventList* events = app_state->events;
    WM_Window     window = app_state->window;
    U64           now_us = NowTimeUS();
 
    F32 scroll = 0;
    for (WM_Event* event = events->first; event != 0; event = event->next) {
       if (event->kind == WM_EventKind_WindowClose) {
-         FR_RequestQuit(app_state);
+         StateOp_App_RequestQuit(ops);
       }
       if (event->kind == WM_EventKind_Scroll) {
          // Over a block with more words than room, the wheel moves through
          // its words (caret\caret.c). Anywhere else, through the slides.
          //
          // Over the block in this window only: the presenter's window hands
-         // its wheel on too (PRES_Input), and where its mouse is says
+         // its wheel on too (Presenter_Input), and where its mouse is says
          // nothing of what is under it here - asked of this window's mouse,
          // a turn over the presenter's notes would scroll whatever block of
          // the slide happens to be at the same place in this one. The
          // event's own place, which is in the window it came to.
          B32 is_here = (event->window.u64[0] == window.u64[0]);
-         if (!(is_here && CARET_PresentWheel(app_state, event->pos, event->delta.y / 120.0f))) {
+         if (!(is_here && Caret_PresentWheel(app_state, event->pos, event->delta.y / 120.0f))) {
             scroll += event->delta.y;
          }
       }
-      // Of several things dropped at once, the first is opened.
+      // Of several things dropped at once, the first is opened. The rest of
+      // this frame's input was for the deck that is going.
       if (event->kind == WM_EventKind_FileDrop && event->strings.first != 0) {
-         FR_OpenPath(app_state, event->strings.first->string);
-         if (app_state->is_editing) {
-            return;
-         }
+         StateOp_App_OpenPath(ops)->path = PushStr8Copy(ops->arena, event->strings.first->string);
+         return;
       }
    }
 
-   FR_SyncDeck(app_state);
-
    //- bgz: overlays
    if (Core_WM_KeyPress(events, window, 0, WM_Key_I)) {
-      app_state->show_info = !app_state->show_info;
+      StateOp_App_ToggleInfo(ops);
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_N)) {
-      app_state->show_notes = !app_state->show_notes;
+      StateOp_App_ToggleNotes(ops);
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_V)) {
-      app_state->toggle_presenter = 1;
+      StateOp_App_TogglePresenter(ops);
    }
 
    //- bgz: the slide's video, if it has one (slide_video\slide_video.c)
    {
-      if (SVID_Keys(app_state)) {
-         app_state->video_key_us = now_us;
+      if (SlideVideo_Keys(app_state)) {
+         frame->video_key_us = now_us;
       }
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_H) || Core_WM_KeyPress(events, window, 0, WM_Key_F1)) {
-      app_state->show_help = !app_state->show_help;
+      StateOp_App_ToggleHelp(ops);
    }
 
    //- bgz: fullscreen, the edit screen and quit
@@ -456,46 +494,38 @@ _FR_PresentInput(App_State* app_state) {
    fullscreen_pressed |= Core_WM_KeyPress(events, window, 0, WM_Key_F11);
    fullscreen_pressed |= Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Return);
    if (fullscreen_pressed) {
-      app_state->toggle_fullscreen = 1;
+      StateOp_App_ToggleFullscreen(ops);
    }
 
    B32 edit_pressed = Core_WM_KeyPress(events, window, 0, WM_Key_F5);
    if (edit_pressed && app_state->editor == 0) {
       // Said, rather than nothing happening: F5 is in the list of keys.
-      FR_Notice(app_state, Str8Lit("A folder of images has no text to edit. F5 is for text decks (.md)."));
+      StateOp_App_Notice(ops)->notice = Str8Lit("A folder of images has no text to edit. F5 is for text decks (.md).");
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_Esc)) {
       if (is_fullscreen) {
-         app_state->toggle_fullscreen = 1;
+         StateOp_App_ToggleFullscreen(ops);
       } else if (app_state->editor != 0) {
          edit_pressed = 1;
       } else {
-         FR_RequestQuit(app_state);
+         StateOp_App_RequestQuit(ops);
       }
    }
    if (edit_pressed && app_state->editor != 0) {
-      // Back to the text, at the slide that was showing - unless the cursor
-      // is on that slide already, and then it stays where it was.
-      DECK_Deck* deck = app_state->deck;
-      if (deck->slide_count != 0 &&
-          DECK_SlideFromTextPos(deck, app_state->editor->cursor) != app_state->slide_idx) {
-         ED_SetCursor(app_state->editor, deck->slides[app_state->slide_idx].text_pos);
-      }
-      app_state->is_editing = 1;
-      app_state->playing = 0;
-      app_state->fade_active = 0;
-      if (is_fullscreen) {
-         app_state->toggle_fullscreen = 1;
-      }
+      StateOp_App_StartEditing(ops);
       return;
    }
 
    //- bgz: which slide
+   //
+   // Worked out here, however many presses there were this frame, and asked
+   // for once: the fade is from the slide that was on screen to the one that
+   // ends up showing (App_GoToSlide).
    WM_Key next_keys[] = {WM_Key_Right, WM_Key_Down, WM_Key_Space, WM_Key_Return, WM_Key_PageDown, WM_Key_LeftMouseButton};
    WM_Key prev_keys[] = {WM_Key_Left, WM_Key_Up, WM_Key_Backspace, WM_Key_PageUp, WM_Key_RightMouseButton};
 
    U64 slide_count = app_state->deck->slide_count;
-   U64 old_slide_idx = app_state->slide_idx;
+   U64 slide_idx = app_state->slide_idx;
    if (slide_count != 0) {
       U64 last_idx = slide_count - 1;
 
@@ -503,81 +533,65 @@ _FR_PresentInput(App_State* app_state) {
       // deck does not wrap by hand: next on the last slide stays there.
       for (U64 i = 0; i < ArrayCount(next_keys); i += 1) {
          while (Core_WM_KeyPress(events, window, 0, next_keys[i])) {
-            if (app_state->slide_idx < last_idx) {
-               app_state->slide_idx += 1;
+            if (slide_idx < last_idx) {
+               slide_idx += 1;
             }
          }
       }
       for (U64 i = 0; i < ArrayCount(prev_keys); i += 1) {
          while (Core_WM_KeyPress(events, window, 0, prev_keys[i])) {
-            if (app_state->slide_idx > 0) {
-               app_state->slide_idx -= 1;
+            if (slide_idx > 0) {
+               slide_idx -= 1;
             }
          }
       }
 
       // The wheel: a slide a notch. A touchpad sends many small movements,
       // which add up here until they come to a notch.
-      app_state->scroll_left_over += scroll;
-      while (app_state->scroll_left_over >= _FR_SCROLL_PER_SLIDE) {
-         app_state->scroll_left_over -= _FR_SCROLL_PER_SLIDE;
-         if (app_state->slide_idx < last_idx) {
-            app_state->slide_idx += 1;
+      frame->scroll_left_over += scroll;
+      while (frame->scroll_left_over >= _FR_SCROLL_PER_SLIDE) {
+         frame->scroll_left_over -= _FR_SCROLL_PER_SLIDE;
+         if (slide_idx < last_idx) {
+            slide_idx += 1;
          }
       }
-      while (app_state->scroll_left_over <= -_FR_SCROLL_PER_SLIDE) {
-         app_state->scroll_left_over += _FR_SCROLL_PER_SLIDE;
-         if (app_state->slide_idx > 0) {
-            app_state->slide_idx -= 1;
+      while (frame->scroll_left_over <= -_FR_SCROLL_PER_SLIDE) {
+         frame->scroll_left_over += _FR_SCROLL_PER_SLIDE;
+         if (slide_idx > 0) {
+            slide_idx -= 1;
          }
       }
 
-      // A slide clicked in the presenter's window (presenter\presenter.c).
-      if (app_state->presenter_goto != 0) {
-         app_state->slide_idx = Min(app_state->presenter_goto - 1, last_idx);
-      }
 
       if (Core_WM_KeyPress(events, window, 0, WM_Key_Home)) {
-         app_state->slide_idx = 0;
+         slide_idx = 0;
       }
       if (Core_WM_KeyPress(events, window, 0, WM_Key_End)) {
-         app_state->slide_idx = last_idx;
+         slide_idx = last_idx;
       }
 
       //- bgz: playing
+      //
+      // P's op runs after this, so what it will leave is worked out here.
+      B32 playing = app_state->playing;
+      U64 play_from_us = app_state->play_from_us;
       if (Core_WM_KeyPress(events, window, 0, WM_Key_P)) {
-         app_state->playing = !app_state->playing;
-         app_state->play_from_us = now_us;
+         StateOp_App_TogglePlaying(ops);
+         playing = !playing;
+         play_from_us = now_us;
       }
       // Only when nothing above moved the deck this frame: a slide changed by
-      // hand starts its turn over, below.
-      if (app_state->playing && slide_count > 1 && app_state->slide_idx == old_slide_idx) {
+      // hand starts its turn over (App_GoToSlide).
+      if (playing && slide_count > 1 && slide_idx == app_state->slide_idx) {
          U64 play_us = (U64)(FR_PLAY_SECONDS * 1000000.0f);
-         if (now_us - app_state->play_from_us >= play_us) {
-            app_state->slide_idx = (app_state->slide_idx + 1) % slide_count;
+         if (now_us - play_from_us >= play_us) {
+            slide_idx = (slide_idx + 1) % slide_count;
          }
       }
    }
 
-   app_state->presenter_goto = 0;
-
-   // However many presses there were this frame, the fade is from the slide
-   // that was on screen to the one that ends up showing.
-   //
-   // A change that comes before the last one's fade is over is a cut, with no
-   // fade. Otherwise a held key, which changes slide many times in the length
-   // of one fade, would show every slide it passes only faintly.
-   if (app_state->slide_idx != old_slide_idx) {
-      U64 fade_us = (U64)(FR_FADE_SECONDS * 1000000.0f);
-      B32 is_soon_after_last = (app_state->fade_active ||
-                                (app_state->slide_changed_us != 0 && now_us - app_state->slide_changed_us < fade_us));
-
-      app_state->fade_active = !is_soon_after_last;
-      app_state->fade_from_idx = old_slide_idx;
-      app_state->fade_start_us = 0;
-
-      app_state->slide_changed_us = now_us;
-      app_state->play_from_us = now_us;
+   if (slide_idx != app_state->slide_idx) {
+      StateOp_App_GoToSlide(ops)->slide_idx = slide_idx;
    }
 }
 
@@ -600,27 +614,28 @@ _FR_PresentInput(App_State* app_state) {
 // window's box.
 PRIVATE void
 _FR_DrawSlide(UI_Box* box, void* user_data) {
-   App_State* app_state = (App_State*)user_data;
-   DECK_Deck* deck = app_state->deck;
+   const App_State* app_state = (const App_State*)user_data;
+   Deck_Deck* deck = app_state->deck;
    Rng2F32    window_rect = box->rect;
 
    // The slide showing is asked for first: that is what loads its picture,
    // and what releases the pictures of slides far from it.
-   DECK_LoadSlide(deck, app_state->slide_idx);
+   Deck_LoadSlide(deck, app_state->slide_idx);
 
    // How far through the fade this frame is, 0 to 1. The clock starts here,
    // after the load above, and not at the key press: decoding a big photo can
    // take longer than the whole fade, which would then never be seen.
    F32 fade_t = 1.0f;
-   if (app_state->fade_active) {
+   if (FR_IsFading(app_state)) {
       U64 now_us = NowTimeUS();
-      if (app_state->fade_start_us == 0) {
-         app_state->fade_start_us = now_us;
+      if (_frame_state.fade_of_us != app_state->slide_changed_us) {
+         _frame_state.fade_of_us = app_state->slide_changed_us;
+         _frame_state.fade_start_us = now_us;
       }
-      F32 seconds = (F32)(now_us - app_state->fade_start_us) / 1000000.0f;
+      F32 seconds = (F32)(now_us - _frame_state.fade_start_us) / 1000000.0f;
       F32 t = seconds / FR_FADE_SECONDS;
       if (t >= 1.0f) {
-         app_state->fade_active = 0;
+         _frame_state.fade_done_of_us = app_state->slide_changed_us;
       } else {
          fade_t = t * t * (3.0f - 2.0f * t); // eased at both ends
       }
@@ -630,23 +645,23 @@ _FR_DrawSlide(UI_Box* box, void* user_data) {
    // loaded. It is after a step to a neighbour. After a jump across the deck
    // it has been released, and the slide goes without it. fade_from_idx past
    // the last slide is no slide: the new one fades in over the background.
-   if (app_state->fade_active && app_state->fade_from_idx < deck->slide_count) {
+   if (FR_IsFading(app_state) && app_state->fade_from_idx < deck->slide_count) {
       // As far down its blocks' words as it was: not back at their top.
-      CARET_BeforeDrawOf(app_state, app_state->fade_from_idx);
-      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->fade_from_idx],
+      Caret_BeforeDrawOf(app_state, app_state->fade_from_idx);
+      View_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->fade_from_idx],
                      window_rect, 1.0f - fade_t, 0);
-      CARET_AfterDrawOf(app_state, app_state->fade_from_idx);
+      Caret_AfterDrawOf(app_state, app_state->fade_from_idx);
    }
    if (app_state->slide_idx < deck->slide_count) {
       // With its blocks as far down their words as the wheel has them
       // (caret\caret.c): a block with more words than room has a scroll
       // bar - the view's own, part of the slide, which fades with it - and
       // the wheel over it moves it.
-      VIEW_HitList hits = {0};
-      CARET_BeforeDraw(app_state);
-      VIEW_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], window_rect,
+      View_HitList hits = {0};
+      Caret_BeforeDraw(app_state);
+      View_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], window_rect,
                      fade_t, &hits);
-      CARET_PresentAfterDraw(app_state, &hits);
+      Caret_PresentAfterDraw(app_state, &hits);
    }
 }
 
@@ -659,12 +674,12 @@ FR_BuildWords(FNT_Tag font, F32 px, Vec2F32 top_left, Vec4F32 color, String8 wor
    va_end(args);
    // A little wider than the words: the UI cuts words that do not fit their
    // box short, and its measure can be a pixel over the font cache's.
-   F32 w = TXT_Width(font, px, words) + px;
+   F32 w = Text_Width(font, px, words) + px;
    // A line's height: the UI puts the words in the middle of it, down, which
-   // is where TXT_Draw puts them from its top - to the pixel at most sizes,
+   // is where Text_Draw puts them from its top - to the pixel at most sizes,
    // a pixel higher at some.
    F32 top = top_left.y;
-   F32 h = TXT_LineHeight(font, px);
+   F32 h = Text_LineHeight(font, px);
    UI_SetNextFont(font);
    UI_SetNextFontSize(FR_UIFontSize(px));
    UI_SetNextTextColor(color);
@@ -690,10 +705,10 @@ _FR_BuildPanel(String8 tag, Rng2F32 rect, F32 radius, char* key) {
 // notes, the slide's number, the play bar, what to do with no slides, the
 // video's strip - then the slide itself.
 PRIVATE void
-_FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
-   DECK_Deck* deck = app_state->deck;
-   TXT_Fonts* fonts = &app_state->fonts;
-   F32        scale = Max(VIEW_ScaleFromDim(window_dim), _FR_MIN_OVERLAY_SCALE);
+_FR_BuildPresentation(const App_State* app_state, Vec2F32 window_dim) {
+   Deck_Deck* deck = app_state->deck;
+   const Text_Fonts* fonts = &app_state->fonts;
+   F32        scale = Max(View_ScaleFromDim(window_dim), _FR_MIN_OVERLAY_SCALE);
    Temp       scratch = ScratchBegin(0, 0);
 
    //- bgz: a notice, along the top
@@ -701,8 +716,8 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
    if (notice.size != 0) {
       F32 px = 20.0f * scale;
       F32 pad = 10.0f * scale;
-      F32 w = TXT_Width(fonts->regular, px, notice);
-      F32 h = TXT_LineHeight(fonts->regular, px);
+      F32 w = Text_Width(fonts->regular, px, notice);
+      F32 h = Text_LineHeight(fonts->regular, px);
       F32 x = (window_dim.x - w) * 0.5f;
       F32 y = pad * 2.0f;
       FR_BuildWords(fonts->regular, px, V2F32(x, y), UI_ThemeColor(Str8Lit("notice"), UI_ColorSlot_Text), notice, "###present notice");
@@ -749,7 +764,7 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       F32 panel_h = 0;
       for (U64 pass = 0; pass < 2; pass += 1) {
          px = 20.0f * list_scale;
-         row_h = TXT_LineHeight(fonts->regular, px) * 1.25f;
+         row_h = Text_LineHeight(fonts->regular, px) * 1.25f;
          pad = 28.0f * list_scale;
          column_gap = 36.0f * list_scale;
 
@@ -757,8 +772,8 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
          key_w = 0;
          what_w = 0;
          for (U64 i = 0; i < ArrayCount(rows); i += 1) {
-            key_w = Max(key_w, TXT_Width(fonts->bold, px, rows[i][0]));
-            what_w = Max(what_w, TXT_Width(fonts->regular, px, rows[i][1]));
+            key_w = Max(key_w, Text_Width(fonts->bold, px, rows[i][0]));
+            what_w = Max(what_w, Text_Width(fonts->regular, px, rows[i][1]));
          }
 
          panel_w = pad + key_w + column_gap + what_w + pad;
@@ -790,19 +805,19 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
    //- bgz: the notes: the slide's @note lines and the next slide's title, on a
    // strip along the bottom - for whoever presents, on a screen only they see
    if (app_state->show_notes && deck->slide_count != 0) {
-      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+      Deck_Slide* slide = &deck->slides[app_state->slide_idx];
       F32         px = 22.0f * scale;
       F32         small_px = 17.0f * scale;
       F32         pad = 18.0f * scale;
-      F32         line_h = TXT_LineHeight(fonts->regular, px);
-      F32         small_h = TXT_LineHeight(fonts->regular, small_px);
+      F32         line_h = Text_LineHeight(fonts->regular, px);
+      F32         small_h = Text_LineHeight(fonts->regular, small_px);
       F32         text_w = Max(window_dim.x - pad * 2.0f, 1.0f);
 
       // What comes next: the next slide's title, or that this is the last.
       // On the build arena: its box shows it once the build is done.
       String8 next = Str8Lit("Next: the end");
       if (app_state->slide_idx + 1 < deck->slide_count) {
-         DECK_Slide* next_slide = &deck->slides[app_state->slide_idx + 1];
+         Deck_Slide* next_slide = &deck->slides[app_state->slide_idx + 1];
          String8     next_name = next_slide->title;
          if (next_name.size == 0) {
             next_name = (next_slide->picture_count != 0) ? Str8SkipLastSlash(next_slide->pictures[0].path)
@@ -814,7 +829,7 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       // The notes' lines, wrapped, to know how tall the strip is.
       String8List lines = {0};
       for (String8Node* note = slide->notes.first; note != 0; note = note->next) {
-         String8List wrapped = TXT_Wrap(UI_BuildArena(), fonts->regular, px, note->string, text_w);
+         String8List wrapped = Text_Wrap(UI_BuildArena(), fonts->regular, px, note->string, text_w);
          for (String8Node* line = wrapped.first; line != 0; line = line->next) {
             Str8ListPush(scratch.arena, &lines, line->string);
          }
@@ -842,7 +857,7 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
 
    //- bgz: the slide's number, and the name of the file it is from
    if (app_state->show_info && deck->slide_count != 0) {
-      DECK_Slide* slide = &deck->slides[app_state->slide_idx];
+      Deck_Slide* slide = &deck->slides[app_state->slide_idx];
       String8     name = Str8SkipLastSlash(deck->file.size != 0 ? deck->file
                                                                     : (slide->picture_count != 0 ? slide->pictures[0].path : Str8Lit("")));
       String8     text = PushStr8F(UI_BuildArena(), "%llu / %llu   %S", (unsigned long long)(app_state->slide_idx + 1),
@@ -850,8 +865,8 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
 
       F32 px = 18.0f * scale;
       F32 pad = 8.0f * scale;
-      F32 w = TXT_Width(fonts->regular, px, text);
-      F32 h = TXT_LineHeight(fonts->regular, px);
+      F32 w = Text_Width(fonts->regular, px, text);
+      F32 h = Text_LineHeight(fonts->regular, px);
       F32 x = window_dim.x - w - pad * 3.0f;
       F32 y = window_dim.y - h - pad * 3.0f;
 
@@ -878,12 +893,12 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
       F32     sizes[] = {40.0f * scale, 22.0f * scale};
       Vec4F32 colors[] = {UI_ThemeColor(Str8Lit("present"), UI_ColorSlot_Text), UI_ThemeColor(Str8Lit("present hint"), UI_ColorSlot_Text)};
 
-      F32 y = window_dim.y * 0.5f - TXT_LineHeight(fonts->bold, sizes[0]);
+      F32 y = window_dim.y * 0.5f - Text_LineHeight(fonts->bold, sizes[0]);
       for (U64 i = 0; i < ArrayCount(lines); i += 1) {
          FNT_Tag font = (i == 0) ? fonts->bold : fonts->regular;
-         F32     w = TXT_Width(font, sizes[i], lines[i]);
+         F32     w = Text_Width(font, sizes[i], lines[i]);
          FR_BuildWords(font, sizes[i], V2F32((window_dim.x - w) * 0.5f, y), colors[i], lines[i], "###present empty %llu", (unsigned long long)i);
-         y += TXT_LineHeight(font, sizes[i]) * 1.2f;
+         y += Text_LineHeight(font, sizes[i]) * 1.2f;
       }
    }
 
@@ -891,20 +906,22 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
    // the slide for a moment after one of its keys, and while it is paused -
    // once it has been started: not in the frame or two before it is. Not
    // clicked: a click is the next slide. Lit where the mouse is.
-   VID_Video* video = DECK_VideoFromSlide(deck, app_state->slide_idx);
+   Video_Video* video = Deck_VideoFromSlide(deck, app_state->slide_idx);
    if (video != 0 && app_state->video_auto_slide == app_state->slide_idx + 1) {
       U64 strip_us = (U64)(SVID_STRIP_SECONDS * 1000000.0f);
-      B32 key_was_recent = (app_state->video_key_us != 0 && NowTimeUS() - app_state->video_key_us < strip_us);
+      B32 key_was_recent = (_frame_state.video_key_us != 0 && NowTimeUS() - _frame_state.video_key_us < strip_us);
       // Paused: all of the slide's videos, not only the first, which may be
       // a short one that has ended while the others play on.
-      if (!SVID_SlideIsPlaying(deck, app_state->slide_idx) || key_was_recent) {
-         SVID_BuildStripLook(app_state, video, VIEW_PageRectFromRect(R2F32P(0, 0, window_dim.x, window_dim.y)), FR_UIScale(window_dim), 0, 0);
+      if (!SlideVideo_SlideIsPlaying(deck, app_state->slide_idx) || key_was_recent) {
+         SlideVideo_BuildStripLook(app_state, video, View_PageRectFromRect(R2F32P(0, 0, window_dim.x, window_dim.y)), FR_UIScale(window_dim), 0, 0);
       }
    }
 
    //- bgz: the slide, under all of it
    UI_Box* slide_box = FR_BuildRectBox(0, R2F32P(0, 0, window_dim.x, window_dim.y), "###present slide");
-   UI_BoxEquipCustomDraw(slide_box, _FR_DrawSlide, app_state);
+   // Handed on as the UI hands any box's own data on: _FR_DrawSlide reads it
+   // as const again.
+   UI_BoxEquipCustomDraw(slide_box, _FR_DrawSlide, (void*)app_state);
 
    ScratchEnd(scratch);
 }
@@ -917,17 +934,17 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
 // The tree is drawn by FR_DrawUITree, over the window's background. Ported
 // from the editor's frame.c (_FR_ProcessEvents, _FR_BeginUIBuild,
 // _FR_DrawUITree). The presenter's window is built the same way, with a
-// UI_State of its own (PRES_Draw, presenter\presenter.c).
+// UI_State of its own (Presenter_Draw, presenter\presenter.c).
 //
-// Built with it: the open screen (OPEN_Build, open\open.c) and the whole
-// edit screen (EDIT_Build, edit\edit.c): the text (drawn by its box, with the
+// Built with it: the open screen (Open_Build, open\open.c) and the whole
+// edit screen (Edit_Build, edit\edit.c): the text (drawn by its box, with the
 // editor), the Format panel, list of pictures, status line, and the preview -
 // the slide (drawn by its box, with the view), what is over it (the caret,
 // the boxes of its pieces and their corners, scroll bars, videos' controls),
 // the caption, the small slides and the + - and the presentation
 // (_FR_BuildPresentation): its slide, drawn by its box, and what is over it.
 //
-// The UI's events are what the screens' own input (EDIT_Input, OPEN_Input)
+// The UI's events are what the screens' own input (Edit_Input, Open_Input)
 // left: a click that took is eaten there. The hand-drawn parts that take
 // clicks and the UI parts do not overlap, so neither gets the other's
 // clicks; while the open screen is up, the edit screen's input does not run
@@ -938,11 +955,11 @@ _FR_BuildPresentation(App_State* app_state, Vec2F32 window_dim) {
 // until the next UI_EndBuild. Another window's events are not this one's: a
 // press in the presenter's window is at a place in that window.
 PRIVATE UI_EventList
-_FR_UIEventsFromEvents(App_State* app_state, UI_State* ui_state, WM_Window window) {
+_FR_UIEventsFromEvents(const App_State* app_state, UI_State* ui_state, WM_Window window) {
    UI_SelectState(ui_state);
 
    UI_EventList ui_events = {0};
-   for (WM_Event* event = app_state->events.first; event != 0; event = event->next) {
+   for (WM_Event* event = app_state->events->first; event != 0; event = event->next) {
       if (event->window.u64[0] != window.u64[0] && event->window.u64[0] != 0) {
          continue;
       }
@@ -1054,13 +1071,13 @@ FR_UIScale(Vec2F32 window_dim) {
 
 F32
 FR_UIFontSize(F32 px) {
-   // As text.c's _TXT_PointsFromPx: the UI hands its size to the same font
+   // As text.c's _Text_PointsFromPx: the UI hands its size to the same font
    // cache, which takes points, 72 to an inch where pixels are 96.
    return Max((F32)(S32)(px * 0.75f), 1.0f);
 }
 
 void
-FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64* last_frame_us) {
+FR_BeginUIBuild(const App_State* app_state, UI_State* ui_state, WM_Window window, U64* last_frame_us) {
    Vec2F32      window_dim = Dim2F32(Core_WM_ClientRectFromWindow(window));
    UI_EventList ui_events = _FR_UIEventsFromEvents(app_state, ui_state, window);
    // The colours, by tag. A box asks under the tags pushed with UI_ColorTag,
@@ -1099,7 +1116,7 @@ FR_BeginUIBuild(App_State* app_state, UI_State* ui_state, WM_Window window, U64*
        {"row", UI_ColorSlot_Background, UI_TRANSPARENT},                       // a list's row: the panel shows through
        {"row hot", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.07f}}},   // under the mouse
        {"dim", UI_ColorSlot_Text, {{0.84f, 0.86f, 0.90f, 0.55f}}},             // what a row is, hints, keys
-       {"notice", UI_ColorSlot_Text, {{1.00f, 0.85f, 0.50f, 1.00f}}},          // FR_Notice's
+       {"notice", UI_ColorSlot_Text, {{1.00f, 0.85f, 0.50f, 1.00f}}},          // App_Notice's
        {"deck", UI_ColorSlot_Text, {{1.00f, 0.80f, 0.40f, 1.00f}}},            // a deck to open
        {"folder", UI_ColorSlot_Text, {{0.55f, 0.75f, 1.00f, 1.00f}}},
        {"action", UI_ColorSlot_Text, {{0.60f, 0.85f, 0.60f, 1.00f}}},          // Browse, New deck, Present
@@ -1311,14 +1328,14 @@ FR_DrawUITree(UI_State* ui_state) {
 
 // The font cache's turn of the frame, before any text is measured or drawn.
 PRIVATE void
-_FR_BeginText(App_State* app_state, Vec2F32 window_dim) {
+_FR_BeginText(Vec2F32 window_dim) {
    // Text is drawn at sizes that follow the window's (view.h), and the font
    // cache keeps every glyph of every size it has drawn, in textures. Left
    // alone, dragging the window's edge would fill it with sizes never used
    // again. So a new window size empties it: what this frame draws is put
    // back in as it is drawn.
-   if (window_dim.x != app_state->text_window_dim.x || window_dim.y != app_state->text_window_dim.y) {
-      app_state->text_window_dim = window_dim;
+   if (window_dim.x != _frame_state.text_window_dim.x || window_dim.y != _frame_state.text_window_dim.y) {
+      _frame_state.text_window_dim = window_dim;
       Core_FNT_Reset();
    }
 
@@ -1326,46 +1343,84 @@ _FR_BeginText(App_State* app_state, Vec2F32 window_dim) {
    Core_FNT_Frame();
 }
 
+// The one place app state is changed: runs the state ops pushed since it was
+// last called (state_ops\state_ops.h). Twice a frame, as in the editor
+// project: at its start, for what the UI build pushed last frame, and after
+// the input. What it returns is the app state for the code after it to read.
+PRIVATE const App_State*
+_FR_UpdateAppState(App_State* app_state, StateOp_List* ops, B32 is_after_input) {
+   StateOp_ProcessList(app_state, ops);
+
+   // The deck, made again from the text if an op changed it - or something
+   // else wrote the file - and on the edit screen the slide the cursor is on.
+   // So everything after this reads a deck that is of the text as it is.
+   FR_SyncDeck(app_state);
+   if (app_state->is_editing && app_state->editor != 0) {
+      app_state->slide_idx = Deck_SlideFromTextPos(app_state->deck, app_state->editor->cursor);
+   }
+
+   // Once a frame, on the state the input's ops left - the slide showing,
+   // the screen that is up: what goes on by itself.
+   if (is_after_input) {
+      Copy_Update(app_state);
+      SlideVideo_Update(app_state);
+   }
+
+   return app_state;
+}
+
 void
-FrameWork(App_State* app_state) {
+FrameWork(App_State* rw_app_state) {
+   // The one handle here that app state can be changed through: only
+   // _FR_UpdateAppState is given it. Everything else reads app_state.
+   StateOp_List* ops = rw_app_state->op_list;
+
    // What is logged this frame is gathered, and written at the frame's end.
-   LogSelect(app_state->log);
+   LogSelect(rw_app_state->log);
    LogScopeBegin();
 
-   Vec2F32 window_dim = Dim2F32(Core_WM_ClientRectFromWindow(app_state->window));
+   Vec2F32 window_dim = Dim2F32(Core_WM_ClientRectFromWindow(rw_app_state->window));
 
-   // Before input: the edit screen measures text to know what a click is on.
-   _FR_BeginText(app_state, window_dim);
+   // Before the ops and the input: both measure text, to know what a click
+   // is on.
+   _FR_BeginText(window_dim);
 
    // Before the UI build too: the edit screen lays its slide out there, into
    // a bucket of its own, to know where its pieces are this frame.
    Core_D_BeginFrame();
 
+   // What the UI build asked for last frame, so the input below is read
+   // against state that has those clicks in it.
+   const App_State* app_state = _FR_UpdateAppState(rw_app_state, ops, 0);
+
    // The presenter's window is for presenting: it goes when the text comes
    // back. Its keys are made the main window's before anything reads them.
-   PRES_Input(app_state);
+   Presenter_Input(app_state);
    if (app_state->presenter_open && app_state->is_editing) {
-      app_state->toggle_presenter = 1;
+      StateOp_App_TogglePresenter(ops);
    }
 
    // The open screen is over either screen, and while it is up the input is
    // all its own.
-   if (!app_state->show_open && Core_WM_KeyPress(&app_state->events, app_state->window, WM_Modifier_Ctrl, WM_Key_O)) {
-      OPEN_Show(app_state);
+   if (!app_state->show_open && Core_WM_KeyPress(app_state->events, app_state->window, WM_Modifier_Ctrl, WM_Key_O)) {
+      StateOp_Open_Show(ops);
    }
 
    // Input can change which screen is up, so that is asked again for drawing.
    if (app_state->show_open) {
-      OPEN_Input(app_state, window_dim);
+      Open_Input(app_state, ops);
    } else if (app_state->is_editing) {
-      EDIT_Input(app_state, window_dim);
+      Edit_Input(app_state, ops, window_dim);
    } else {
-      _FR_PresentInput(app_state);
+      _FR_PresentInput(app_state, &_frame_state, ops);
+   }
+   // The wheel's small movements add up only while presenting.
+   if (app_state->show_open || app_state->is_editing) {
+      _frame_state.scroll_left_over = 0;
    }
 
-   // After the input, which may have changed the slide or the screen.
-   COPY_Update(app_state);
-   SVID_Update(app_state);
+   // What the input asked for, so that it is drawn this frame.
+   app_state = _FR_UpdateAppState(rw_app_state, ops, 1);
 
    // The UI tree, built after the screens' own input, against the screen
    // that input left up. UI_EndBuild lays it out; it is drawn below, over
@@ -1376,17 +1431,17 @@ FrameWork(App_State* app_state) {
    // wheel that misses its panel. Under it, the edit screen's panels are
    // built only to be seen.
    {
-      FR_BeginUIBuild(app_state, app_state->ui_state, app_state->window, &app_state->ui_last_frame_us);
+      FR_BeginUIBuild(app_state, app_state->ui_state, app_state->window, &_frame_state.ui_last_frame_us);
 
       // What the panels show is text as it is - paths, names, "## Heading" -
       // never a box's key: the UI would show only what is before a ##.
       UI_FlagsAdd(UI_BoxFlag_DisableIDString) {
          if (app_state->show_open) {
-            OPEN_Build(app_state, window_dim);
+            Open_Build(app_state, window_dim);
          }
          // Asked after: a deck opened from the open screen is up already.
          if (app_state->is_editing) {
-            EDIT_Build(app_state, window_dim, !app_state->show_open);
+            Edit_Build(app_state, ops, window_dim, !app_state->show_open);
          } else {
             _FR_BuildPresentation(app_state, window_dim);
          }
@@ -1400,7 +1455,7 @@ FrameWork(App_State* app_state) {
       // The background, which is all there is behind a slide that does not
       // fill the window.
       Core_D_Rect(R2F32P(0, 0, window_dim.x, window_dim.y), R2F32P(0, 0, 1, 1),
-                  VIEW_ColorsFromTheme(app_state->deck->theme).background);
+                  View_ColorsFromTheme(app_state->deck->theme).background);
 
       // Over it, all there is: the open screen, and the edit screen or the
       // presentation, the slide among it.
@@ -1408,5 +1463,5 @@ FrameWork(App_State* app_state) {
    }
    Core_D_SubmitBucket(app_state->window, app_state->window_eqp, bucket);
 
-   FR_WriteLogs(app_state, LogScopeEnd(app_state->frame_arena));
+   FR_WriteLogs(LogScopeEnd(app_state->frame_arena));
 }

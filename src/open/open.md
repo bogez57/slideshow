@@ -4,17 +4,21 @@ The open screen: a panel over whichever screen is up, to pick a deck without lea
 
 ## State
 
-In `App_State`:
+In `App_State`, changed by the ops below:
 
 - `show_open`: the panel is up.
-- `open_arena`, `open_folder`, `open_rows`, `open_row_count` (`OPEN_Row`): the folder shown and its lines.
-- `open_scroll`, `open_scanned_us`: where the lines are scrolled to, and when the folder was last read.
+- `open_arena`, `open_folder`: the folder shown.
 
-## Functions
+The panel's own, `_open_view` in open.c, written with no op:
 
-- `OPEN_Show`: puts the panel up, in the folder of the deck that is open.
-- `OPEN_Input`: its keys.
-- `OPEN_Build`: the panel, in FrameWork's UI build, with its clicks and wheel.
+- `rows`, `row_count` (`Open_Row`), `arena`: the lines, made again from the folder every second while the panel is built.
+- `scroll`, `scanned_us`: where the lines are scrolled to, and when the folder was last read.
+
+## Functions and ops
+
+- `Open_Input`: its keys. Pushes ops.
+- `Open_Build`: the panel, in FrameWork's UI build, with its clicks and wheel. Reads the folder into the rows, and pushes ops.
+- Ops: `Open_Show` (puts the panel up, in the folder of the deck that is open), `Open_Close`, `Open_GoToFolder`, `Open_NewDeck` (makes a text deck and opens it). Opening a deck is app_state.c's `App_OpenPath`.
 
 ## Used by
 

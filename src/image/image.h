@@ -14,18 +14,18 @@
 // The longest side a texture can have (Direct3D 11's limit).
 #define IMG_MAX_DIM 16384
 
-typedef struct IMG_Image IMG_Image;
-struct IMG_Image {
+typedef struct Image_Image Image_Image;
+struct Image_Image {
    R_Handle texture; // zero when there is no image
    Vec2S32  size;    // in pixels
 };
 
-// Whether a file name ends in an extension IMG_LoadFromPath can decode.
-B32 IMG_NameIsImage(String8 name);
+// Whether a file name ends in an extension Image_LoadFromPath can decode.
+B32 Image_NameIsImage(String8 name);
 
 // Reads and decodes the file and makes a texture of it. On failure the image
 // is zero, and why is printed.
-IMG_Image IMG_LoadFromPath(String8 path);
+Image_Image Image_LoadFromPath(String8 path);
 
-B32  IMG_IsLoaded(IMG_Image* image);
-void IMG_Release(IMG_Image* image);
+B32  Image_IsLoaded(Image_Image* image);
+void Image_Release(Image_Image* image);

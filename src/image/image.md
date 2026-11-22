@@ -5,13 +5,13 @@ An image file, decoded and handed to the renderer as a texture. Decoding is stb_
 ## State
 
 - `_img_decode_arena`: what stb_image allocates while one image is decoded, let go of all at once when the pixels have gone to the renderer.
-- An `IMG_Image` is the caller's: its texture and size.
+- An `Image_Image` is the caller's: its texture and size.
 
 ## Functions
 
-- `IMG_NameIsImage`: whether a file name has an extension it decodes.
-- `IMG_LoadFromPath`: reads, decodes and makes the texture. Zero on failure, and why is logged.
-- `IMG_IsLoaded`, `IMG_Release`.
+- `Image_NameIsImage`: whether a file name has an extension it decodes.
+- `Image_LoadFromPath`: reads, decodes and makes the texture. Zero on failure, and why is logged.
+- `Image_IsLoaded`, `Image_Release`.
 
 ## Used by
 

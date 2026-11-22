@@ -4,13 +4,13 @@ A plain text editor for one file: the text, the cursor and selection, undo, and 
 
 ## State
 
-- An `ED_Editor` is the caller's: `App_State`'s `editor`, for a deck from a text file. It has two arenas of its own, the text's and the undo history's, released by `ED_Close`.
+- An `Editor_Editor` is the caller's: `App_State`'s `editor`, for a deck from a text file. It has two arenas of its own, the text's and the undo history's, released by `Editor_Close`.
 
 ## Functions
 
-- The file: `ED_Open`, `ED_Close`, `ED_Save`, `ED_Reload`, `ED_HasUnsavedChanges`, `ED_FileHasChanged`.
-- The text: `ED_Text`, `ED_ReplaceRange`, `ED_Insert`, `ED_InsertLine`, `ED_WrapSelection`, `ED_SetCursor`.
-- Its box: `ED_Input` (keys), `ED_Press`, `ED_Drag`, `ED_Wheel`, `ED_Draw`.
+- The file: `Editor_Open`, `Editor_Close`, `Editor_Save`, `Editor_Reload`, `Editor_HasUnsavedChanges`, `Editor_FileHasChanged`.
+- The text: `Editor_Text`, `Editor_ReplaceRange`, `Editor_Insert`, `Editor_InsertLine`, `Editor_WrapSelection`, `Editor_SetCursor`.
+- Its box: `Editor_Input` (keys), `Editor_Press`, `Editor_Drag`, `Editor_Wheel`, `Editor_Draw`.
 
 ## Used by
 

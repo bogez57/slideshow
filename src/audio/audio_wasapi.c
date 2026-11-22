@@ -52,8 +52,8 @@ static const GUID _aud_format_float = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 
 #define _AUD_SILENT_MS     10
 #define _AUD_SILENT_FRAMES (AUD_SAMPLE_RATE / 20)
 
-struct AUD_Device {
-   AUD_DeviceFunction* function;
+struct Audio_Device {
+   Audio_DeviceFunction* function;
    void*               user;
    Thread              thread;
    HANDLE              quit_event; // set: the thread is to end
@@ -63,7 +63,7 @@ struct AUD_Device {
 // Plays through the default card until it stops answering or the device is
 // closed. Returns at once if there is no card to open.
 PRIVATE void
-_AUD_PlayThroughCard(AUD_Device* device) {
+_Audio_PlayThroughCard(Audio_Device* device) {
    IMMDeviceEnumerator* enumerator = 0;
    IMMDevice*           card = 0;
    IAudioClient*        client = 0;
@@ -189,14 +189,14 @@ _AUD_PlayThroughCard(AUD_Device* device) {
 }
 
 PRIVATE void
-_AUD_DeviceThread(void* p) {
-   AUD_Device* device = (AUD_Device*)p;
+_Audio_DeviceThread(void* p) {
+   Audio_Device* device = (Audio_Device*)p;
    SetThreadNameF("audio");
 
    HRESULT com = CoInitializeEx(0, COINIT_MULTITHREADED);
 
    for (;;) {
-      _AUD_PlayThroughCard(device);
+      _Audio_PlayThroughCard(device);
       if (WaitForSingleObject(device->quit_event, 0) == WAIT_OBJECT_0) {
          break;
       }
@@ -229,20 +229,20 @@ _AUD_DeviceThread(void* p) {
    }
 }
 
-AUD_Device*
-AUD_DeviceOpen(Arena* arena, AUD_DeviceFunction* function, void* user) {
-   AUD_Device* device = PushArray(arena, AUD_Device, 1);
+Audio_Device*
+Audio_DeviceOpen(Arena* arena, Audio_DeviceFunction* function, void* user) {
+   Audio_Device* device = PushArray(arena, Audio_Device, 1);
    device->function = function;
    device->user = user;
    device->silent_samples = PushArray(arena, F32, _AUD_SILENT_FRAMES * AUD_CHANNELS);
    // Manual reset: once set it stays set, for every wait that asks.
    device->quit_event = CreateEventW(0, 1, 0, 0);
-   device->thread = ThreadLaunch(_AUD_DeviceThread, device);
+   device->thread = ThreadLaunch(_Audio_DeviceThread, device);
    return device;
 }
 
 void
-AUD_DeviceClose(AUD_Device* device) {
+Audio_DeviceClose(Audio_Device* device) {
    if (device == 0) {
       return;
    }

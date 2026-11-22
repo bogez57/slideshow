@@ -6,16 +6,16 @@ A slide's pictures - images or videos - are loaded the first time they are asked
 
 ## State
 
-- A `DECK_Deck` is the caller's: `App_State`'s `deck`.
+- A `Deck_Deck` is the caller's: `App_State`'s `deck`.
 - `_deck_alias_arena`, `_deck_first_alias`: paths that stand for others for a while - a video on its way into the deck's folder plays from where it was dropped from (copy). For every deck, so a deck read again keeps them.
 
 ## Functions
 
-- Opening: `DECK_OpenPath` (any kind), `DECK_OpenFolder`, `DECK_OpenFile`, `DECK_OpenText` (from the editor's text), `DECK_Close`.
-- Reading a deck: `DECK_SlideFromTextPos`, `DECK_SlideHasText`, `DECK_PlaceName`, `DECK_ThemeName`, `DECK_LayoutName`, `DECK_NamedColorFromIdx`, `DECK_ColorFromString`.
-- Pictures: `DECK_LoadSlide`, `DECK_LoadSlideOnly`, `DECK_TakeImages` (a deck read again keeps what the old one loaded), `DECK_ReopenPicture`, `DECK_PictureNamesFromFolder`, `DECK_SetPathAlias`, `DECK_ClearPathAlias`.
-- Videos: `DECK_VideoFromSlide`, `DECK_VideosFromSlide`, `DECK_SlideHasVideo`, `DECK_SlideVideosAreOpen`, `DECK_UpdateVideos`.
-- File names: `DECK_NameIsTextDeck`, `DECK_SortNames`.
+- Opening: `Deck_OpenPath` (any kind), `Deck_OpenFolder`, `Deck_OpenFile`, `Deck_OpenText` (from the editor's text), `Deck_Close`.
+- Reading a deck: `Deck_SlideFromTextPos`, `Deck_SlideHasText`, `Deck_PlaceName`, `Deck_ThemeName`, `Deck_LayoutName`, `Deck_NamedColorFromIdx`, `Deck_ColorFromString`.
+- Pictures: `Deck_LoadSlide`, `Deck_LoadSlideOnly`, `Deck_TakeImages` (a deck read again keeps what the old one loaded), `Deck_ReopenPicture`, `Deck_PictureNamesFromFolder`, `Deck_SetPathAlias`, `Deck_ClearPathAlias`.
+- Videos: `Deck_VideoFromSlide`, `Deck_VideosFromSlide`, `Deck_SlideHasVideo`, `Deck_SlideVideosAreOpen`, `Deck_UpdateVideos`.
+- File names: `Deck_NameIsTextDeck`, `Deck_SortNames`.
 
 ## Used by
 

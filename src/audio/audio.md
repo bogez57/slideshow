@@ -17,13 +17,13 @@ audio_device.h             what a device is: open and close
 audio_wasapi.c             the device there is, done with Windows' audio
 ```
 
-- **`audio.h`** is all the rest of the program sees: `AUD_Init`,
-  `AUD_Shutdown`, `AUD_VoiceAdd`, `AUD_VoiceRemove`, `AUD_IsMuted`,
-  `AUD_SetMuted`. Sound is always two channels of `F32` at `AUD_SAMPLE_RATE`.
+- **`audio.h`** is all the rest of the program sees: `Audio_Init`,
+  `Audio_Shutdown`, `Audio_VoiceAdd`, `Audio_VoiceRemove`, `Audio_IsMuted`,
+  `Audio_SetMuted`. Sound is always two channels of `F32` at `AUD_SAMPLE_RATE`.
 - **`audio.c`** is the mixer. A voice is a function; when the device wants
   sound the mixer calls every voice and adds up what they write.
-- **`audio_device.h`** is the seam: `AUD_DeviceOpen` takes a function to call
-  for sound, `AUD_DeviceClose` stops calling it.
+- **`audio_device.h`** is the seam: `Audio_DeviceOpen` takes a function to call
+  for sound, `Audio_DeviceClose` stops calling it.
 - **`audio_wasapi.c`** is those two done with WASAPI. It is the only file that
   includes Windows' audio headers.
 

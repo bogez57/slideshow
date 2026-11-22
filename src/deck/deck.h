@@ -12,7 +12,7 @@
 //  - A text file (.md or .txt) that says what is on each slide - the format
 //    is below. A folder with a slides.md in it opens as that file. The
 //    program edits these: the deck is then made from the editor's text
-//    (DECK_OpenText), again at every change.
+//    (Deck_OpenText), again at every change.
 //
 // A slide's image is loaded the first time it is asked for, not when the deck
 // is opened, and only the slides around the one showing are kept: a folder of
@@ -71,7 +71,7 @@
 //    @size text 0.8     the same for the body's words - on a slide with
 //                       @box lines, those of the block the line is in
 //    @color title red   the colour of the title's words: one of the names
-//                       in deck.c (DECK_NamedColorFromIdx) - white, black,
+//                       in deck.c (Deck_NamedColorFromIdx) - white, black,
 //                       gray, red, orange, yellow, green, blue, purple,
 //                       pink - or #rrggbb, as a web page has it. In place
 //                       of the theme's
@@ -98,37 +98,37 @@
 #define DECK_MAX_BOXES 8
 
 // The colours of a whole deck. The names, as written after @theme, are in
-// deck.c (DECK_ThemeName), in this order.
-typedef enum DECK_Theme {
-   DECK_Theme_Dark,
-   DECK_Theme_Light,
-   DECK_Theme_Blue,
-   DECK_Theme_Paper,
-   DECK_Theme_COUNT,
-} DECK_Theme;
+// deck.c (Deck_ThemeName), in this order.
+typedef enum Deck_Theme {
+   Deck_Theme_Dark,
+   Deck_Theme_Light,
+   Deck_Theme_Blue,
+   Deck_Theme_Paper,
+   Deck_Theme_COUNT,
+} Deck_Theme;
 
 // How one slide is laid out. The names, as written after @layout, are in
-// deck.c (DECK_LayoutName), in this order.
-typedef enum DECK_Layout {
-   DECK_Layout_PictureRight, // the body on the left, the picture on the right
-   DECK_Layout_PictureLeft,
-   DECK_Layout_PictureBehind, // the picture fills the slide, behind the words
-   DECK_Layout_Center,        // every line in the middle
-   DECK_Layout_COUNT,
-} DECK_Layout;
+// deck.c (Deck_LayoutName), in this order.
+typedef enum Deck_Layout {
+   Deck_Layout_PictureRight, // the body on the left, the picture on the right
+   Deck_Layout_PictureLeft,
+   Deck_Layout_PictureBehind, // the picture fills the slide, behind the words
+   Deck_Layout_Center,        // every line in the middle
+   Deck_Layout_COUNT,
+} Deck_Layout;
 
 // What of a slide an @place line can put somewhere. The names, as written
-// after @place, are in deck.c (DECK_PlaceName), in this order.
-typedef enum DECK_PlaceKind {
-   DECK_PlaceKind_Picture, // or video: one of the slide's (DECK_Picture's place)
-   DECK_PlaceKind_Text,    // the body: every line under the title
-   DECK_PlaceKind_Title,
-   DECK_PlaceKind_COUNT,
-} DECK_PlaceKind;
+// after @place, are in deck.c (Deck_PlaceName), in this order.
+typedef enum Deck_PlaceKind {
+   Deck_PlaceKind_Picture, // or video: one of the slide's (Deck_Picture's place)
+   Deck_PlaceKind_Text,    // the body: every line under the title
+   Deck_PlaceKind_Title,
+   Deck_PlaceKind_COUNT,
+} Deck_PlaceKind;
 
 // From an @place line.
-typedef struct DECK_Place DECK_Place;
-struct DECK_Place {
+typedef struct Deck_Place Deck_Place;
+struct Deck_Place {
    B32     is_set;
    Rng2F32 rect; // in parts of the page: 0,0 its top left, 1,1 its bottom right
    // Where in the deck's text the line is (without its ending) when
@@ -144,8 +144,8 @@ struct DECK_Place {
 // How the words of a title, or of a block of the body, look where the
 // deck's text says so: from @size and @color lines. Without them, the size
 // is view.c's and the colour the theme's.
-typedef struct DECK_Look DECK_Look;
-struct DECK_Look {
+typedef struct Deck_Look Deck_Look;
+struct Deck_Look {
    B32     has_size;
    F32     size; // times the usual size
    B32     has_color;
@@ -161,24 +161,24 @@ struct DECK_Look {
 #define DECK_SIZE_MAX 4.0f
 
 // A colour an @color line can ask for by name.
-typedef struct DECK_NamedColor DECK_NamedColor;
-struct DECK_NamedColor {
+typedef struct Deck_NamedColor Deck_NamedColor;
+struct Deck_NamedColor {
    String8 name;
    Vec4F32 color;
 };
 #define DECK_NAMED_COLOR_COUNT 10
 
-typedef enum DECK_ItemKind {
-   DECK_ItemKind_Text,
-   DECK_ItemKind_Bullet,
-   DECK_ItemKind_Heading,
-} DECK_ItemKind;
+typedef enum Deck_ItemKind {
+   Deck_ItemKind_Text,
+   Deck_ItemKind_Bullet,
+   Deck_ItemKind_Heading,
+} Deck_ItemKind;
 
 // One line of a slide's body.
-typedef struct DECK_Item DECK_Item;
-struct DECK_Item {
-   DECK_Item*    next;
-   DECK_ItemKind kind;
+typedef struct Deck_Item Deck_Item;
+struct Deck_Item {
+   Deck_Item*    next;
+   Deck_ItemKind kind;
    String8       text;
    U32           level;      // bullets: 0 is outermost
    B32           gap_before; // an empty line came before it
@@ -187,12 +187,12 @@ struct DECK_Item {
 
 // One block of a slide's body: its items are item_count of the slide's,
 // from first_item on.
-typedef struct DECK_Box DECK_Box;
-struct DECK_Box {
-   DECK_Item* first_item;
+typedef struct Deck_Box Deck_Box;
+struct Deck_Box {
+   Deck_Item* first_item;
    U64        item_count;
-   DECK_Place place; // from its @place text line
-   DECK_Look  look;  // from its @size text and @color text lines
+   Deck_Place place; // from its @place text line
+   Deck_Look  look;  // from its @size text and @color text lines
    // Where in the deck's text the block begins: the start of its @box line
    // - or, for a slide's first block, where the slide begins.
    U64 text_pos;
@@ -205,35 +205,35 @@ struct DECK_Box {
 };
 
 // One of a slide's pictures.
-typedef struct DECK_Picture DECK_Picture;
-struct DECK_Picture {
+typedef struct Deck_Picture Deck_Picture;
+struct Deck_Picture {
    String8   path;        // of the file
-   IMG_Image image;       // zero until loaded
+   Image_Image image;       // zero until loaded
    B32       load_failed; // tried once and could not be: not tried again
 
-   // A picture that is a video file (VID_NameIsVideo) is played, not
+   // A picture that is a video file (Video_NameIsVideo) is played, not
    // decoded once: video is its player, open for as long as image is
    // loaded, and image is the player's texture - so a video is drawn as a
    // picture is, by code that does not know the difference.
-   VID_Video* video;
+   Video_Video* video;
 
-   // Where in the deck's text the path is: as DECK_Item's text_range. Zero
+   // Where in the deck's text the path is: as Deck_Item's text_range. Zero
    // in a folder of images.
    Rng1U64 range;
 
    // From its @place line.
-   DECK_Place place;
+   Deck_Place place;
 
    // For one of a deck's spares only: when it lost its slide.
    U64 spared_us;
 };
 
-typedef struct DECK_Slide DECK_Slide;
-struct DECK_Slide {
+typedef struct Deck_Slide Deck_Slide;
+struct Deck_Slide {
    // The slide's pictures, in the order of their lines. On the deck's arena.
    // Lines past DECK_MAX_PICTURES are counted in pictures_passed_over, so
    // the edit screen can say they are not shown.
-   DECK_Picture* pictures;
+   Deck_Picture* pictures;
    U64           picture_count;
    U64           pictures_passed_over;
 
@@ -241,31 +241,31 @@ struct DECK_Slide {
    // 0 in a folder of images.
    U64 text_pos;
 
-   // Where in the deck's text the title's words are: as DECK_Item's
+   // Where in the deck's text the title's words are: as Deck_Item's
    // text_range. Zero for a slide without one, and in a folder of images.
    Rng1U64 title_range;
 
    // From the slide's @layout line, which is at layout_line in the deck's
    // text (the line without its ending) when has_layout_line.
-   DECK_Layout layout;
+   Deck_Layout layout;
    B32         has_layout_line;
    Rng1U64     layout_line;
 
-   // From the slide's @place lines, by DECK_PlaceKind. The pictures' are
-   // their own (DECK_Picture's place) and so are the body's blocks'
-   // (DECK_Box's): the ones here for those are not used.
-   DECK_Place places[DECK_PlaceKind_COUNT];
+   // From the slide's @place lines, by Deck_PlaceKind. The pictures' are
+   // their own (Deck_Picture's place) and so are the body's blocks'
+   // (Deck_Box's): the ones here for those are not used.
+   Deck_Place places[Deck_PlaceKind_COUNT];
 
    // From the slide's @size title and @color title lines. The body's
-   // blocks have their own (DECK_Box's look).
-   DECK_Look title_look;
+   // blocks have their own (Deck_Box's look).
+   Deck_Look title_look;
 
    // The body's blocks: all of it is the first, until an @box line. A
    // block with no items is one being written. 0 of them in a folder of
    // images.
-   DECK_Box boxes[DECK_MAX_BOXES];
+   Deck_Box boxes[DECK_MAX_BOXES];
    U64      box_count;
-   // As DECK_Box's scroll, for the blocks without an @place line, which
+   // As Deck_Box's scroll, for the blocks without an @place line, which
    // share the body's room.
    F32 body_scroll;
 
@@ -280,8 +280,8 @@ struct DECK_Slide {
 
    // Empty and zero for a slide that is only a picture.
    String8    title;
-   DECK_Item* first_item;
-   DECK_Item* last_item;
+   Deck_Item* first_item;
+   Deck_Item* last_item;
    U64        item_count;
 };
 
@@ -289,11 +289,11 @@ struct DECK_Slide {
 #define DECK_SPARE_MAX     8
 #define DECK_SPARE_SECONDS 5.0
 
-typedef struct DECK_Deck DECK_Deck;
-struct DECK_Deck {
+typedef struct Deck_Deck Deck_Deck;
+struct Deck_Deck {
    Arena*      arena;  // the deck's own: everything it points to is on it
    String8     folder; // of the images, or that the text file is in
-   DECK_Slide* slides;
+   Deck_Slide* slides;
    U64         slide_count;
 
    // For a deck from a text file: the file. Empty for a folder of images.
@@ -301,112 +301,112 @@ struct DECK_Deck {
 
    // From the file's first @theme line, which is at theme_line in the text
    // (the line without its ending) when has_theme_line.
-   DECK_Theme theme;
+   Deck_Theme theme;
    B32        has_theme_line;
    Rng1U64    theme_line;
 
    // Pictures that were loaded for slides that are gone, kept while a slide
-   // of the deck still shows their file (DECK_TakeImages). Typing over a
+   // of the deck still shows their file (Deck_TakeImages). Typing over a
    // title line takes its slide away for a key or two: when the slide is
    // back it gets its picture back, and a video goes on from where it was.
    // Only path, image, video and spared_us are set. At most DECK_SPARE_MAX.
-   DECK_Picture* spares;
+   Deck_Picture* spares;
    U64           spare_count;
 };
 
 // As written after @theme and @layout.
-String8 DECK_ThemeName(DECK_Theme theme);
-String8 DECK_LayoutName(DECK_Layout layout);
+String8 Deck_ThemeName(Deck_Theme theme);
+String8 Deck_LayoutName(Deck_Layout layout);
 // As written after @place.
-String8 DECK_PlaceName(DECK_PlaceKind kind);
+String8 Deck_PlaceName(Deck_PlaceKind kind);
 
 // The colours with names, idx under DECK_NAMED_COLOR_COUNT.
-DECK_NamedColor DECK_NamedColorFromIdx(U64 idx);
+Deck_NamedColor Deck_NamedColorFromIdx(U64 idx);
 // The colour an @color line's word is: a name, or #rrggbb (or #rgb). 0 if
 // it is neither.
-B32 DECK_ColorFromString(String8 string, Vec4F32* color_out);
+B32 Deck_ColorFromString(String8 string, Vec4F32* color_out);
 
 // Never 0. A folder that is missing, or has no images in it, gives a deck
 // with no slides.
-DECK_Deck* DECK_OpenFolder(String8 folder);
+Deck_Deck* Deck_OpenFolder(String8 folder);
 
 // Reads a deck from a text file. Never 0: a file that is missing or has
 // nothing in it gives a deck with no slides.
-DECK_Deck* DECK_OpenFile(String8 file);
+Deck_Deck* Deck_OpenFile(String8 file);
 
 // A deck from text that is already in memory - the editor's, which may not be
 // what is in the file. The deck keeps its own copy. Line endings must be \n
 // alone. file is where the text is from: pictures are found from its folder.
-DECK_Deck* DECK_OpenText(String8 text, String8 file);
+Deck_Deck* Deck_OpenText(String8 text, String8 file);
 
 // The slide a position in the deck's text is on: the last that begins at or
 // before it. 0 if there are no slides.
-U64 DECK_SlideFromTextPos(DECK_Deck* deck, U64 text_pos);
+U64 Deck_SlideFromTextPos(Deck_Deck* deck, U64 text_pos);
 
 // Moves the pictures src has loaded over to the pictures of dst's slides that show the
 // same file, so that a deck read again does not decode them again. src is
 // left with none of the ones moved. A file src could not load is marked as
 // not loadable in dst too. What no slide of dst takes, of a file a slide of
 // dst still shows, goes to dst's spares.
-void DECK_TakeImages(DECK_Deck* dst, DECK_Deck* src);
+void Deck_TakeImages(Deck_Deck* dst, Deck_Deck* src);
 
 // Opens whichever kind of deck path is: a text file, a folder, or one image
 // file. An image opens the folder it is in, and first_slide_out is given its
 // slide's index, which is where to start. For the others that is 0.
-DECK_Deck* DECK_OpenPath(String8 path, U64* first_slide_out);
+Deck_Deck* Deck_OpenPath(String8 path, U64* first_slide_out);
 
 // Whether there is anything on the slide but its picture.
-B32 DECK_SlideHasText(DECK_Slide* slide);
+B32 Deck_SlideHasText(Deck_Slide* slide);
 
 // The names of the image and video files in a folder and in the folders directly inside
 // it, as a slide's ![](...) line would name them from a text file there:
 // "hills.png", "pictures/bars.jpg". In order of name, on arena.
-String8Array DECK_PictureNamesFromFolder(Arena* arena, String8 folder);
+String8Array Deck_PictureNamesFromFolder(Arena* arena, String8 folder);
 
 // Whether a file name ends in an extension a text deck can have: .md or
 // .txt.
-B32 DECK_NameIsTextDeck(String8 name);
+B32 Deck_NameIsTextDeck(String8 name);
 
 // Sorts names in place, as a folder's slides are shown: by name, ignoring
 // case, with runs of digits in order of their number (2 before 10).
-void DECK_SortNames(String8Array names);
+void Deck_SortNames(String8Array names);
 
 // Releases every image the deck has loaded, and the deck itself.
-void DECK_Close(DECK_Deck* deck);
+void Deck_Close(Deck_Deck* deck);
 
 // Loads the pictures of a slide that are not loaded yet, and releases those
 // of slides more than one away from it: for the slide that is showing. A
-// slide is drawn with whichever of its pictures are loaded (VIEW_DrawSlide).
-void DECK_LoadSlide(DECK_Deck* deck, U64 slide_idx);
+// slide is drawn with whichever of its pictures are loaded (View_DrawSlide).
+void Deck_LoadSlide(Deck_Deck* deck, U64 slide_idx);
 
 // The same, but releases nothing: for a second look at a slide close to the
-// one DECK_LoadSlide was last asked for (the presenter's next slide).
-void DECK_LoadSlideOnly(DECK_Deck* deck, U64 slide_idx);
+// one Deck_LoadSlide was last asked for (the presenter's next slide).
+void Deck_LoadSlideOnly(Deck_Deck* deck, U64 slide_idx);
 
 // The first of a slide's videos that is open - as long as its image is
 // loaded - else 0: the one whose time and state stand for the slide's.
-VID_Video* DECK_VideoFromSlide(DECK_Deck* deck, U64 slide_idx);
+Video_Video* Deck_VideoFromSlide(Deck_Deck* deck, U64 slide_idx);
 // Every open video of a slide, into videos, which has room for
 // DECK_MAX_PICTURES. Returns how many.
-U64 DECK_VideosFromSlide(DECK_Deck* deck, U64 slide_idx, VID_Video** videos);
+U64 Deck_VideosFromSlide(Deck_Deck* deck, U64 slide_idx, Video_Video** videos);
 // Whether any of the slide's pictures is a video file, open or not. Not one
 // that could not be opened.
-B32 DECK_SlideHasVideo(DECK_Deck* deck, U64 slide_idx);
+B32 Deck_SlideHasVideo(Deck_Deck* deck, U64 slide_idx);
 // Whether all of them that are video files are open: none still to load.
-B32 DECK_SlideVideosAreOpen(DECK_Deck* deck, U64 slide_idx);
-// Once a frame: every open video's VID_Update, and spares kept for longer
+B32 Deck_SlideVideosAreOpen(Deck_Deck* deck, U64 slide_idx);
+// Once a frame: every open video's Video_Update, and spares kept for longer
 // than DECK_SPARE_SECONDS released.
-void DECK_UpdateVideos(DECK_Deck* deck);
+void Deck_UpdateVideos(Deck_Deck* deck);
 
 // Lets go of a picture and loads it again: for a file that has changed, or
 // whose path now leads somewhere else (below).
-void DECK_ReopenPicture(DECK_Picture* picture);
+void Deck_ReopenPicture(Deck_Picture* picture);
 
 // From now on, a slide whose picture is at path is shown the file at
-// stands_for instead - until DECK_ClearPathAlias(path). For a file that is
+// stands_for instead - until Deck_ClearPathAlias(path). For a file that is
 // on its way to path and not there yet (copy\copy.c). For every deck: a
 // deck read again from its text keeps showing the same file. Slides that
-// have the picture loaded already are not changed: DECK_ReopenPicture does
+// have the picture loaded already are not changed: Deck_ReopenPicture does
 // that.
-void DECK_SetPathAlias(String8 path, String8 stands_for);
-void DECK_ClearPathAlias(String8 path);
+void Deck_SetPathAlias(String8 path, String8 stands_for);
+void Deck_ClearPathAlias(String8 path);

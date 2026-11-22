@@ -6,17 +6,17 @@ The presenter's window: a second window for whoever presents, with the slide sho
 
 In `App_State`:
 
-- `toggle_presenter`: a frame asked for the window to be opened or closed, which the main loop does between frames.
+- `toggle_presenter`: a frame asked for the window to be opened or closed (`App_TogglePresenter`), which the main loop does between frames.
 - `presenter_open`, `presenter_window`, `presenter_window_eqp`: the window.
-- `presenter_started_us`, `presenter_paused_us`: its clock.
+- `presenter_started_us`, `presenter_paused_us`: its clock, changed by the ops below.
 - `presenter_ui_state`, `presenter_ui_last_frame_us`: its own UI state.
-- `presenter_goto`: a slide a click in it asked for, gone to by the presentation's input.
 
-## Functions
+## Functions and ops
 
-- `PRES_Toggle`: opens or closes the window. Between frames only.
-- `PRES_Input`: takes the window's events off the frame's.
-- `PRES_Draw`: builds and draws the window, in its own frame after the main window's.
+- `Presenter_Toggle`: opens or closes the window. Between frames only, from the main loop: not an op.
+- `Presenter_Input`: takes the window's events off the frame's.
+- `Presenter_Draw`: builds and draws the window, in its own frame after the main window's. Its clicks push ops, run at the start of the next frame: `App_GoToSlide` for a slide, slide_video's `SlideVideo_ToggleSlide` for the video's button, and its own for the clock.
+- Ops: `Presenter_ToggleClock`, `Presenter_ResetClock`.
 
 ## Used by
 

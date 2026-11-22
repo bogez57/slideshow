@@ -8,11 +8,11 @@ The edit screen: the size and the colour of a slide's words - the title's, or a 
 
 ## Functions
 
-- `LOOK_Input`: the keys.
-- `LOOK_StepSize`, `LOOK_SetColor`: larger, smaller or usual; a colour with a name or the theme's.
-- `LOOK_Describe`, `LOOK_ColorIsNow`, `LOOK_SizeIsUsual`: what the piece has now, for the Format panel.
-- `LOOK_Target`: the piece the cursor is in.
-- `LOOK_Of`: how a slide's piece's words look.
+- `Look_Input`: the keys. Pushes `Look_StepSize`.
+- Ops: `Look_StepSize`, `Look_SetColor`: larger, smaller or usual; a colour with a name or the theme's. Each writes or takes out a line of the text.
+- `Look_Describe`, `Look_ColorIsNow`, `Look_SizeIsUsual`: what the piece has now, for the Format panel.
+- `Look_Target`: the piece the cursor is in.
+- `Look_Of`: how a slide's piece's words look.
 
 ## Used by
 

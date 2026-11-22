@@ -18,15 +18,15 @@ video_decoder.h            what a decoder is: open, next frame, next sound, seek
 video_ffmpeg.c             the decoder there is, done with FFmpeg
 ```
 
-- **`video.h`** is all the rest of the program sees: `VID_Open`, `VID_Close`,
-  `VID_Texture`, `VID_Size`, `VID_Duration`, `VID_Position`, `VID_IsPlaying`,
-  `VID_SetPlaying`, `VID_Seek`, `VID_Update`, `VID_NameIsVideo`. Only bgz types.
+- **`video.h`** is all the rest of the program sees: `Video_Open`, `Video_Close`,
+  `Video_Texture`, `Video_Size`, `Video_Duration`, `Video_Position`, `Video_IsPlaying`,
+  `Video_SetPlaying`, `Video_Seek`, `Video_Update`, `Video_NameIsVideo`. Only bgz types.
 - **`video.c`** is the player. It knows nothing of files or codecs. A thread
-  decodes a few frames ahead into a queue; `VID_Update`, once a frame on the
+  decodes a few frames ahead into a queue; `Video_Update`, once a frame on the
   main thread, moves the clock on and copies the frame that is due into the
   texture.
-- **`video_decoder.h`** is the seam: `VID_DecoderOpen`, `VID_DecoderClose`,
-  `VID_DecoderNextFrame`, `VID_DecoderNextSound`, `VID_DecoderSeek`, and the `VID_DecoderInfo` that open
+- **`video_decoder.h`** is the seam: `Video_DecoderOpen`, `Video_DecoderClose`,
+  `Video_DecoderNextFrame`, `Video_DecoderNextSound`, `Video_DecoderSeek`, and the `Video_DecoderInfo` that open
   fills in. Plain, one call at a time, no threads of its own to answer for.
 - **`video_ffmpeg.c`** is those functions done with FFmpeg. It is the only
   file that includes FFmpeg's headers.
@@ -44,8 +44,8 @@ decoder is there.
 ## How a slide gets a video
 
 A slide's picture line with a video file in it, `![](clip.mp4)`, makes the
-slide's picture a video. The deck (`deck.c`) opens a `VID_Video` for it where
-it would decode an image, and gives the slide's `IMG_Image` the player's
+slide's picture a video. The deck (`deck.c`) opens a `Video_Video` for it where
+it would decode an image, and gives the slide's `Image_Image` the player's
 texture, so the view draws a video exactly as it draws a picture. When it
 plays and its controls are in `src\slide_video\slide_video.c`.
 
@@ -53,7 +53,7 @@ plays and its controls are in `src\slide_video\slide_video.c`.
 
 The decoder gives sound as two channels of `F32` at the mixer's rate. The
 player keeps a couple of seconds of it in a ring and has a voice in the mixer
-(`AUD_VoiceAdd`) that plays from the ring.
+(`Audio_VoiceAdd`) that plays from the ring.
 
 A video with sound keeps time by its sound: the clock is "what is being heard
 now", worked out from what the audio thread last took from the ring and when
