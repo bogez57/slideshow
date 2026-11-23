@@ -761,7 +761,9 @@ Place_WriteLine(App_State* app_state, StateOp_List* ops, Place_WriteLineOpParams
       // The others picked that went with it: each its line, with the deck
       // made again between, as one step to undo.
       for (U64 i = 0; i < drag->group_count && params->corner == 0; i += 1) {
+         // The deck made again is a new one: the one above is gone.
          FR_SyncDeck(app_state);
+         deck = app_state->deck;
          slide = &deck->slides[params->slide_idx];
          _Place_WriteLine(editor, slide, drag->group_kinds[i], drag->group_idxs[i],
                           _Place_PlaceOf(slide, drag->group_kinds[i], drag->group_idxs[i]), _Place_GroupRect(drag, i));

@@ -956,8 +956,10 @@ _Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_C
    g_caret_view.focus_hidden = 0;
    ScratchEnd(scratch);
 
-   //- bgz: what was pasted, picked: the slide's pieces from where it went in
+   //- bgz: what was pasted, picked: the slide's pieces from where it went in.
+   // The deck made again is a new one: deck is gone.
    FR_SyncDeck(app_state);
+   deck = app_state->deck;
    Deck_Slide* slide = &deck->slides[slide_idx];
    g_edit_view.picked_count = 0;
    for (U64 i = 0; i < slide->picture_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
