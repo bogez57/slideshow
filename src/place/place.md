@@ -16,7 +16,7 @@ A drag changes nothing of the deck. The slide is given the place the mouse makes
 - `Place_Keys`, `Place_GiveUp`: Esc, and F5, give up a drag.
 - `Place_BeforeLayout`: moves a drag with the mouse before the slide is laid out. When the button comes up it pushes `Place_WriteLine`, and the piece stays drawn where it was dropped until that has run.
 - `Place_PutDrag`, `Place_TakeDrag`: around a drawing of the slide.
-- Ops: `Place_WriteLine` (the dropped piece's `@place` line), `Place_RemoveLine` (a right-click: the line taken out), `Place_Nudge` (the arrow keys with pieces picked: each one's line a step over, one step to undo). Clicks push edit's `Edit_PreviewClick` and caret's `Caret_SelectWord`, `Caret_SelectLine`.
+- Ops: `Place_WriteLine` (the dropped piece's `@place` line), `Place_RemoveLine` (a right-click: the line taken out), `Place_Nudge` (the arrow keys with pieces picked: each one's line a step over, one step to undo), `Place_Arrange` (several picked lined up by an edge or the middle, or spaced evenly). Clicks push edit's `Edit_PreviewClick` and caret's `Caret_SelectWord`, `Caret_SelectLine`.
 - `Place_BuildCorners`, `Place_BuildHits`: the boxes that are clicked, after the slide is laid out.
 - `Place_BuildLook`: what is drawn - outlines, handles, guides.
 - `Place_IsAtWords`, `Place_PressWords`, `Place_SelectHeld`: selecting words with the mouse.

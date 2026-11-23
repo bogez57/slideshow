@@ -77,6 +77,13 @@
 //    copy pieces      with pieces picked, Ctrl+C copies them and Ctrl+X cuts
 //                     them; Ctrl+V pastes them on the slide showing, picked.
 //                     Ctrl+D puts a copy a little down and right
+//    pick by a box    Ctrl and a drag on the slide where nothing is: every
+//                     piece the box touches is picked, with those already
+//    front and back   Ctrl+Shift+] brings the pieces picked in front of the
+//                     slide's other pictures, or other blocks, and
+//                     Ctrl+Shift+[ sends them behind
+//    line up, space   Ctrl+Shift and an arrow, C, M, H or V with several
+//                     picked (place\place.c)
 //    nudge pieces     the arrow keys with pieces picked move them a small
 //                     step, Shift+arrow a larger one
 //    size by wheel    Ctrl and the wheel over the title or a block: its
@@ -922,66 +929,102 @@ _Edit_ClipFromPicked(Arena* arena, const App_State* app_state, Edit_ClipPiece* p
 }
 
 // Writes pieces on slide_idx, offset down and right by offset, and picks
-// them. The deck has to be of the text as it is. 1 if any were.
+// them. At the end of the slide's lines, where they are drawn last, over the
+// slide's other pictures or blocks - or with at_back at its start, right
+// under the line that starts it, where they are drawn first, under them:
+// there an @box line after them starts the block that was the slide's first.
+// The deck has to be of the text as it is. 1 if any were.
 PRIVATE B32
-_Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_ClipPiece* pieces, U64 count, F32 offset) {
+_Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_ClipPiece* pieces, U64 count, F32 offset, B32 at_back) {
    Editor_Editor* editor = app_state->editor;
    Deck_Deck*     deck = app_state->deck;
    if (slide_idx >= deck->slide_count || count == 0) {
       return 0;
    }
-   Temp scratch = ScratchBegin(0, 0);
+   Temp        scratch = ScratchBegin(0, 0);
+   Deck_Slide* slide = &deck->slides[slide_idx];
+   String8     text = Editor_Text(editor);
 
-   // Under the slide's last line with anything on it, as a box drawn.
-   String8 text = Editor_Text(editor);
-   Rng1U64 range = _Edit_TextRangeFromSlide(editor, deck, slide_idx);
-   U64     end = range.max;
-   while (end > range.min && (text.str[end - 1] == '\n' || text.str[end - 1] == ' ' || text.str[end - 1] == '\t')) {
-      end -= 1;
-   }
-
+   // Each piece's lines, with no line ending after the last.
    String8List added = {0};
+   B32         has_block = 0;
    for (U64 i = 0; i < count; i += 1) {
       Edit_ClipPiece* piece = &pieces[i];
       F32 w = piece->rect.max.x - piece->rect.min.x;
       F32 h = piece->rect.max.y - piece->rect.min.y;
       F32 x = Clamp(0.0f, piece->rect.min.x + offset, Max(1.0f - w, 0.0f));
       F32 y = Clamp(0.0f, piece->rect.min.y + offset, Max(1.0f - h, 0.0f));
+      if (i != 0) {
+         Str8ListPush(scratch.arena, &added, at_back ? Str8Lit("\n") : Str8Lit("\n\n"));
+      }
       if (piece->is_picture) {
-         Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "\n\n%S@place picture %.3f %.3f %.3f %.3f", piece->lines, x, y, w, h));
+         Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "%S@place picture %.3f %.3f %.3f %.3f", piece->lines, x, y, w, h));
       } else {
-         Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "\n\n@box\n@place text %.3f %.3f %.3f %.3f\n%S%S", x, y, w, h,
+         has_block = 1;
+         Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "@box\n@place text %.3f %.3f %.3f %.3f\n%S%S", x, y, w, h,
                                                        piece->looks, Str8Prefix(piece->lines, piece->lines.size - 1)));
       }
    }
-   String8 joined = Str8ListJoin(scratch.arena, &added, 0);
-   Editor_ReplaceRange(editor, end, end, joined);
-   U64 added_end = end + joined.size;
+   String8 body = Str8ListJoin(scratch.arena, &added, 0);
+
+   U64     at = 0;
+   String8 joined = {0};
+   if (!at_back) {
+      // Under the slide's last line with anything on it, as a box drawn.
+      Rng1U64 range = _Edit_TextRangeFromSlide(editor, deck, slide_idx);
+      at = range.max;
+      while (at > range.min && (text.str[at - 1] == '\n' || text.str[at - 1] == ' ' || text.str[at - 1] == '\t')) {
+         at -= 1;
+      }
+      joined = PushStr8F(scratch.arena, "\n\n%S", body);
+   } else {
+      // Under the line that starts the slide, its title's or its ---. A
+      // slide that starts with neither - the deck's first, straight into
+      // its words - has them above its first line.
+      U64 line_start = Min(slide->text_pos, text.size);
+      U64 line_end = line_start;
+      while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
+      String8 first_line = Str8Substr(text, R1U64(line_start, line_end));
+      B32     starts_slide = (slide->title_range.max != 0 || (first_line.size >= 3 && MemoryMatch(first_line.str, "---", 3)));
+      String8 after = has_block ? Str8Lit("\n@box") : Str8Lit("");
+      if (starts_slide) {
+         at = line_end;
+         joined = PushStr8F(scratch.arena, "\n%S%S", body, after);
+      } else {
+         at = line_start;
+         joined = PushStr8F(scratch.arena, "%S%S\n", body, after);
+      }
+   }
+   Editor_ReplaceRange(editor, at, at, joined);
+   U64 added_end = at + joined.size;
    Editor_SetCursor(editor, added_end);
    editor->mark = added_end;
    editor->last_input_us = NowTimeUS();
    g_caret_view.focus_hidden = 0;
    ScratchEnd(scratch);
 
-   //- bgz: what was pasted, picked: the slide's pieces from where it went in.
+   //- bgz: what was pasted, picked: the slide's pieces in what went in.
    // The deck made again is a new one: deck is gone.
    FR_SyncDeck(app_state);
    deck = app_state->deck;
-   Deck_Slide* slide = &deck->slides[slide_idx];
    g_edit_view.picked_count = 0;
-   for (U64 i = 0; i < slide->picture_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
-      if (slide->pictures[i].range.min >= end) {
-         g_edit_view.picked_kinds[g_edit_view.picked_count] = Deck_PlaceKind_Picture;
-         g_edit_view.picked_idxs[g_edit_view.picked_count] = i;
-         g_edit_view.picked_count += 1;
+   if (slide_idx < deck->slide_count) {
+      slide = &deck->slides[slide_idx];
+      for (U64 i = 0; i < slide->picture_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
+         if (slide->pictures[i].range.min >= at && slide->pictures[i].range.min < added_end) {
+            g_edit_view.picked_kinds[g_edit_view.picked_count] = Deck_PlaceKind_Picture;
+            g_edit_view.picked_idxs[g_edit_view.picked_count] = i;
+            g_edit_view.picked_count += 1;
+         }
       }
-   }
-   for (U64 i = 0; i < slide->box_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
-      Deck_Box* block = &slide->boxes[i];
-      if (block->item_count != 0 && block->first_item != 0 && block->first_item->text_range.min >= end) {
-         g_edit_view.picked_kinds[g_edit_view.picked_count] = Deck_PlaceKind_Text;
-         g_edit_view.picked_idxs[g_edit_view.picked_count] = i;
-         g_edit_view.picked_count += 1;
+      for (U64 i = 0; i < slide->box_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
+         Deck_Box* block = &slide->boxes[i];
+         if (block->item_count != 0 && block->first_item != 0 && block->first_item->text_range.min >= at &&
+             block->first_item->text_range.min <= added_end) {
+            g_edit_view.picked_kinds[g_edit_view.picked_count] = Deck_PlaceKind_Text;
+            g_edit_view.picked_idxs[g_edit_view.picked_count] = i;
+            g_edit_view.picked_count += 1;
+         }
       }
    }
    _Edit_PickedSnapshot(app_state);
@@ -1787,7 +1830,7 @@ Edit_PastePieces(App_State* app_state, StateOp_List* ops) {
       g_edit_view.clip_paste_count += 1; // from -1 after a cut: 0, where it was
       offset = _EDIT_PASTE_STEP * (F32)g_edit_view.clip_paste_count;
    }
-   _Edit_PastePieces(app_state, ops, slide_idx, g_edit_view.clip, g_edit_view.clip_count, offset);
+   _Edit_PastePieces(app_state, ops, slide_idx, g_edit_view.clip, g_edit_view.clip_count, offset, 0);
 }
 STATE_OP_NO_PARAMS(Edit_PastePieces)
 
@@ -1803,10 +1846,122 @@ Edit_DuplicatePieces(App_State* app_state, StateOp_List* ops) {
    Temp            scratch = ScratchBegin(0, 0);
    Edit_ClipPiece* pieces = PushArray(scratch.arena, Edit_ClipPiece, VIEW_MAX_BOXES);
    U64             count = _Edit_ClipFromPicked(scratch.arena, app_state, pieces);
-   _Edit_PastePieces(app_state, ops, app_state->slide_idx, pieces, count, _EDIT_PASTE_STEP);
+   _Edit_PastePieces(app_state, ops, app_state->slide_idx, pieces, count, _EDIT_PASTE_STEP, 0);
    ScratchEnd(scratch);
 }
 STATE_OP_NO_PARAMS(Edit_DuplicatePieces)
+
+// Ctrl+Shift+] and Ctrl+Shift+[ with pieces picked whole: in front of the
+// slide's other pieces of their kind, or with to_back behind them.
+//
+// What is over what is the order of the lines (view.c): the slide's
+// pictures are drawn first, in the order of their lines, then the title,
+// then the blocks in theirs. So a piece is brought to the front by moving
+// its lines to the end of the slide's, and sent to the back by moving them
+// to its start (_Edit_PastePieces) - among the pictures, or among the
+// blocks: a picture is never over words, and the title's place in it is
+// its own. A block with no @place line gets one, where it is.
+typedef struct Edit_OrderPiecesOpParams Edit_OrderPiecesOpParams;
+struct Edit_OrderPiecesOpParams {
+   B32 to_back;
+};
+void
+Edit_OrderPieces(App_State* app_state, StateOp_List* ops, Edit_OrderPiecesOpParams* params) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || !Edit_PickedIsGood(app_state) || !Place_BoxesAreGood(app_state)) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+
+   // Not the title. And in the order they are in now, which they keep
+   // among themselves.
+   U64 count = 0;
+   for (U64 i = 0; i < g_edit_view.picked_count; i += 1) {
+      if (g_edit_view.picked_kinds[i] != Deck_PlaceKind_Title) {
+         g_edit_view.picked_kinds[count] = g_edit_view.picked_kinds[i];
+         g_edit_view.picked_idxs[count] = g_edit_view.picked_idxs[i];
+         count += 1;
+      }
+   }
+   g_edit_view.picked_count = count;
+   if (count == 0) {
+      StateOp_App_Notice(ops)->notice = Str8Lit("The title is always over the pictures and under the text boxes");
+      return;
+   }
+   for (U64 i = 1; i < count; i += 1) {
+      for (U64 k = i; k > 0; k -= 1) {
+         B32 is_after = (g_edit_view.picked_kinds[k - 1] > g_edit_view.picked_kinds[k] ||
+                         (g_edit_view.picked_kinds[k - 1] == g_edit_view.picked_kinds[k] &&
+                          g_edit_view.picked_idxs[k - 1] > g_edit_view.picked_idxs[k]));
+         if (!is_after) {
+            break;
+         }
+         Deck_PlaceKind kind = g_edit_view.picked_kinds[k - 1];
+         U64            idx = g_edit_view.picked_idxs[k - 1];
+         g_edit_view.picked_kinds[k - 1] = g_edit_view.picked_kinds[k];
+         g_edit_view.picked_idxs[k - 1] = g_edit_view.picked_idxs[k];
+         g_edit_view.picked_kinds[k] = kind;
+         g_edit_view.picked_idxs[k] = idx;
+      }
+   }
+
+   Temp            scratch = ScratchBegin(0, 0);
+   Edit_ClipPiece* pieces = PushArray(scratch.arena, Edit_ClipPiece, VIEW_MAX_BOXES);
+   U64             clip_count = _Edit_ClipFromPicked(scratch.arena, app_state, pieces);
+   if (clip_count == count) {
+      Deck_PlaceKind kinds[VIEW_MAX_BOXES];
+      U64            idxs[VIEW_MAX_BOXES];
+      MemoryCopy(kinds, g_edit_view.picked_kinds, sizeof(kinds));
+      MemoryCopy(idxs, g_edit_view.picked_idxs, sizeof(idxs));
+      U64 slide_idx = app_state->slide_idx;
+      U64 undo_before = editor->undo_count;
+      g_edit_view.picked_count = 0;
+      if (_Edit_DeletePieces(app_state, slide_idx, kinds, idxs, count)) {
+         FR_SyncDeck(app_state);
+         _Edit_PastePieces(app_state, ops, slide_idx, pieces, clip_count, 0, params->to_back);
+         Editor_JoinUndoSince(editor, undo_before);
+         StateOp_App_Notice(ops)->notice = params->to_back ? Str8Lit("Sent to the back") : Str8Lit("Brought to the front");
+      }
+   }
+   ScratchEnd(scratch);
+}
+STATE_OP(Edit_OrderPieces)
+
+// Ctrl and a drag on the slide's open space: every piece the box drawn
+// touches is picked whole, with those picked already. rect: in pixels, of
+// the slide as it was last laid out - nothing if the text has changed since.
+typedef struct Edit_PickRectOpParams Edit_PickRectOpParams;
+struct Edit_PickRectOpParams {
+   Rng2F32 rect;
+};
+void
+Edit_PickRect(App_State* app_state, StateOp_List* ops, Edit_PickRectOpParams* params) {
+   UnusedVariable(ops);
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || editor->edit_count != g_edit_view.hits_edit_count || app_state->slide_idx >= app_state->deck->slide_count) {
+      return;
+   }
+   if (!Edit_PickedIsGood(app_state)) {
+      g_edit_view.picked_count = 0;
+   }
+   Deck_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   Rng2F32     rect = params->rect;
+   for (U64 i = 0; i < g_edit_view.box_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
+      View_Box* box = &g_edit_view.boxes[i];
+      B32 touches = (box->rect.min.x < rect.max.x && box->rect.max.x > rect.min.x && box->rect.min.y < rect.max.y &&
+                     box->rect.max.y > rect.min.y);
+      if (!touches || (box->kind == Deck_PlaceKind_Picture && box->idx >= slide->picture_count) ||
+          _Edit_PickedIndexOf(box->kind, box->idx) >= 0) {
+         continue;
+      }
+      g_edit_view.picked_kinds[g_edit_view.picked_count] = box->kind;
+      g_edit_view.picked_idxs[g_edit_view.picked_count] = box->idx;
+      g_edit_view.picked_count += 1;
+   }
+   g_caret_view.focus_hidden = 0;
+   _Edit_PickedSnapshot(app_state);
+}
+STATE_OP(Edit_PickRect)
 
 ////////////////////////////////
 //~ bgz: input
@@ -1927,6 +2082,28 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       }
       if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_D)) {
          StateOp_Edit_DuplicatePieces(ops);
+      }
+      // In front of the others, and behind them.
+      WM_Modifiers ctrl_shift = WM_Modifier_Ctrl | WM_Modifier_Shift;
+      if (Core_WM_KeyPress(events, window, ctrl_shift, WM_Key_RightBracket)) {
+         StateOp_Edit_OrderPieces(ops)->to_back = 0;
+      }
+      if (Core_WM_KeyPress(events, window, ctrl_shift, WM_Key_LeftBracket)) {
+         StateOp_Edit_OrderPieces(ops)->to_back = 1;
+      }
+      // Lined up, and spaced evenly (place\place.c).
+      struct {
+         WM_Key            key;
+         Place_ArrangeKind kind;
+      } arranges[] = {
+          {WM_Key_Left, Place_ArrangeKind_Left},  {WM_Key_Right, Place_ArrangeKind_Right}, {WM_Key_Up, Place_ArrangeKind_Top},
+          {WM_Key_Down, Place_ArrangeKind_Bottom}, {WM_Key_C, Place_ArrangeKind_CenterX},   {WM_Key_M, Place_ArrangeKind_CenterY},
+          {WM_Key_H, Place_ArrangeKind_SpaceX},    {WM_Key_V, Place_ArrangeKind_SpaceY},
+      };
+      for (U64 i = 0; i < ArrayCount(arranges); i += 1) {
+         if (Core_WM_KeyPress(events, window, ctrl_shift, arranges[i].key)) {
+            StateOp_Place_Arrange(ops)->kind = arranges[i].kind;
+         }
       }
       // The arrows move them, not the cursor: a small step, a larger one
       // with Shift (place\place.c). In page units, the same across and down.
@@ -2337,6 +2514,8 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
          g_edit_view.is_drawing = 1;
          g_edit_view.draw_from = UI_DragStartMouse();
          g_edit_view.draw_is_box = 0;
+         // With Ctrl the box drawn picks what it touches, and makes nothing.
+         g_edit_view.draw_picks = !!(signal.event_flags & WM_Modifier_Ctrl);
       }
       if (g_edit_view.is_drawing) {
          F32 gone_x = mouse.x - g_edit_view.draw_from.x;
@@ -2350,7 +2529,13 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       if (g_edit_view.is_drawing && (signal.f & UI_SignalFlag_LeftReleased)) {
          g_edit_view.is_drawing = 0;
          Vec2F32 page_dim = Dim2F32(page);
-         if (!g_edit_view.draw_is_box) {
+         if (g_edit_view.draw_picks) {
+            if (g_edit_view.draw_is_box) {
+               Vec2F32 a = g_edit_view.draw_from;
+               Vec2F32 b = g_edit_view.draw_to;
+               StateOp_Edit_PickRect(ops)->rect = R2F32P(Min(a.x, b.x), Min(a.y, b.y), Max(a.x, b.x), Max(a.y, b.y));
+            }
+         } else if (!g_edit_view.draw_is_box) {
             StateOp_Edit_Deselect(ops);
          } else if (page_dim.x > 0 && page_dim.y > 0) {
             Vec2F32 a = g_edit_view.draw_from;
@@ -2446,11 +2631,19 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
          }
       }
 
-      // A text box being drawn: its outline, where the mouse has it.
+      // A text box being drawn: its outline, where the mouse has it. One
+      // that picks what it touches (Ctrl) is washed as well.
       if (g_edit_view.is_drawing && g_edit_view.draw_is_box) {
          Vec2F32 a = g_edit_view.draw_from;
          Vec2F32 b = g_edit_view.draw_to;
          UI_ColorTag(Str8Lit("focus")) {
+            if (g_edit_view.draw_picks) {
+               Vec4F32 wash = UI_ColorFromSlot(UI_ColorSlot_Border);
+               wash.w = 0.15f;
+               UI_SetNextBackgroundColor(wash);
+               FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(Min(a.x, b.x), Min(a.y, b.y), Max(a.x, b.x), Max(a.y, b.y)),
+                               "###edit drawn wash");
+            }
             FR_BuildEdge(R2F32P(Min(a.x, b.x), Min(a.y, b.y), Max(a.x, b.x), Max(a.y, b.y)), Max(1.0f, (F32)(S32)(1.5f * ui)),
                          UI_ColorFromSlot(UI_ColorSlot_Border), "###edit drawn box");
          }
@@ -2486,7 +2679,7 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
                          (can_move && hover.has_piece && hover.corner == 0 &&
                           Place_IsAtWords(hover.kind, hover.idx, Core_WM_MouseFromWindow(app_state->window))));
       if (g_edit_view.is_drawing && g_edit_view.draw_is_box) {
-         caption = Str8Lit("Let go to make the text box");
+         caption = g_edit_view.draw_picks ? Str8Lit("Let go to select what the box touches") : Str8Lit("Let go to make the text box");
       } else if (is_at_words) {
          caption = Str8Lit("Drag across the words to select them      Double-click a word, triple-click a line");
       } else if (has_picked && !can_move) {
@@ -2494,7 +2687,7 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       } else if (can_move && has_picked && hover.has_piece && Edit_PieceIsPicked(app_state, hover.kind, hover.idx)) {
          caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out");
       } else if (open_space_hot) {
-         caption = Str8Lit("Drag to draw a text box");
+         caption = Str8Lit("Drag to draw a text box      Ctrl+drag selects what the box touches");
       } else if (can_move) {
          caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click puts it back");
       } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {

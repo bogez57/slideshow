@@ -64,6 +64,7 @@ struct Edit_View {
    // click.
    B32     is_drawing;
    B32     draw_is_box;
+   B32     draw_picks; // Ctrl was down at the press: the box picks the pieces it touches, and makes none
    Vec2F32 draw_from;
    Vec2F32 draw_to;
 

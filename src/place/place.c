@@ -26,6 +26,12 @@
 //                     together, one step to undo
 //    nudge it         the arrow keys, with pieces picked: a small step,
 //                     and a larger one with Shift
+//    line them up     with several picked, Ctrl+Shift and an arrow: their
+//                     left, right, top or bottom edges on one line.
+//                     Ctrl+Shift+C their middles on a line down the page,
+//                     Ctrl+Shift+M on one across it
+//    space them       with three or more, Ctrl+Shift+H across and
+//                     Ctrl+Shift+V down: the same room between each two
 //    size its words   Ctrl and the wheel over the title or a block
 //                     (look\look.c)
 //    put it back      right-click it: where the layout would have it
@@ -779,50 +785,53 @@ Place_WriteLine(App_State* app_state, StateOp_List* ops, Place_WriteLineOpParams
 }
 STATE_OP(Place_WriteLine)
 
-// The arrow keys with pieces picked whole: each one's @place line written a
-// step over from where it is, as one step to undo, and they stay picked.
-// From the slide as it was last laid out: nothing if the text has changed
-// since - a key held repeats faster than the frame, and the next one then
-// waits for the slide laid out again.
-void
-Place_Nudge(App_State* app_state, StateOp_List* ops, Place_NudgeOpParams* params) {
-   UnusedVariable(ops);
+// The pieces picked whole, as laid out: which, and where each is, in parts
+// of the page. Into arrays of VIEW_MAX_BOXES: how many. 0 if they are not
+// picked any more, or the slide laid out is not of the text as it is.
+PRIVATE U64
+_Place_PickedRects(const App_State* app_state, Deck_PlaceKind* kinds, U64* idxs, Rng2F32* rects) {
+   U64            count = 0;
    Editor_Editor* editor = app_state->editor;
    if (editor == 0 || !Edit_PickedIsGood(app_state) || !Place_BoxesAreGood(app_state) ||
        app_state->parsed_edit_count != editor->edit_count) {
-      return;
+      return 0;
    }
    Rng2F32 page = g_edit_view.page;
    Vec2F32 page_dim = Dim2F32(page);
-   U64     slide_idx = app_state->slide_idx;
-
-   // Where each is now, before any line is written: the boxes are of the
-   // text as it was.
-   Deck_PlaceKind kinds[VIEW_MAX_BOXES];
-   U64            idxs[VIEW_MAX_BOXES];
-   Rng2F32        rects[VIEW_MAX_BOXES];
-   U64            count = 0;
    for (U64 i = 0; i < g_edit_view.picked_count && count < VIEW_MAX_BOXES; i += 1) {
       View_Box* box = _Place_BoxOf(g_edit_view.picked_kinds[i], g_edit_view.picked_idxs[i]);
       if (box == 0) {
          continue;
       }
-      F32 w = (box->rect.max.x - box->rect.min.x) / page_dim.x;
-      F32 h = (box->rect.max.y - box->rect.min.y) / page_dim.y;
-      F32 x = Clamp(0.0f, (box->rect.min.x - page.min.x) / page_dim.x + params->dx, Max(1.0f - w, 0.0f));
-      F32 y = Clamp(0.0f, (box->rect.min.y - page.min.y) / page_dim.y + params->dy, Max(1.0f - h, 0.0f));
       kinds[count] = box->kind;
       idxs[count] = box->idx;
-      rects[count] = R2F32P(x, y, x + w, y + h);
+      rects[count] = R2F32P((box->rect.min.x - page.min.x) / page_dim.x, (box->rect.min.y - page.min.y) / page_dim.y,
+                            (box->rect.max.x - page.min.x) / page_dim.x, (box->rect.max.y - page.min.y) / page_dim.y);
       count += 1;
    }
+   return count;
+}
 
-   U64 undo_before = editor->undo_count;
+// Writes the @place line of each of those pieces of the slide showing, with
+// rects their new places - each kept on the page, its size as it is - as
+// one step to undo, and they stay picked.
+PRIVATE void
+_Place_WriteRects(App_State* app_state, Deck_PlaceKind* kinds, U64* idxs, Rng2F32* rects, U64 count) {
+   Editor_Editor* editor = app_state->editor;
+   U64            slide_idx = app_state->slide_idx;
+   U64            undo_before = editor->undo_count;
    for (U64 i = 0; i < count; i += 1) {
+      F32 w = rects[i].max.x - rects[i].min.x;
+      F32 h = rects[i].max.y - rects[i].min.y;
+      F32 x = Clamp(0.0f, rects[i].min.x, Max(1.0f - w, 0.0f));
+      F32 y = Clamp(0.0f, rects[i].min.y, Max(1.0f - h, 0.0f));
       // The deck made again is a new one, after the line before.
       FR_SyncDeck(app_state);
+      if (slide_idx >= app_state->deck->slide_count) {
+         break;
+      }
       Deck_Slide* slide = &app_state->deck->slides[slide_idx];
-      _Place_WriteLine(editor, slide, kinds[i], idxs[i], _Place_PlaceOf(slide, kinds[i], idxs[i]), rects[i]);
+      _Place_WriteLine(editor, slide, kinds[i], idxs[i], _Place_PlaceOf(slide, kinds[i], idxs[i]), R2F32P(x, y, x + w, y + h));
    }
    Editor_JoinUndoSince(editor, undo_before);
    if (count != 0) {
@@ -830,7 +839,108 @@ Place_Nudge(App_State* app_state, StateOp_List* ops, Place_NudgeOpParams* params
       Edit_KeepPicked(app_state, 1);
    }
 }
+
+// The arrow keys with pieces picked whole: each one's @place line written a
+// step over from where it is. From the slide as it was last laid out:
+// nothing if the text has changed since - a key held repeats faster than
+// the frame, and the next one then waits for the slide laid out again.
+void
+Place_Nudge(App_State* app_state, StateOp_List* ops, Place_NudgeOpParams* params) {
+   UnusedVariable(ops);
+   Deck_PlaceKind kinds[VIEW_MAX_BOXES];
+   U64            idxs[VIEW_MAX_BOXES];
+   Rng2F32        rects[VIEW_MAX_BOXES];
+   U64            count = _Place_PickedRects(app_state, kinds, idxs, rects);
+   for (U64 i = 0; i < count; i += 1) {
+      rects[i] = R2F32P(rects[i].min.x + params->dx, rects[i].min.y + params->dy, rects[i].max.x + params->dx, rects[i].max.y + params->dy);
+   }
+   _Place_WriteRects(app_state, kinds, idxs, rects, count);
+}
 STATE_OP(Place_Nudge)
+
+// Several pieces picked whole, lined up or spaced evenly (Place_ArrangeKind).
+void
+Place_Arrange(App_State* app_state, StateOp_List* ops, Place_ArrangeOpParams* params) {
+   Deck_PlaceKind kinds[VIEW_MAX_BOXES];
+   U64            idxs[VIEW_MAX_BOXES];
+   Rng2F32        rects[VIEW_MAX_BOXES];
+   U64            count = _Place_PickedRects(app_state, kinds, idxs, rects);
+   B32            is_space = (params->kind == Place_ArrangeKind_SpaceX || params->kind == Place_ArrangeKind_SpaceY);
+   if (count < (is_space ? 3u : 2u)) {
+      StateOp_App_Notice(ops)->notice = is_space ? Str8Lit("Pick three or more to space them evenly: Ctrl+click adds one")
+                                                 : Str8Lit("Pick two or more to line them up: Ctrl+click adds one");
+      return;
+   }
+
+   // What they all reach to, together.
+   Rng2F32 all = rects[0];
+   for (U64 i = 1; i < count; i += 1) {
+      all.min.x = Min(all.min.x, rects[i].min.x);
+      all.min.y = Min(all.min.y, rects[i].min.y);
+      all.max.x = Max(all.max.x, rects[i].max.x);
+      all.max.y = Max(all.max.y, rects[i].max.y);
+   }
+
+   if (!is_space) {
+      for (U64 i = 0; i < count; i += 1) {
+         F32 w = rects[i].max.x - rects[i].min.x;
+         F32 h = rects[i].max.y - rects[i].min.y;
+         F32 x = rects[i].min.x;
+         F32 y = rects[i].min.y;
+         switch (params->kind) {
+         case Place_ArrangeKind_Left: x = all.min.x; break;
+         case Place_ArrangeKind_Right: x = all.max.x - w; break;
+         case Place_ArrangeKind_Top: y = all.min.y; break;
+         case Place_ArrangeKind_Bottom: y = all.max.y - h; break;
+         case Place_ArrangeKind_CenterX: x = (all.min.x + all.max.x) * 0.5f - w * 0.5f; break;
+         case Place_ArrangeKind_CenterY: y = (all.min.y + all.max.y) * 0.5f - h * 0.5f; break;
+         default: break;
+         }
+         rects[i] = R2F32P(x, y, x + w, y + h);
+      }
+   } else {
+      // In the order they are in, across or down, by their middles: the
+      // first and the last stay, the rest go between with the same room
+      // between each two - less than none, if they are too large for it.
+      B32 is_x = (params->kind == Place_ArrangeKind_SpaceX);
+      U64 order[VIEW_MAX_BOXES];
+      for (U64 i = 0; i < count; i += 1) {
+         order[i] = i;
+      }
+#define _Place_Mid(r) (is_x ? ((r).min.x + (r).max.x) : ((r).min.y + (r).max.y))
+      for (U64 i = 1; i < count; i += 1) {
+         for (U64 k = i; k > 0 && _Place_Mid(rects[order[k - 1]]) > _Place_Mid(rects[order[k]]); k -= 1) {
+            U64 swap = order[k - 1];
+            order[k - 1] = order[k];
+            order[k] = swap;
+         }
+      }
+#undef _Place_Mid
+      F32 sizes = 0;
+      for (U64 i = 0; i < count; i += 1) {
+         sizes += is_x ? (rects[i].max.x - rects[i].min.x) : (rects[i].max.y - rects[i].min.y);
+      }
+      Rng2F32 first = rects[order[0]];
+      Rng2F32 last = rects[order[count - 1]];
+      F32     span = is_x ? (last.max.x - first.min.x) : (last.max.y - first.min.y);
+      F32     gap = (span - sizes) / (F32)(count - 1);
+      F32     at = is_x ? first.min.x : first.min.y;
+      for (U64 i = 0; i < count; i += 1) {
+         Rng2F32* rect = &rects[order[i]];
+         F32      w = rect->max.x - rect->min.x;
+         F32      h = rect->max.y - rect->min.y;
+         if (is_x) {
+            *rect = R2F32P(at, rect->min.y, at + w, rect->max.y);
+            at += w + gap;
+         } else {
+            *rect = R2F32P(rect->min.x, at, rect->max.x, at + h);
+            at += h + gap;
+         }
+      }
+   }
+   _Place_WriteRects(app_state, kinds, idxs, rects, count);
+}
+STATE_OP(Place_Arrange)
 
 // A right-click on a piece of the slide showing: its @place line taken out,
 // so that it is back where the layout puts it.

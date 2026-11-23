@@ -164,6 +164,25 @@ struct Place_NudgeOpParams {
 };
 Place_NudgeOpParams* StateOp_Place_Nudge(StateOp_List* ops);
 
+// Several pieces picked whole lined up, or spaced evenly. Lined up: an edge
+// or the middle of each on that of them all. Spaced: the first and the last
+// stay, and the room between each two is made the same.
+typedef enum Place_ArrangeKind {
+   Place_ArrangeKind_Left,
+   Place_ArrangeKind_Right,
+   Place_ArrangeKind_Top,
+   Place_ArrangeKind_Bottom,
+   Place_ArrangeKind_CenterX, // their middles on one line down the page
+   Place_ArrangeKind_CenterY, // and across it
+   Place_ArrangeKind_SpaceX,
+   Place_ArrangeKind_SpaceY,
+} Place_ArrangeKind;
+typedef struct Place_ArrangeOpParams Place_ArrangeOpParams;
+struct Place_ArrangeOpParams {
+   Place_ArrangeKind kind;
+};
+Place_ArrangeOpParams* StateOp_Place_Arrange(StateOp_List* ops);
+
 // A piece of the slide showing put back where the layout has it: its @place
 // line taken out.
 typedef struct Place_RemoveLineOpParams Place_RemoveLineOpParams;
