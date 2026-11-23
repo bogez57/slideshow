@@ -925,7 +925,18 @@ Caret_BuildLook(const App_State* app_state, F32 ui) {
          // (place\place.c), which is just inside it: one line, not two side
          // by side.
          F32     thick = Max(1.0f, (F32)(S32)(1.5f * ui));
-         Rng2F32 rect = Intersect2F32(Pad2F32(box->room, thick), g_edit_view.page);
+         //
+         // A block with no @place line shares the body's room, and the last
+         // of them has all of it down to the bottom margin: around that the
+         // box ran to the bottom of the slide under a line or two of words.
+         // So as tall as the words (the block's own box) - and the caret's
+         // line, on a new line under them - and no taller than the room. A
+         // placed block's box is its room: nothing changes for it.
+         Rng2F32 around = box->room;
+         if (kind == Deck_PlaceKind_Text) {
+            around.max.y = Min(box->room.max.y, Max(box->rect.max.y, caret.is_found ? caret.rect.max.y : 0.0f));
+         }
+         Rng2F32 rect = Intersect2F32(Pad2F32(around, thick), g_edit_view.page);
          if (rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
             FR_BuildEdge(rect, thick, UI_ColorFromSlot(UI_ColorSlot_Border), "###caret focus");
          }
