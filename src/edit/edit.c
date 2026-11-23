@@ -77,6 +77,8 @@
 //    copy pieces      with pieces picked, Ctrl+C copies them and Ctrl+X cuts
 //                     them; Ctrl+V pastes them on the slide showing, picked.
 //                     Ctrl+D puts a copy a little down and right
+//    nudge pieces     the arrow keys with pieces picked move them a small
+//                     step, Shift+arrow a larger one
 //    size by wheel    Ctrl and the wheel over the title or a block: its
 //                     words larger or smaller - those of all picked, over
 //                     one of them (look\look.c)
@@ -820,6 +822,11 @@ Edit_KeepPicked(App_State* app_state, B32 was_good) {
 // where it was copied from: a block - or the title, as a block of a
 // heading - is an @box block with its words' lines and its @size and
 // @color lines, a picture is its line. All of a paste is one step to undo.
+
+// How far an arrow key moves the pieces picked, and with Shift. In page
+// units (VIEW_PAGE_W by VIEW_PAGE_H).
+#define _EDIT_NUDGE_SMALL 4.0f
+#define _EDIT_NUDGE_LARGE 20.0f
 
 // How far down and right a paste on the slide copied from, or a duplicate,
 // is from what it is of. In parts of the page.
@@ -1920,6 +1927,20 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       }
       if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_D)) {
          StateOp_Edit_DuplicatePieces(ops);
+      }
+      // The arrows move them, not the cursor: a small step, a larger one
+      // with Shift (place\place.c). In page units, the same across and down.
+      WM_Key arrows[4] = {WM_Key_Left, WM_Key_Right, WM_Key_Up, WM_Key_Down};
+      for (U64 i = 0; i < ArrayCount(arrows); i += 1) {
+         B32 small = Core_WM_KeyPress(events, window, 0, arrows[i]);
+         B32 large = !small && Core_WM_KeyPress(events, window, WM_Modifier_Shift, arrows[i]);
+         if (small || large) {
+            F32 units = small ? _EDIT_NUDGE_SMALL : _EDIT_NUDGE_LARGE;
+            F32 sign = (i == 0 || i == 2) ? -1.0f : 1.0f;
+            Place_NudgeOpParams* nudge = StateOp_Place_Nudge(ops);
+            nudge->dx = (i < 2) ? sign * units / VIEW_PAGE_W : 0.0f;
+            nudge->dy = (i < 2) ? 0.0f : sign * units / VIEW_PAGE_H;
+         }
       }
    }
 

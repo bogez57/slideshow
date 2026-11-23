@@ -24,6 +24,8 @@
 //    move several     drag one of several picked: the others go with it,
 //                     as far, each kept on the page. One line each, written
 //                     together, one step to undo
+//    nudge it         the arrow keys, with pieces picked: a small step,
+//                     and a larger one with Shift
 //    size its words   Ctrl and the wheel over the title or a block
 //                     (look\look.c)
 //    put it back      right-click it: where the layout would have it
@@ -776,6 +778,59 @@ Place_WriteLine(App_State* app_state, StateOp_List* ops, Place_WriteLineOpParams
    }
 }
 STATE_OP(Place_WriteLine)
+
+// The arrow keys with pieces picked whole: each one's @place line written a
+// step over from where it is, as one step to undo, and they stay picked.
+// From the slide as it was last laid out: nothing if the text has changed
+// since - a key held repeats faster than the frame, and the next one then
+// waits for the slide laid out again.
+void
+Place_Nudge(App_State* app_state, StateOp_List* ops, Place_NudgeOpParams* params) {
+   UnusedVariable(ops);
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || !Edit_PickedIsGood(app_state) || !Place_BoxesAreGood(app_state) ||
+       app_state->parsed_edit_count != editor->edit_count) {
+      return;
+   }
+   Rng2F32 page = g_edit_view.page;
+   Vec2F32 page_dim = Dim2F32(page);
+   U64     slide_idx = app_state->slide_idx;
+
+   // Where each is now, before any line is written: the boxes are of the
+   // text as it was.
+   Deck_PlaceKind kinds[VIEW_MAX_BOXES];
+   U64            idxs[VIEW_MAX_BOXES];
+   Rng2F32        rects[VIEW_MAX_BOXES];
+   U64            count = 0;
+   for (U64 i = 0; i < g_edit_view.picked_count && count < VIEW_MAX_BOXES; i += 1) {
+      View_Box* box = _Place_BoxOf(g_edit_view.picked_kinds[i], g_edit_view.picked_idxs[i]);
+      if (box == 0) {
+         continue;
+      }
+      F32 w = (box->rect.max.x - box->rect.min.x) / page_dim.x;
+      F32 h = (box->rect.max.y - box->rect.min.y) / page_dim.y;
+      F32 x = Clamp(0.0f, (box->rect.min.x - page.min.x) / page_dim.x + params->dx, Max(1.0f - w, 0.0f));
+      F32 y = Clamp(0.0f, (box->rect.min.y - page.min.y) / page_dim.y + params->dy, Max(1.0f - h, 0.0f));
+      kinds[count] = box->kind;
+      idxs[count] = box->idx;
+      rects[count] = R2F32P(x, y, x + w, y + h);
+      count += 1;
+   }
+
+   U64 undo_before = editor->undo_count;
+   for (U64 i = 0; i < count; i += 1) {
+      // The deck made again is a new one, after the line before.
+      FR_SyncDeck(app_state);
+      Deck_Slide* slide = &app_state->deck->slides[slide_idx];
+      _Place_WriteLine(editor, slide, kinds[i], idxs[i], _Place_PlaceOf(slide, kinds[i], idxs[i]), rects[i]);
+   }
+   Editor_JoinUndoSince(editor, undo_before);
+   if (count != 0) {
+      editor->last_input_us = NowTimeUS();
+      Edit_KeepPicked(app_state, 1);
+   }
+}
+STATE_OP(Place_Nudge)
 
 // A right-click on a piece of the slide showing: its @place line taken out,
 // so that it is back where the layout puts it.

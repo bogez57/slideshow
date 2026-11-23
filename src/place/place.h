@@ -155,6 +155,15 @@ struct Place_WriteLineOpParams {
 };
 Place_WriteLineOpParams* StateOp_Place_WriteLine(StateOp_List* ops);
 
+// The arrow keys with pieces picked whole (edit\edit.c): all of them moved
+// by dx across and dy down, in parts of the page, each kept on the page.
+typedef struct Place_NudgeOpParams Place_NudgeOpParams;
+struct Place_NudgeOpParams {
+   F32 dx;
+   F32 dy;
+};
+Place_NudgeOpParams* StateOp_Place_Nudge(StateOp_List* ops);
+
 // A piece of the slide showing put back where the layout has it: its @place
 // line taken out.
 typedef struct Place_RemoveLineOpParams Place_RemoveLineOpParams;
