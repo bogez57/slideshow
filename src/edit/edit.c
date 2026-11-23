@@ -2115,10 +2115,10 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       // with Shift (place\place.c). In page units, the same across and down.
       WM_Key arrows[4] = {WM_Key_Left, WM_Key_Right, WM_Key_Up, WM_Key_Down};
       for (U64 i = 0; i < ArrayCount(arrows); i += 1) {
-         B32 small = Core_WM_KeyPress(events, window, 0, arrows[i]);
-         B32 large = !small && Core_WM_KeyPress(events, window, WM_Modifier_Shift, arrows[i]);
-         if (small || large) {
-            F32 units = small ? _EDIT_NUDGE_SMALL : _EDIT_NUDGE_LARGE;
+         B32 is_small = Core_WM_KeyPress(events, window, 0, arrows[i]);
+         B32 is_large = !is_small && Core_WM_KeyPress(events, window, WM_Modifier_Shift, arrows[i]);
+         if (is_small || is_large) {
+            F32 units = is_small ? _EDIT_NUDGE_SMALL : _EDIT_NUDGE_LARGE;
             F32 sign = (i == 0 || i == 2) ? -1.0f : 1.0f;
             Place_NudgeOpParams* nudge = StateOp_Place_Nudge(ops);
             nudge->dx = (i < 2) ? sign * units / VIEW_PAGE_W : 0.0f;
