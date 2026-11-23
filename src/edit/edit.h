@@ -8,6 +8,17 @@
 
 typedef struct App_State App_State;
 
+// A piece of a slide copied (Ctrl+C, Ctrl+X, Ctrl+D): what it takes to
+// write it on a slide again. A block of words or a title is pasted as a
+// block of its own, a picture as a picture.
+typedef struct Edit_ClipPiece Edit_ClipPiece;
+struct Edit_ClipPiece {
+   B32     is_picture;
+   Rng2F32 rect;  // where it was, in parts of the page: its @place line's
+   String8 lines; // its own lines, as the text had them: a block's words, or the picture's line. Each ends with \n
+   String8 looks; // a block's @size text and @color text lines, each ending with \n, or none
+};
+
 // The edit screen's own, which is not app state, written with no state op:
 // the preview's slide as it was last laid out, and its panel's lists.
 typedef struct Edit_View Edit_View;
@@ -83,6 +94,18 @@ struct Edit_View {
    U64            picked_edit_count;
    U64            picked_cursor;
    U64            picked_mark;
+
+   // The pieces copied whole, on clip_arena, and the text put on the
+   // system's clipboard for them: Ctrl+V pastes them as pieces while the
+   // clipboard still has that text, else it is text again, the editor's.
+   // Pasted on the slide they were copied from, each paste is a little
+   // further down and right, so they are not over each other.
+   Arena*         clip_arena;
+   Edit_ClipPiece clip[VIEW_MAX_BOXES];
+   U64            clip_count;
+   String8        clip_text;
+   U64            clip_slide_idx;
+   U64            clip_paste_count;
 };
 global Edit_View g_edit_view;
 

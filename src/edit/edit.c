@@ -74,6 +74,9 @@
 //                     of its kind - all the pictures, or all the blocks.
 //                     Delete takes them all out, and a drag of one moves
 //                     them all
+//    copy pieces      with pieces picked, Ctrl+C copies them and Ctrl+X cuts
+//                     them; Ctrl+V pastes them on the slide showing, picked.
+//                     Ctrl+D puts a copy a little down and right
 //    size by wheel    Ctrl and the wheel over the title or a block: its
 //                     words larger or smaller - those of all picked, over
 //                     one of them (look\look.c)
@@ -799,6 +802,185 @@ Edit_KeepPicked(App_State* app_state, B32 was_good) {
    if (was_good && app_state->editor != 0) {
       _Edit_PickedSnapshot(app_state);
    }
+}
+
+////////////////////////////////
+//~ bgz: pieces copied, pasted and duplicated
+//
+// With pieces picked whole, Ctrl+C copies them, Ctrl+X copies them and takes
+// them out, and Ctrl+D puts a copy of them a little down and right of where
+// they are. Ctrl+V pastes what was copied on the slide showing - with or
+// without anything picked - while the system's clipboard still has what
+// copying put there (their lines, as the text has them): copied from
+// anywhere else, it is text, the editor's. What is pasted or duplicated is
+// picked after, to be moved or sized together.
+//
+// Each piece goes on the slide as one of its own, at the end of the slide's
+// lines, as a text box drawn does (_Edit_AddTextBox), with an @place line
+// where it was copied from: a block - or the title, as a block of a
+// heading - is an @box block with its words' lines and its @size and
+// @color lines, a picture is its line. All of a paste is one step to undo.
+
+// How far down and right a paste on the slide copied from, or a duplicate,
+// is from what it is of. In parts of the page.
+#define _EDIT_PASTE_STEP 0.03f
+
+// The whole line at pos, without its ending, then \n.
+PRIVATE String8
+_Edit_LineAt(Arena* arena, String8 text, U64 pos) {
+   U64 start = Min(pos, text.size);
+   U64 end = start;
+   while (start > 0 && text.str[start - 1] != '\n') start -= 1;
+   while (end < text.size && text.str[end] != '\n') end += 1;
+   return PushStr8F(arena, "%S\n", Str8Substr(text, R1U64(start, end)));
+}
+
+// An @color line of the title's or a block's, as a block's: what follows its
+// second word, after "@color text".
+PRIVATE String8
+_Edit_ColorLineAsText(Arena* arena, String8 text, Rng1U64 line) {
+   String8 whole = Str8Substr(text, R1U64(Min(line.min, text.size), Min(line.max, text.size)));
+   U64     at = 0;
+   for (U32 word = 0; word < 2; word += 1) {
+      while (at < whole.size && (whole.str[at] == ' ' || whole.str[at] == '\t')) at += 1;
+      while (at < whole.size && whole.str[at] != ' ' && whole.str[at] != '\t') at += 1;
+   }
+   while (at < whole.size && (whole.str[at] == ' ' || whole.str[at] == '\t')) at += 1;
+   return PushStr8F(arena, "@color text %S\n", Str8Skip(whole, at));
+}
+
+// The pieces picked, as they are written (Edit_ClipPiece), into pieces, on
+// arena: how many. The deck, the text and the preview's boxes have to be of
+// the text as it is.
+PRIVATE U64
+_Edit_ClipFromPicked(Arena* arena, const App_State* app_state, Edit_ClipPiece* pieces) {
+   U64 count = 0;
+   if (!Place_BoxesAreGood(app_state)) {
+      return 0;
+   }
+   Deck_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
+   String8     text = Editor_Text(app_state->editor);
+   Rng2F32     page = g_edit_view.page;
+   Vec2F32     page_dim = Dim2F32(page);
+   for (U64 i = 0; i < g_edit_view.picked_count; i += 1) {
+      Deck_PlaceKind kind = g_edit_view.picked_kinds[i];
+      U64            idx = g_edit_view.picked_idxs[i];
+      View_Box*      box = 0;
+      for (U64 k = 0; k < g_edit_view.box_count; k += 1) {
+         if (g_edit_view.boxes[k].kind == kind && g_edit_view.boxes[k].idx == idx) {
+            box = &g_edit_view.boxes[k];
+         }
+      }
+      if (box == 0) {
+         continue;
+      }
+      Edit_ClipPiece piece = {0};
+      piece.rect = R2F32P((box->rect.min.x - page.min.x) / page_dim.x, (box->rect.min.y - page.min.y) / page_dim.y,
+                          (box->rect.max.x - page.min.x) / page_dim.x, (box->rect.max.y - page.min.y) / page_dim.y);
+      String8List lines = {0};
+      String8List looks = {0};
+      Deck_Look*  look = 0;
+      B32         ok = 1;
+      if (kind == Deck_PlaceKind_Picture && idx < slide->picture_count) {
+         piece.is_picture = 1;
+         Str8ListPush(arena, &lines, _Edit_LineAt(arena, text, slide->pictures[idx].range.min));
+      } else if (kind == Deck_PlaceKind_Text && idx < slide->box_count) {
+         Deck_Box*  block = &slide->boxes[idx];
+         Deck_Item* item = block->first_item;
+         for (U64 n = 0; n < block->item_count && item != 0; n += 1, item = item->next) {
+            Str8ListPush(arena, &lines, _Edit_LineAt(arena, text, item->text_range.min));
+         }
+         look = &block->look;
+      } else if (kind == Deck_PlaceKind_Title && slide->title.size != 0) {
+         Str8ListPush(arena, &lines, PushStr8F(arena, "## %S\n", slide->title));
+         look = &slide->title_look;
+      } else {
+         ok = 0;
+      }
+      if (!ok || lines.node_count == 0) {
+         continue;
+      }
+      if (look != 0 && look->has_size) {
+         Str8ListPush(arena, &looks, PushStr8F(arena, "@size text %.2f\n", look->size));
+      }
+      if (look != 0 && look->has_color) {
+         Str8ListPush(arena, &looks, _Edit_ColorLineAsText(arena, text, look->color_line));
+      }
+      piece.lines = Str8ListJoin(arena, &lines, 0);
+      piece.looks = Str8ListJoin(arena, &looks, 0);
+      pieces[count] = piece;
+      count += 1;
+   }
+   return count;
+}
+
+// Writes pieces on slide_idx, offset down and right by offset, and picks
+// them. The deck has to be of the text as it is. 1 if any were.
+PRIVATE B32
+_Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_ClipPiece* pieces, U64 count, F32 offset) {
+   Editor_Editor* editor = app_state->editor;
+   Deck_Deck*     deck = app_state->deck;
+   if (slide_idx >= deck->slide_count || count == 0) {
+      return 0;
+   }
+   Temp scratch = ScratchBegin(0, 0);
+
+   // Under the slide's last line with anything on it, as a box drawn.
+   String8 text = Editor_Text(editor);
+   Rng1U64 range = _Edit_TextRangeFromSlide(editor, deck, slide_idx);
+   U64     end = range.max;
+   while (end > range.min && (text.str[end - 1] == '\n' || text.str[end - 1] == ' ' || text.str[end - 1] == '\t')) {
+      end -= 1;
+   }
+
+   String8List added = {0};
+   for (U64 i = 0; i < count; i += 1) {
+      Edit_ClipPiece* piece = &pieces[i];
+      F32 w = piece->rect.max.x - piece->rect.min.x;
+      F32 h = piece->rect.max.y - piece->rect.min.y;
+      F32 x = Clamp(0.0f, piece->rect.min.x + offset, Max(1.0f - w, 0.0f));
+      F32 y = Clamp(0.0f, piece->rect.min.y + offset, Max(1.0f - h, 0.0f));
+      if (piece->is_picture) {
+         Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "\n\n%S@place picture %.3f %.3f %.3f %.3f", piece->lines, x, y, w, h));
+      } else {
+         Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "\n\n@box\n@place text %.3f %.3f %.3f %.3f\n%S%S", x, y, w, h,
+                                                       piece->looks, Str8Prefix(piece->lines, piece->lines.size - 1)));
+      }
+   }
+   String8 joined = Str8ListJoin(scratch.arena, &added, 0);
+   Editor_ReplaceRange(editor, end, end, joined);
+   U64 added_end = end + joined.size;
+   Editor_SetCursor(editor, added_end);
+   editor->mark = added_end;
+   editor->last_input_us = NowTimeUS();
+   g_caret_view.focus_hidden = 0;
+   ScratchEnd(scratch);
+
+   //- bgz: what was pasted, picked: the slide's pieces from where it went in
+   FR_SyncDeck(app_state);
+   Deck_Slide* slide = &deck->slides[slide_idx];
+   g_edit_view.picked_count = 0;
+   for (U64 i = 0; i < slide->picture_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
+      if (slide->pictures[i].range.min >= end) {
+         g_edit_view.picked_kinds[g_edit_view.picked_count] = Deck_PlaceKind_Picture;
+         g_edit_view.picked_idxs[g_edit_view.picked_count] = i;
+         g_edit_view.picked_count += 1;
+      }
+   }
+   for (U64 i = 0; i < slide->box_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
+      Deck_Box* block = &slide->boxes[i];
+      if (block->item_count != 0 && block->first_item != 0 && block->first_item->text_range.min >= end) {
+         g_edit_view.picked_kinds[g_edit_view.picked_count] = Deck_PlaceKind_Text;
+         g_edit_view.picked_idxs[g_edit_view.picked_count] = i;
+         g_edit_view.picked_count += 1;
+      }
+   }
+   _Edit_PickedSnapshot(app_state);
+   g_edit_view.picked_slide_idx = slide_idx;
+   if (g_edit_view.picked_count < count) {
+      StateOp_App_Notice(ops)->notice = Str8Lit("Not all of it fits: a slide has at most 8 pictures and 8 text boxes");
+   }
+   return 1;
 }
 
 // Gives the deck the theme after the one it has: its @theme line is
@@ -1535,6 +1717,88 @@ Edit_DeletePiece(App_State* app_state, StateOp_List* ops) {
 }
 STATE_OP_NO_PARAMS(Edit_DeletePiece)
 
+// Ctrl+C, or Ctrl+X with is_cut, with pieces picked whole: copied, as
+// pieces (g_edit_view.clip) and as their lines on the system's clipboard -
+// and with is_cut taken out.
+typedef struct Edit_CopyPiecesOpParams Edit_CopyPiecesOpParams;
+struct Edit_CopyPiecesOpParams {
+   B32 is_cut;
+};
+void
+Edit_CopyPieces(App_State* app_state, StateOp_List* ops, Edit_CopyPiecesOpParams* params) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || !Edit_PickedIsGood(app_state)) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   if (g_edit_view.clip_arena == 0) {
+      g_edit_view.clip_arena = ArenaAlloc();
+   }
+   ArenaClear(g_edit_view.clip_arena);
+   g_edit_view.clip_count = _Edit_ClipFromPicked(g_edit_view.clip_arena, app_state, g_edit_view.clip);
+   g_edit_view.clip_slide_idx = app_state->slide_idx;
+   g_edit_view.clip_paste_count = 0;
+   if (g_edit_view.clip_count == 0) {
+      return;
+   }
+
+   // Their lines, as text: pasted anywhere else, they are what was copied.
+   String8List lines = {0};
+   for (U64 i = 0; i < g_edit_view.clip_count; i += 1) {
+      Str8ListPush(g_edit_view.clip_arena, &lines, g_edit_view.clip[i].lines);
+   }
+   g_edit_view.clip_text = Str8ListJoin(g_edit_view.clip_arena, &lines, 0);
+   Core_WM_SetClipboardText(g_edit_view.clip_text);
+
+   U64 count = g_edit_view.clip_count;
+   if (params->is_cut) {
+      U64 picked = g_edit_view.picked_count;
+      g_edit_view.picked_count = 0;
+      _Edit_DeletePieces(app_state, app_state->slide_idx, g_edit_view.picked_kinds, g_edit_view.picked_idxs, picked);
+      // Pasted back on this slide, it goes where it was.
+      g_edit_view.clip_paste_count = (U64)-1;
+   }
+   StateOp_App_Notice(ops)->notice = PushStr8F(ops->arena, "%s %llu piece%s. Ctrl+V pastes %s", params->is_cut ? "Cut" : "Copied",
+                                               (unsigned long long)count, (count == 1) ? "" : "s", (count == 1) ? "it" : "them");
+}
+STATE_OP(Edit_CopyPieces)
+
+// Ctrl+V, with the clipboard as copying the pieces left it: they go on the
+// slide showing, and are picked.
+void
+Edit_PastePieces(App_State* app_state, StateOp_List* ops) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || g_edit_view.clip_count == 0) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   U64 slide_idx = app_state->slide_idx;
+   F32 offset = 0;
+   if (slide_idx == g_edit_view.clip_slide_idx) {
+      g_edit_view.clip_paste_count += 1; // from -1 after a cut: 0, where it was
+      offset = _EDIT_PASTE_STEP * (F32)g_edit_view.clip_paste_count;
+   }
+   _Edit_PastePieces(app_state, ops, slide_idx, g_edit_view.clip, g_edit_view.clip_count, offset);
+}
+STATE_OP_NO_PARAMS(Edit_PastePieces)
+
+// Ctrl+D with pieces picked whole: a copy of them a little down and right,
+// picked in their place. The clipboard is left as it is.
+void
+Edit_DuplicatePieces(App_State* app_state, StateOp_List* ops) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || !Edit_PickedIsGood(app_state)) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   Temp            scratch = ScratchBegin(0, 0);
+   Edit_ClipPiece* pieces = PushArray(scratch.arena, Edit_ClipPiece, VIEW_MAX_BOXES);
+   U64             count = _Edit_ClipFromPicked(scratch.arena, app_state, pieces);
+   _Edit_PastePieces(app_state, ops, app_state->slide_idx, pieces, count, _EDIT_PASTE_STEP);
+   ScratchEnd(scratch);
+}
+STATE_OP_NO_PARAMS(Edit_DuplicatePieces)
+
 ////////////////////////////////
 //~ bgz: input
 //
@@ -1645,6 +1909,41 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       if (is_delete || is_backspace) {
          StateOp_Edit_DeletePiece(ops);
       }
+      // Copied, cut and duplicated as pieces, not as the editor's text.
+      if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_C)) {
+         StateOp_Edit_CopyPieces(ops)->is_cut = 0;
+      }
+      if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_X)) {
+         StateOp_Edit_CopyPieces(ops)->is_cut = 1;
+      }
+      if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_D)) {
+         StateOp_Edit_DuplicatePieces(ops);
+      }
+   }
+
+   //- bgz: pieces copied, pasted as pieces - while the clipboard has what
+   // copying them put there (the \r Windows may give it aside). Looked at
+   // before the key is taken: else it is the editor's, as text.
+   B32 has_paste = 0;
+   for (WM_Event* event = events->first; event != 0 && g_edit_view.clip_count != 0; event = event->next) {
+      has_paste |= (event->kind == WM_EventKind_Press && event->key == WM_Key_V && event->modifiers == WM_Modifier_Ctrl);
+   }
+   if (has_paste && Place_BoxesAreGood(app_state)) {
+      Temp    scratch = ScratchBegin(0, 0);
+      String8 got = Core_WM_GetClipboardText(scratch.arena);
+      U8*     clean = PushArray(scratch.arena, U8, got.size + 1);
+      U64     clean_size = 0;
+      for (U64 i = 0; i < got.size; i += 1) {
+         if (got.str[i] != '\r') {
+            clean[clean_size] = got.str[i];
+            clean_size += 1;
+         }
+      }
+      if (Str8Match(Str8(clean, clean_size), g_edit_view.clip_text, 0) &&
+          Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_V)) {
+         StateOp_Edit_PastePieces(ops);
+      }
+      ScratchEnd(scratch);
    }
 
    //- bgz: everything else is the editor's
