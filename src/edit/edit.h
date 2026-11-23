@@ -138,6 +138,9 @@ struct Edit_PreviewClickOpParams {
    B32            picks;
    B32            adds;
    B32            picks_all;
+   // A click let go of with no drag, on one of several picked: it alone is
+   // picked, as a click on it with none picked would.
+   B32            picks_only;
    Deck_PlaceKind kind;
    U64            idx;
 };

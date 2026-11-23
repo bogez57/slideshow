@@ -1460,8 +1460,9 @@ Edit_PreviewClick(App_State* app_state, StateOp_List* ops, Edit_PreviewClickOpPa
    }
 
    //- bgz: a plain press on one of several picked: they stay picked, to be
-   // dragged together (place\place.c)
-   if (params->picks && was_good && g_edit_view.picked_count > 1 && _Edit_PickedIndexOf(params->kind, params->idx) >= 0) {
+   // dragged together (place\place.c). Let go of with no drag, it alone is
+   // (picks_only).
+   if (params->picks && !params->picks_only && was_good && g_edit_view.picked_count > 1 && _Edit_PickedIndexOf(params->kind, params->idx) >= 0) {
       return;
    }
 

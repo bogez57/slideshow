@@ -849,6 +849,17 @@ Place_BeforeLayout(const App_State* app_state, F32 ui) {
          write->corner = drag->corner;
          drag->state = Place_DragState_Dropped;
       } else {
+         // A click, not a drag, on one of several picked: that one alone is
+         // picked now, as in other editors. The press kept them all, for a
+         // drag (edit\edit.c).
+         if (drag->state == Place_DragState_Pressed && drag->group_count != 0) {
+            Edit_PreviewClickOpParams* click = StateOp_Edit_PreviewClick(app_state->op_list);
+            click->pos = drag->press_mouse;
+            click->picks = 1;
+            click->picks_only = 1;
+            click->kind = drag->kind;
+            click->idx = drag->idx;
+         }
          drag->state = Place_DragState_None;
       }
       return;
