@@ -324,6 +324,10 @@ Caret_DragTo(const App_State* app_state, Deck_PlaceKind kind, U64 idx, Vec2F32 p
 void
 Caret_PressRoom(App_State* app_state, StateOp_List* ops, Caret_PressRoomOpParams* params) {
    UnusedVariable(ops);
+   // The cursor is in the words now: no piece is picked whole. Said so
+   // here: with the cursor already where the click puts it, nothing else
+   // would show that they are not (Edit_PickedIsGood).
+   g_edit_view.picked_count = 0;
    Caret_Click(app_state, params->pos, params->keeps_mark);
 }
 STATE_OP(Caret_PressRoom)
@@ -576,7 +580,17 @@ Caret_BuildRooms(const App_State* app_state, F32 ui, B32 interactive) {
       if (box->kind == Deck_PlaceKind_Picture) {
          continue;
       }
-      UI_Box*   room = FR_BuildRectBox(UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll, Intersect2F32(box->room, g_edit_view.page),
+      // A block's, no further down than its words: a block with no @place
+      // line shares the body's room, and the last of them has all of it
+      // down to the bottom margin - where a click then went into the block,
+      // far under its words, when it was meant for the slide's open space,
+      // to let go of what is picked. As the box drawn around it
+      // (Caret_BuildLook). A placed block's box is its room.
+      Rng2F32 room_rect = box->room;
+      if (box->kind == Deck_PlaceKind_Text) {
+         room_rect.max.y = Min(box->room.max.y, Max(box->rect.max.y, room_rect.min.y));
+      }
+      UI_Box*   room = FR_BuildRectBox(UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll, Intersect2F32(room_rect, g_edit_view.page),
                                        "###caret room %d %llu", (int)box->kind, (unsigned long long)box->idx);
       // A click here goes to the nearest letter, but the mouse is the bar
       // that text is typed at only right at the words (place\place.c) - and

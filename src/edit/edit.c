@@ -2817,6 +2817,13 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
             StateOp_Edit_AddSlide(ops);
          }
       }
+
+      //- bgz: the preview around the slide, under all of the above: a click
+      // there lets go of what is selected, as one on the slide's open space
+      UI_Signal around = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, layout->preview, "###edit preview around"));
+      if ((around.f & UI_SignalFlag_LeftPressed) && !g_edit_view.is_drawing) {
+         StateOp_Edit_Deselect(ops);
+      }
    }
 
    //- bgz: 4: laid out again, for what they did
