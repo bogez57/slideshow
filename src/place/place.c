@@ -95,6 +95,12 @@
 // them, and could hardly be put anywhere else.
 #define _PLACE_SNAP 5.0f
 
+// And how far from a line it is on the mouse takes it before it comes off:
+// more than it takes to get on. With the two the same, a mouse held at the
+// edge of a line's reach had the box on the line one frame and off it the
+// next, and a box between two lines went back and forth between them.
+#define _PLACE_SNAP_LEAVE 11.0f
+
 // The least the body's box is made by a handle, as parts of the page - or
 // what it was already, if a hand-written line made it less.
 #define _PLACE_TEXT_MIN_W 0.2f
@@ -401,6 +407,40 @@ _Place_NearestLine(F32 value, _Place_Line* lines, U64 line_count, F32 reach, F32
    return result;
 }
 
+// The line of lines that is at at, or -1.
+PRIVATE S64
+_Place_LineAt(_Place_Line* lines, U64 line_count, F32 at) {
+   S64 result = -1;
+   for (U64 i = 0; i < line_count && result < 0; i += 1) {
+      F32 gap = lines[i].at - at;
+      if (gap < 0.00005f && gap > -0.00005f) {
+         result = (S64)i;
+      }
+   }
+   return result;
+}
+
+// The line the drag was on last frame, if it is still one of lines and one
+// of values is within reach of it - the further reach, of a line it is
+// already on: its index, and how far that value is from it. Else -1.
+PRIVATE S64
+_Place_StuckLine(B32 has_stuck, F32 stuck, F32* values, U64 value_count, _Place_Line* lines, U64 line_count, F32 reach,
+                 F32 shift_lo, F32 shift_hi, F32* shift_out) {
+   S64 result = -1;
+   S64 line_idx = has_stuck ? _Place_LineAt(lines, line_count, stuck) : -1;
+   F32 best = reach;
+   for (U64 i = 0; i < value_count && line_idx >= 0; i += 1) {
+      F32 gap = lines[line_idx].at - values[i];
+      F32 gap_size = (gap < 0) ? -gap : gap;
+      if (gap_size <= best && gap >= shift_lo && gap <= shift_hi) {
+         best = gap_size;
+         *shift_out = gap;
+         result = line_idx;
+      }
+   }
+   return result;
+}
+
 // Puts what line_idx of lines is into the drag, across (is_x) or down, to be
 // drawn: the line, and the box it came from.
 PRIVATE void
@@ -458,6 +498,11 @@ _Place_LinedUp(Place_Drag* drag, Rng2F32 rect, F32 ui) {
    for (U64 i = 0; i < g_edit_view.box_count && box_count < ArrayCount(boxes); i += 1) {
       View_Box* box = &g_edit_view.boxes[i];
       B32       is_dragged = (box->kind == drag->kind && box->idx == drag->idx);
+      // Nor the others that go with it: they move as it does, and a line
+      // of theirs would be one that runs ahead of it.
+      for (U64 k = 0; k < drag->group_count && drag->corner == 0; k += 1) {
+         is_dragged |= (box->kind == drag->group_kinds[k] && box->idx == drag->group_idxs[k]);
+      }
       if (is_dragged) {
          continue;
       }
@@ -475,6 +520,8 @@ _Place_LinedUp(Place_Drag* drag, Rng2F32 rect, F32 ui) {
 
    F32     reach_x = _PLACE_SNAP * ui / page_dim.x;
    F32     reach_y = _PLACE_SNAP * ui / page_dim.y;
+   F32     leave_x = _PLACE_SNAP_LEAVE * ui / page_dim.x;
+   F32     leave_y = _PLACE_SNAP_LEAVE * ui / page_dim.y;
    F32     w = rect.max.x - rect.min.x;
    F32     h = rect.max.y - rect.min.y;
    Rng2F32 result = rect;
@@ -496,16 +543,35 @@ _Place_LinedUp(Place_Drag* drag, Rng2F32 rect, F32 ui) {
       F32 own_y[3] = {rect.min.y, (rect.min.y + rect.max.y) * 0.5f, rect.max.y};
       F32 best_x = reach_x;
       F32 best_y = reach_y;
+
+      // The line it is on already keeps it, each way, while it is near
+      // enough: no other is looked for that way.
+      F32 stuck_shift = 0;
+      S64 stuck_idx = _Place_StuckLine(drag->has_stuck_x, drag->stuck_x, own_x, 3, xs, x_count, leave_x, lo_x, hi_x, &stuck_shift);
+      B32 is_stuck_x = (stuck_idx >= 0);
+      if (is_stuck_x) {
+         result.min.x = rect.min.x + stuck_shift;
+         result.max.x = rect.max.x + stuck_shift;
+         _Place_SetGuide(drag, 1, xs, stuck_idx, boxes);
+      }
+      stuck_idx = _Place_StuckLine(drag->has_stuck_y, drag->stuck_y, own_y, 3, ys, y_count, leave_y, lo_y, hi_y, &stuck_shift);
+      B32 is_stuck_y = (stuck_idx >= 0);
+      if (is_stuck_y) {
+         result.min.y = rect.min.y + stuck_shift;
+         result.max.y = rect.max.y + stuck_shift;
+         _Place_SetGuide(drag, 0, ys, stuck_idx, boxes);
+      }
+
       for (U64 i = 0; i < 3; i += 1) {
          F32 shift = 0;
-         S64 line_idx = _Place_NearestLine(own_x[i], xs, x_count, best_x, lo_x, hi_x, &shift);
+         S64 line_idx = is_stuck_x ? -1 : _Place_NearestLine(own_x[i], xs, x_count, best_x, lo_x, hi_x, &shift);
          if (line_idx >= 0) {
             best_x = (shift < 0) ? -shift : shift;
             result.min.x = rect.min.x + shift;
             result.max.x = rect.max.x + shift;
             _Place_SetGuide(drag, 1, xs, line_idx, boxes);
          }
-         line_idx = _Place_NearestLine(own_y[i], ys, y_count, best_y, lo_y, hi_y, &shift);
+         line_idx = is_stuck_y ? -1 : _Place_NearestLine(own_y[i], ys, y_count, best_y, lo_y, hi_y, &shift);
          if (line_idx >= 0) {
             best_y = (shift < 0) ? -shift : shift;
             result.min.y = rect.min.y + shift;
@@ -553,6 +619,25 @@ _Place_LinedUp(Place_Drag* drag, Rng2F32 rect, F32 ui) {
                                       is_left ? w - hi_w : lo_w - w, is_left ? w - lo_w : hi_w - w, &shift_x);
       S64 line_y = _Place_NearestLine(is_top ? rect.min.y : rect.max.y, ys, y_count, reach_y,
                                       is_top ? h - hi_h : lo_h - h, is_top ? h - lo_h : hi_h - h, &shift_y);
+
+      // The line the edge is on already keeps it, while it is near enough.
+      {
+         F32 edge_x = is_left ? rect.min.x : rect.max.x;
+         F32 edge_y = is_top ? rect.min.y : rect.max.y;
+         F32 stuck_shift = 0;
+         S64 stuck_idx = _Place_StuckLine(drag->has_stuck_x, drag->stuck_x, &edge_x, 1, xs, x_count, leave_x,
+                                          is_left ? w - hi_w : lo_w - w, is_left ? w - lo_w : hi_w - w, &stuck_shift);
+         if (stuck_idx >= 0) {
+            line_x = stuck_idx;
+            shift_x = stuck_shift;
+         }
+         stuck_idx = _Place_StuckLine(drag->has_stuck_y, drag->stuck_y, &edge_y, 1, ys, y_count, leave_y,
+                                      is_top ? h - hi_h : lo_h - h, is_top ? h - lo_h : hi_h - h, &stuck_shift);
+         if (stuck_idx >= 0) {
+            line_y = stuck_idx;
+            shift_y = stuck_shift;
+         }
+      }
 
       // A side moves one edge: the other way nothing is lined up.
       if (side_x == 0) {
@@ -1020,7 +1105,14 @@ Place_BeforeLayout(const App_State* app_state, F32 ui) {
          // A click, not a drag, on one of several picked: that one alone is
          // picked now, as in other editors. The press kept them all, for a
          // drag (edit\edit.c).
-         if (drag->state == Place_DragState_Pressed && drag->group_count != 0) {
+         if (drag->state == Place_DragState_Pressed && drag->is_shift_click) {
+            Edit_PreviewClickOpParams* click = StateOp_Edit_PreviewClick(app_state->op_list);
+            click->pos = drag->press_mouse;
+            click->picks = 1;
+            click->picks_all = 1;
+            click->kind = drag->kind;
+            click->idx = drag->idx;
+         } else if (drag->state == Place_DragState_Pressed && drag->group_count != 0) {
             Edit_PreviewClickOpParams* click = StateOp_Edit_PreviewClick(app_state->op_list);
             click->pos = drag->press_mouse;
             click->picks = 1;
@@ -1043,7 +1135,12 @@ Place_BeforeLayout(const App_State* app_state, F32 ui) {
    }
    if (drag->state == Place_DragState_Dragging) {
       drag->now = _Place_RectFromMouse(drag, g_edit_view.page, mouse);
-      // Shift lines it up with what it is near.
+      // Shift lines it up with what it is near - and keeps it on the line
+      // it was on last frame until it is well past it.
+      drag->has_stuck_x = drag->has_guide_x;
+      drag->has_stuck_y = drag->has_guide_y;
+      drag->stuck_x = drag->guide_x;
+      drag->stuck_y = drag->guide_y;
       drag->has_guide_x = 0;
       drag->has_guide_y = 0;
       if (Core_WM_KeyIsDown(WM_Key_Shift)) {
@@ -1199,17 +1296,24 @@ _Place_Signal(const App_State* app_state, UI_Box* box, B32 has_piece, Deck_Place
 
    B32 ctrl = !!(signal.event_flags & WM_Modifier_Ctrl);
    B32 shift = !!(signal.event_flags & WM_Modifier_Shift);
-   if ((signal.f & UI_SignalFlag_LeftPressed) && corner == 0 && piece != 0 && (ctrl || (shift && Edit_PickedIsGood(app_state)))) {
-      // Ctrl: the piece added to those picked whole, or taken out of them.
-      // Shift, with pieces picked: every one of the kind of the first
+   if ((signal.f & UI_SignalFlag_LeftPressed) && corner == 0 && piece != 0 && ctrl) {
+      // Ctrl: the piece added to those picked whole, or taken out of them
       // (edit\edit.c). Nothing moves, and the cursor stays.
       Edit_PreviewClickOpParams* click = StateOp_Edit_PreviewClick(app_state->op_list);
       click->pos = UI_DragStartMouse();
       click->picks = 1;
-      click->adds = ctrl;
-      click->picks_all = !ctrl;
+      click->adds = 1;
       click->kind = kind;
       click->idx = idx;
+      g_place_view.click_count = 0;
+      result = 1;
+   } else if ((signal.f & UI_SignalFlag_LeftPressed) && corner == 0 && piece != 0 && shift && Edit_PickedIsGood(app_state)) {
+      // Shift, with pieces picked: watched for a drag, which Shift lines up
+      // - it was no drag at all, with Shift down before the press, and the
+      // key had to be found after the button. Let go of with no drag, every
+      // piece of the kind of the first is picked (Place_BeforeLayout).
+      _Place_Begin(app_state, piece, 0, UI_DragStartMouse(), Place_DragState_Pressed);
+      g_place_view.drag.is_shift_click = 1;
       g_place_view.click_count = 0;
       result = 1;
    } else if (signal.f & UI_SignalFlag_LeftPressed) {

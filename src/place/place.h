@@ -57,6 +57,17 @@ struct Place_Drag {
    // words. A line moved out of its block's room by the drag has no hit,
    // and its box is built without one (Place_BuildHits).
    S64             select_hit;
+   // The line it was on last frame, across and down: it stays on that line
+   // until the mouse has taken it well past (_PLACE_SNAP_LEAVE), so it does
+   // not jump on and off a line the mouse is at the edge of.
+   B32             has_stuck_x;
+   B32             has_stuck_y;
+   F32             stuck_x;
+   F32             stuck_y;
+   // The press was with Shift down, with pieces picked: let go of with no
+   // drag, every piece of the kind of the first is picked (edit\edit.c).
+   // Dragged, it is a drag like any other, lined up from the start.
+   B32             is_shift_click;
    // A drag of one of several pieces picked whole (edit\edit.c): the others,
    // which go with it, by the same amount. Each with where it was then, in
    // parts of the page, and its place as the text has it, kept while the
