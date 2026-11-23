@@ -135,6 +135,11 @@ void Editor_WrapSelection(Editor_Editor* editor, String8 mark, String8 placehold
 
 void Editor_SetCursor(Editor_Editor* editor, U64 pos);
 
+// The changes made since the undo history had undo_count_before steps are
+// undone as one: for an op that changes the text in several places at once.
+// Called with editor->undo_count before the first of them.
+void Editor_JoinUndoSince(Editor_Editor* editor, U64 undo_count_before);
+
 // Keys and typing. Events it uses are eaten, so what the caller wants for
 // itself (its own shortcuts) it takes first. arena is for the frame: the row
 // layout and the clipboard's text go on it.

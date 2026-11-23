@@ -26,10 +26,17 @@ B32 Look_Target(const App_State* app_state, U64* slide_idx_out, Deck_PlaceKind* 
 
 //- bgz: state ops, pushed with StateOp_<Name>(ops)
 
-// direction: over 0 larger, under 0 smaller, 0 the usual size again.
+// direction: over 0 larger, under 0 smaller, 0 the usual size again. Of the
+// piece the cursor is in - or, with has_piece, of the preview slide's piece
+// of kind and idx (Ctrl and the wheel over it, place\place.c), and with
+// with_picked of every piece picked whole that has words (edit\edit.c).
 typedef struct Look_StepSizeOpParams Look_StepSizeOpParams;
 struct Look_StepSizeOpParams {
-   S32 direction;
+   S32            direction;
+   B32            has_piece;
+   Deck_PlaceKind kind;
+   U64            idx;
+   B32            with_picked;
 };
 Look_StepSizeOpParams* StateOp_Look_StepSize(StateOp_List* ops);
 

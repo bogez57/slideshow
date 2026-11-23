@@ -19,7 +19,13 @@
 //                     when it comes near one. A line shows what it is on,
 //                     and an outline the other box the line is from
 //    pick it          click it away from its words - a picture anywhere:
-//                     Delete then takes it out (edit\edit.c)
+//                     Delete then takes it out (edit\edit.c). Ctrl+click
+//                     adds more, Shift+click picks all of the kind
+//    move several     drag one of several picked: the others go with it,
+//                     as far, each kept on the page. One line each, written
+//                     together, one step to undo
+//    size its words   Ctrl and the wheel over the title or a block
+//                     (look\look.c)
 //    put it back      right-click it: where the layout would have it
 //    give up a drag   Esc - or F5, which presents
 //
@@ -592,6 +598,8 @@ _Place_LinedUp(Place_Drag* drag, Rng2F32 rect, F32 ui) {
    return result;
 }
 
+PRIVATE View_Box* _Place_BoxOf(Deck_PlaceKind kind, U64 idx);
+
 PRIVATE void
 _Place_Begin(const App_State* app_state, View_Box* from, U32 corner, Vec2F32 pos, Place_DragState state) {
    Place_Drag* drag = &g_place_view.drag;
@@ -613,6 +621,37 @@ _Place_Begin(const App_State* app_state, View_Box* from, U32 corner, Vec2F32 pos
                         (box.max.x - page.min.x) / page_dim.x, (box.max.y - page.min.y) / page_dim.y);
    drag->now = drag->start;
    drag->before = *_Place_PlaceOf(&app_state->deck->slides[app_state->slide_idx], kind, idx);
+
+   // Moved, not resized, as one of several picked whole: the others go with
+   // it.
+   if (corner == 0 && Edit_PieceIsPicked(app_state, kind, idx)) {
+      for (U64 i = 0; i < g_edit_view.picked_count; i += 1) {
+         Deck_PlaceKind other_kind = g_edit_view.picked_kinds[i];
+         U64            other_idx = g_edit_view.picked_idxs[i];
+         View_Box*      other = _Place_BoxOf(other_kind, other_idx);
+         if ((other_kind == kind && other_idx == idx) || other == 0 || drag->group_count >= VIEW_MAX_BOXES) {
+            continue;
+         }
+         Rng2F32 rect = other->rect;
+         drag->group_kinds[drag->group_count] = other_kind;
+         drag->group_idxs[drag->group_count] = other_idx;
+         drag->group_start[drag->group_count] = R2F32P((rect.min.x - page.min.x) / page_dim.x, (rect.min.y - page.min.y) / page_dim.y,
+                                                       (rect.max.x - page.min.x) / page_dim.x, (rect.max.y - page.min.y) / page_dim.y);
+         drag->group_count += 1;
+      }
+   }
+}
+
+// Where the i-th of the others a drag moves has been taken: by as much as
+// the piece dragged, and kept on the page.
+PRIVATE Rng2F32
+_Place_GroupRect(Place_Drag* drag, U64 i) {
+   Rng2F32 start = drag->group_start[i];
+   F32     w = start.max.x - start.min.x;
+   F32     h = start.max.y - start.min.y;
+   F32     x = Clamp(0.0f, start.min.x + (drag->now.min.x - drag->start.min.x), Max(1.0f - w, 0.0f));
+   F32     y = Clamp(0.0f, start.min.y + (drag->now.min.y - drag->start.min.y), Max(1.0f - h, 0.0f));
+   return R2F32P(x, y, x + w, y + h);
 }
 
 
@@ -675,6 +714,13 @@ Place_PutDrag(const App_State* app_state, U64 slide_idx) {
       place->is_set = 1;
       place->rect = drag->now;
       drag->is_put = 1;
+      // Only a move takes the others along: a resize is the one piece's.
+      for (U64 i = 0; i < drag->group_count && drag->corner == 0; i += 1) {
+         Deck_Place* other = _Place_PlaceOf(&deck->slides[slide_idx], drag->group_kinds[i], drag->group_idxs[i]);
+         drag->group_before[i] = *other;
+         other->is_set = 1;
+         other->rect = _Place_GroupRect(drag, i);
+      }
    }
 }
 
@@ -683,6 +729,10 @@ Place_TakeDrag(const App_State* app_state, U64 slide_idx) {
    Place_Drag* drag = &g_place_view.drag;
    Deck_Deck*  deck = app_state->deck;
    if (drag->is_put && drag->slide_idx == slide_idx && slide_idx < deck->slide_count) {
+      // The others first: in the order they were put, backwards.
+      for (U64 i = (drag->corner == 0) ? drag->group_count : 0; i > 0; i -= 1) {
+         *_Place_PlaceOf(&deck->slides[slide_idx], drag->group_kinds[i - 1], drag->group_idxs[i - 1]) = drag->group_before[i - 1];
+      }
       *_Place_PlaceOf(&deck->slides[slide_idx], drag->kind, drag->idx) = drag->before;
       drag->is_put = 0;
    }
@@ -705,15 +755,22 @@ Place_WriteLine(App_State* app_state, StateOp_List* ops, Place_WriteLineOpParams
    if (editor != 0 && editor->edit_count == params->edit_count && app_state->parsed_edit_count == editor->edit_count &&
        params->slide_idx < deck->slide_count) {
       Deck_Slide* slide = &deck->slides[params->slide_idx];
-      B32 was_picked = Edit_PieceIsPicked(app_state, params->kind, params->idx);
+      B32         was_picked = Edit_PickedIsGood(app_state);
+      U64         undo_before = editor->undo_count;
       _Place_WriteLine(editor, slide, params->kind, params->idx, _Place_PlaceOf(slide, params->kind, params->idx), params->rect);
-      editor->last_input_us = NowTimeUS();
-      // Picked whole before it was moved, it still is (edit\edit.c).
-      if (was_picked) {
-         g_edit_view.picked_edit_count = editor->edit_count;
-         g_edit_view.picked_cursor = editor->cursor;
-         g_edit_view.picked_mark = editor->mark;
+      // The others picked that went with it: each its line, with the deck
+      // made again between, as one step to undo.
+      for (U64 i = 0; i < drag->group_count && params->corner == 0; i += 1) {
+         FR_SyncDeck(app_state);
+         slide = &deck->slides[params->slide_idx];
+         _Place_WriteLine(editor, slide, drag->group_kinds[i], drag->group_idxs[i],
+                          _Place_PlaceOf(slide, drag->group_kinds[i], drag->group_idxs[i]), _Place_GroupRect(drag, i));
       }
+      Editor_JoinUndoSince(editor, undo_before);
+      drag->group_count = 0;
+      editor->last_input_us = NowTimeUS();
+      // Picked whole before they were moved, they still are (edit\edit.c).
+      Edit_KeepPicked(app_state, was_picked);
    }
 }
 STATE_OP(Place_WriteLine)
@@ -789,6 +846,7 @@ Place_BeforeLayout(const App_State* app_state, F32 ui) {
          write->idx = drag->idx;
          write->edit_count = drag->edit_count;
          write->rect = drag->now;
+         write->corner = drag->corner;
          drag->state = Place_DragState_Dropped;
       } else {
          drag->state = Place_DragState_None;
@@ -957,7 +1015,22 @@ _Place_Signal(const App_State* app_state, UI_Box* box, B32 has_piece, Deck_Place
       hover->hit_idx = hit_idx;
    }
 
-   if (signal.f & UI_SignalFlag_LeftPressed) {
+   B32 ctrl = !!(signal.event_flags & WM_Modifier_Ctrl);
+   B32 shift = !!(signal.event_flags & WM_Modifier_Shift);
+   if ((signal.f & UI_SignalFlag_LeftPressed) && corner == 0 && piece != 0 && (ctrl || (shift && Edit_PickedIsGood(app_state)))) {
+      // Ctrl: the piece added to those picked whole, or taken out of them.
+      // Shift, with pieces picked: every one of the kind of the first
+      // (edit\edit.c). Nothing moves, and the cursor stays.
+      Edit_PreviewClickOpParams* click = StateOp_Edit_PreviewClick(app_state->op_list);
+      click->pos = UI_DragStartMouse();
+      click->picks = 1;
+      click->adds = ctrl;
+      click->picks_all = !ctrl;
+      click->kind = kind;
+      click->idx = idx;
+      g_place_view.click_count = 0;
+      result = 1;
+   } else if (signal.f & UI_SignalFlag_LeftPressed) {
       Vec2F32 pos = UI_DragStartMouse();
       if (corner != 0 && piece != 0) {
          _Place_Begin(app_state, piece, corner, pos, Place_DragState_Dragging);
@@ -995,7 +1068,26 @@ _Place_Signal(const App_State* app_state, UI_Box* box, B32 has_piece, Deck_Place
    // The wheel over a block's words moves them (caret\caret.c). Over
    // anything else of the slide it does nothing - not the block under a
    // picture.
-   if (signal.scroll.y != 0 && has_piece && kind == Deck_PlaceKind_Text) {
+   //
+   // With Ctrl down, over the title or a block, it makes their words larger
+   // - the wheel turned up - or smaller: a step a notch (look\look.c). Of all
+   // those picked whole, if it is one of them.
+   if (signal.scroll.y != 0 && has_piece && kind != Deck_PlaceKind_Picture && Core_WM_KeyIsDown(WM_Key_Ctrl)) {
+      S32 notches = (S32)((F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH + ((signal.scroll.y > 0) ? 0.5f : -0.5f));
+      if (notches == 0) {
+         notches = (signal.scroll.y > 0) ? 1 : -1;
+      }
+      notches = Clamp(-4, notches, 4);
+      B32 is_picked = Edit_PieceIsPicked(app_state, kind, idx);
+      for (S32 n = 0; n < ((notches < 0) ? -notches : notches); n += 1) {
+         Look_StepSizeOpParams* step = StateOp_Look_StepSize(app_state->op_list);
+         step->direction = (notches < 0) ? 1 : -1;
+         step->has_piece = 1;
+         step->kind = kind;
+         step->idx = idx;
+         step->with_picked = is_picked;
+      }
+   } else if (signal.scroll.y != 0 && has_piece && kind == Deck_PlaceKind_Text) {
       Caret_ScrollBlock(app_state, idx, (F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH);
       result = 1;
    }

@@ -151,33 +151,83 @@ _Look_SizeNow(const App_State* app_state, U64 slide_idx, Deck_PlaceKind kind, U6
 // the text again when the ops have run (_FR_UpdateAppState): made here first
 // too, since an op before this one may have changed the text.
 
-void
-Look_StepSize(App_State* app_state, StateOp_List* ops, Look_StepSizeOpParams* params) {
-   if (app_state->editor == 0) {
-      return;
-   }
-   FR_SyncDeck(app_state);
-   S32            direction = params->direction;
-   U64            slide_idx = 0;
-   Deck_PlaceKind kind = Deck_PlaceKind_Title;
-   U64            idx = 0;
-   if (!Look_Target(app_state, &slide_idx, &kind, &idx)) {
-      StateOp_App_Notice(ops)->notice = Str8Lit("Put the cursor in the words to size: a title, or a line of the body");
-      return;
-   }
+// One step of the size of a slide's piece's words, written. 1 if it could
+// not go further that way.
+PRIVATE B32
+_Look_StepPiece(App_State* app_state, U64 slide_idx, Deck_PlaceKind kind, U64 idx, S32 direction) {
+   B32         result = 0;
    Deck_Slide* slide = &app_state->deck->slides[slide_idx];
    if (direction == 0) {
       _Look_WriteSize(app_state->editor, slide, kind, idx, 0, 0);
    } else {
       F32 now = _Look_SizeNow(app_state, slide_idx, kind, idx);
       F32 size = _Look_SteppedSize(now, direction);
-      if (size == now) {
-         StateOp_App_Notice(ops)->notice = (direction > 0) ? Str8Lit("That is as large as words get")
-                                                           : Str8Lit("That is as small as words get");
-      }
+      result = (size == now);
       _Look_WriteSize(app_state->editor, slide, kind, idx, 1, size);
    }
-   app_state->editor->last_input_us = NowTimeUS();
+   return result;
+}
+
+void
+Look_StepSize(App_State* app_state, StateOp_List* ops, Look_StepSizeOpParams* params) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   S32 direction = params->direction;
+   B32 at_end = 0;
+
+   if (params->has_piece) {
+      //- bgz: a piece of the preview's slide, or all of those picked whole
+      // that have words: one step to undo
+      U64 slide_idx = app_state->slide_idx;
+      if (slide_idx >= app_state->deck->slide_count) {
+         return;
+      }
+      B32            was_picked = Edit_PickedIsGood(app_state);
+      Deck_PlaceKind kinds[VIEW_MAX_BOXES];
+      U64            idxs[VIEW_MAX_BOXES];
+      U64            count = 0;
+      if (params->with_picked && was_picked) {
+         for (U64 i = 0; i < g_edit_view.picked_count; i += 1) {
+            if (g_edit_view.picked_kinds[i] != Deck_PlaceKind_Picture) {
+               kinds[count] = g_edit_view.picked_kinds[i];
+               idxs[count] = g_edit_view.picked_idxs[i];
+               count += 1;
+            }
+         }
+      } else {
+         kinds[0] = params->kind;
+         idxs[0] = params->idx;
+         count = 1;
+      }
+      U64 undo_before = editor->undo_count;
+      for (U64 i = 0; i < count; i += 1) {
+         if (i != 0) {
+            FR_SyncDeck(app_state);
+         }
+         at_end |= _Look_StepPiece(app_state, slide_idx, kinds[i], idxs[i], direction);
+      }
+      Editor_JoinUndoSince(editor, undo_before);
+      Edit_KeepPicked(app_state, was_picked);
+   } else {
+      //- bgz: the piece the cursor is in
+      U64            slide_idx = 0;
+      Deck_PlaceKind kind = Deck_PlaceKind_Title;
+      U64            idx = 0;
+      if (!Look_Target(app_state, &slide_idx, &kind, &idx)) {
+         StateOp_App_Notice(ops)->notice = Str8Lit("Put the cursor in the words to size: a title, or a line of the body");
+         return;
+      }
+      at_end = _Look_StepPiece(app_state, slide_idx, kind, idx, direction);
+   }
+
+   if (at_end) {
+      StateOp_App_Notice(ops)->notice = (direction > 0) ? Str8Lit("That is as large as words get")
+                                                        : Str8Lit("That is as small as words get");
+   }
+   editor->last_input_us = NowTimeUS();
 }
 STATE_OP(Look_StepSize)
 

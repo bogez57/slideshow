@@ -19,17 +19,18 @@ The screen's own, `g_edit_view` (`Edit_View`, edit.h), written with no op:
 - `pictures`, `pictures_arena`, `pictures_scanned_us`, `pictures_scroll`: the names in the list of pictures, and where it is scrolled to.
 - `is_drawing`, `draw_is_box`, `draw_from`, `draw_to`: a text box being drawn with the mouse on the slide's open space.
 - `has_new_box`, `new_box_edit_count`, `new_box_range`: a text box just drawn on the slide's open space, while nothing has been done to it. Left so, it is taken out again.
-- `has_picked`, `picked_kind`, `picked_idx`, `picked_slide_idx`, `picked_edit_count`, `picked_cursor`, `picked_mark`: a piece of the slide picked whole - a picture clicked, or the title or a block clicked away from its words - for as long as the text, the cursor and the slide are as the click left them. Delete takes it out.
+- `picked_count`, `picked_kinds`, `picked_idxs`, `picked_slide_idx`, `picked_edit_count`, `picked_cursor`, `picked_mark`: the pieces of the slide picked whole - a picture clicked, or the title or a block clicked away from its words; Ctrl+click adds one or takes it out, Shift+click picks all of the kind of the first - for as long as the text, the cursor and the slide are as the click left them. Delete takes them out, a drag of one moves them all, Ctrl and the wheel sizes their words.
 
 ## Functions and ops
 
 - `Edit_Input`: the screen's keys, then the editor's. Pushes ops.
 - `Edit_Build`: the whole screen, in FrameWork's UI build. Lays the preview's slide out into `g_edit_view`, and pushes ops for clicks.
 - `Edit_PreviewHitAt`: which piece of the preview a point is on.
-- `Edit_PieceIsPicked`: whether a piece of the preview's slide is picked whole, and Delete would take it out. caret leaves out the caret in one that is.
+- `Edit_PieceIsPicked`, `Edit_PickedIsGood`: whether a piece of the preview's slide is picked whole, or any is. caret leaves out the caret in one that is.
+- `Edit_KeepPicked`: after an op moved or sized the pieces picked, they stay picked. For ops only (place, look).
 - `Edit_PutLineFor`, `Edit_TakeOutLine`: write or take out a line about one piece of a slide (@place, @size, @color). They change the text: called from ops only.
 - Ops, edit.c's own: `Edit_KeyInput` (the editor's keys and typing, from what is left of the frame's events), `Edit_TextPress`, `Edit_TextDrag`, `Edit_TextWheel` (the mouse in the text), `Edit_ToggleFormat`, `Edit_ClosePictures`, `Edit_Deselect`, `Edit_Wrap` (bold, code), `Edit_Save`, `Edit_Present`, `Edit_MoveSlide`, `Edit_AddSlide`, `Edit_GoToSlide`, `Edit_DropPicture`, `Edit_PutPicture`, `Edit_FormatRow`, `Edit_AddTextBox` (a box drawn on the slide where nothing is: a block of its own there, as large as drawn, `@box` and `@place text`, with "Text" selected), `Edit_DeletePiece` (Delete with a piece picked: all of its lines out, as one step to undo; a title leaves `---` in its place).
-- Op other layers push too: `Edit_PreviewClick` (a press on the preview's slide: the cursor to the letter, or the picture's name selected; with `picks`, the piece picked whole as well).
+- Op other layers push too: `Edit_PreviewClick` (a press on the preview's slide: the cursor to the letter, or the picture's name selected; with `picks`, the piece picked whole as well; with `adds` (Ctrl) or `picks_all` (Shift), the pieces picked changed and the cursor left where it is).
 
 ## Used by
 

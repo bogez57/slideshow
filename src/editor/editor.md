@@ -9,7 +9,7 @@ A plain text editor for one file: the text, the cursor and selection, undo, and 
 ## Functions
 
 - The file: `Editor_Open`, `Editor_Close`, `Editor_Save`, `Editor_Reload`, `Editor_HasUnsavedChanges`, `Editor_FileHasChanged`.
-- The text: `Editor_Text`, `Editor_ReplaceRange`, `Editor_Insert`, `Editor_InsertLine`, `Editor_WrapSelection`, `Editor_SetCursor`.
+- The text: `Editor_Text`, `Editor_ReplaceRange`, `Editor_Insert`, `Editor_InsertLine`, `Editor_WrapSelection`, `Editor_SetCursor`, `Editor_JoinUndoSince` (several changes undone as one: a move of several pieces, a size for several).
 - Its box: `Editor_Input` (keys), `Editor_Press`, `Editor_Drag`, `Editor_Wheel`, `Editor_Draw`.
 
 ## Used by

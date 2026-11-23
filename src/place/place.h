@@ -57,6 +57,15 @@ struct Place_Drag {
    // words. A line moved out of its block's room by the drag has no hit,
    // and its box is built without one (Place_BuildHits).
    S64             select_hit;
+   // A drag of one of several pieces picked whole (edit\edit.c): the others,
+   // which go with it, by the same amount. Each with where it was then, in
+   // parts of the page, and its place as the text has it, kept while the
+   // slide is drawn with the mouse's (Place_PutDrag).
+   U64             group_count;
+   Deck_PlaceKind  group_kinds[VIEW_MAX_BOXES];
+   U64             group_idxs[VIEW_MAX_BOXES];
+   Rng2F32         group_start[VIEW_MAX_BOXES];
+   Deck_Place      group_before[VIEW_MAX_BOXES];
 };
 
 // The mouse's own on the slide, which is not app state, written with no
@@ -142,6 +151,7 @@ struct Place_WriteLineOpParams {
    U64            idx;
    U64            edit_count;
    Rng2F32        rect;
+   U32            corner; // the drag's: 0, a move, takes the others picked along (Place_Drag's group)
 };
 Place_WriteLineOpParams* StateOp_Place_WriteLine(StateOp_List* ops);
 

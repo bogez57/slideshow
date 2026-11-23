@@ -69,6 +69,14 @@
 //    take a piece out click a picture, or the title or a block away from its
 //                     words - where it is taken hold of - and press Delete
 //                     or Backspace. Ctrl+Z brings it back
+//    pick several     Ctrl+click adds a piece to those picked, or takes it
+//                     out. Shift+click, with one picked, picks every piece
+//                     of its kind - all the pictures, or all the blocks.
+//                     Delete takes them all out, and a drag of one moves
+//                     them all
+//    size by wheel    Ctrl and the wheel over the title or a block: its
+//                     words larger or smaller - those of all picked, over
+//                     one of them (look\look.c)
 //    add a picture    drop an image or a video on the window: one more on the
 //                     slide. With a picture selected - click it - that one
 //                     is changed for it
@@ -482,7 +490,7 @@ Edit_TakeOutLine(Editor_Editor* editor, Rng1U64 line) {
 // out again (_Edit_TakeOutNewBox). Anything done to it keeps it: a key, a
 // drag.
 //
-// A piece picked whole (g_edit_view.has_picked) - a picture clicked, or the
+// A piece picked whole (g_edit_view.picked_count) - a picture clicked, or the
 // title or a block clicked in its box away from the words - is taken out by
 // Delete or Backspace, all of its lines in one step to undo: a picture's
 // line and its @place line; a block's lines, its @box line and its @place,
@@ -624,10 +632,10 @@ _Edit_PieceName(Deck_PlaceKind kind) {
    return result;
 }
 
-// Takes the piece of kind and idx out of slide_idx: see above. The deck has
-// to be of the text as it is. 1 if anything was.
+// Takes count pieces out of slide_idx, by kind and idx: see above. All in
+// one change. The deck has to be of the text as it is. 1 if anything was.
 PRIVATE B32
-_Edit_DeletePiece(App_State* app_state, U64 slide_idx, Deck_PlaceKind kind, U64 idx) {
+_Edit_DeletePieces(App_State* app_state, U64 slide_idx, Deck_PlaceKind* kinds, U64* idxs, U64 count) {
    Editor_Editor* editor = app_state->editor;
    Deck_Deck*     deck = app_state->deck;
    if (slide_idx >= deck->slide_count) {
@@ -639,44 +647,48 @@ _Edit_DeletePiece(App_State* app_state, U64 slide_idx, Deck_PlaceKind kind, U64 
    _Edit_PieceLines* lines = PushArray(scratch.arena, _Edit_PieceLines, 1);
    String8           none = Str8Lit("");
 
-   if (kind == Deck_PlaceKind_Picture && idx < slide->picture_count) {
-      Deck_Picture* picture = &slide->pictures[idx];
-      _Edit_PieceLinesAdd(lines, text, picture->range.min, none);
-      if (picture->place.has_line) {
-         _Edit_PieceLinesAdd(lines, text, picture->place.line.min, none);
-      }
-   } else if (kind == Deck_PlaceKind_Text && idx < slide->box_count) {
-      Deck_Box* block = &slide->boxes[idx];
-      Deck_Item* item = block->first_item;
-      for (U64 i = 0; i < block->item_count && item != 0; i += 1, item = item->next) {
-         _Edit_PieceLinesAdd(lines, text, item->text_range.min, none);
-      }
-      // Its @box line, which starts it: the slide's first block has none.
-      if (block->text_pos != slide->text_pos) {
-         _Edit_PieceLinesAdd(lines, text, block->text_pos, none);
-      }
-      if (block->place.has_line) {
-         _Edit_PieceLinesAdd(lines, text, block->place.line.min, none);
-      }
-      if (block->look.has_size) {
-         _Edit_PieceLinesAdd(lines, text, block->look.size_line.min, none);
-      }
-      if (block->look.has_color) {
-         _Edit_PieceLinesAdd(lines, text, block->look.color_line.min, none);
-      }
-   } else if (kind == Deck_PlaceKind_Title && slide->title.size != 0) {
-      // The title's line starts the slide: a --- in its place goes on doing
-      // that, with no title.
-      _Edit_PieceLinesAdd(lines, text, slide->title_range.min, Str8Lit("---\n"));
-      Deck_Place* place = &slide->places[Deck_PlaceKind_Title];
-      if (place->has_line) {
-         _Edit_PieceLinesAdd(lines, text, place->line.min, none);
-      }
-      if (slide->title_look.has_size) {
-         _Edit_PieceLinesAdd(lines, text, slide->title_look.size_line.min, none);
-      }
-      if (slide->title_look.has_color) {
-         _Edit_PieceLinesAdd(lines, text, slide->title_look.color_line.min, none);
+   for (U64 piece = 0; piece < count; piece += 1) {
+      Deck_PlaceKind kind = kinds[piece];
+      U64            idx = idxs[piece];
+      if (kind == Deck_PlaceKind_Picture && idx < slide->picture_count) {
+         Deck_Picture* picture = &slide->pictures[idx];
+         _Edit_PieceLinesAdd(lines, text, picture->range.min, none);
+         if (picture->place.has_line) {
+            _Edit_PieceLinesAdd(lines, text, picture->place.line.min, none);
+         }
+      } else if (kind == Deck_PlaceKind_Text && idx < slide->box_count) {
+         Deck_Box* block = &slide->boxes[idx];
+         Deck_Item* item = block->first_item;
+         for (U64 i = 0; i < block->item_count && item != 0; i += 1, item = item->next) {
+            _Edit_PieceLinesAdd(lines, text, item->text_range.min, none);
+         }
+         // Its @box line, which starts it: the slide's first block has none.
+         if (block->text_pos != slide->text_pos) {
+            _Edit_PieceLinesAdd(lines, text, block->text_pos, none);
+         }
+         if (block->place.has_line) {
+            _Edit_PieceLinesAdd(lines, text, block->place.line.min, none);
+         }
+         if (block->look.has_size) {
+            _Edit_PieceLinesAdd(lines, text, block->look.size_line.min, none);
+         }
+         if (block->look.has_color) {
+            _Edit_PieceLinesAdd(lines, text, block->look.color_line.min, none);
+         }
+      } else if (kind == Deck_PlaceKind_Title && slide->title.size != 0) {
+         // The title's line starts the slide: a --- in its place goes on doing
+         // that, with no title.
+         _Edit_PieceLinesAdd(lines, text, slide->title_range.min, Str8Lit("---\n"));
+         Deck_Place* place = &slide->places[Deck_PlaceKind_Title];
+         if (place->has_line) {
+            _Edit_PieceLinesAdd(lines, text, place->line.min, none);
+         }
+         if (slide->title_look.has_size) {
+            _Edit_PieceLinesAdd(lines, text, slide->title_look.size_line.min, none);
+         }
+         if (slide->title_look.has_color) {
+            _Edit_PieceLinesAdd(lines, text, slide->title_look.color_line.min, none);
+         }
       }
    }
 
@@ -747,12 +759,46 @@ _Edit_DeletePiece(App_State* app_state, U64 slide_idx, Deck_PlaceKind kind, U64 
 }
 
 B32
-Edit_PieceIsPicked(const App_State* app_state, Deck_PlaceKind kind, U64 idx) {
+Edit_PickedIsGood(const App_State* app_state) {
    Editor_Editor* editor = app_state->editor;
-   return (g_edit_view.has_picked && editor != 0 && editor->edit_count == g_edit_view.picked_edit_count &&
+   return (g_edit_view.picked_count != 0 && editor != 0 && editor->edit_count == g_edit_view.picked_edit_count &&
            editor->cursor == g_edit_view.picked_cursor && editor->mark == g_edit_view.picked_mark &&
-           app_state->slide_idx == g_edit_view.picked_slide_idx && kind == g_edit_view.picked_kind &&
-           idx == g_edit_view.picked_idx && !g_caret_view.focus_hidden);
+           app_state->slide_idx == g_edit_view.picked_slide_idx && !g_caret_view.focus_hidden);
+}
+
+// Where the piece of kind and idx is in those picked, or -1.
+PRIVATE S64
+_Edit_PickedIndexOf(Deck_PlaceKind kind, U64 idx) {
+   S64 result = -1;
+   for (U64 i = 0; i < g_edit_view.picked_count && result < 0; i += 1) {
+      if (g_edit_view.picked_kinds[i] == kind && g_edit_view.picked_idxs[i] == idx) {
+         result = (S64)i;
+      }
+   }
+   return result;
+}
+
+B32
+Edit_PieceIsPicked(const App_State* app_state, Deck_PlaceKind kind, U64 idx) {
+   return (Edit_PickedIsGood(app_state) && _Edit_PickedIndexOf(kind, idx) >= 0);
+}
+
+// What is picked is good for the text, the cursor and the slide as they are
+// now.
+PRIVATE void
+_Edit_PickedSnapshot(App_State* app_state) {
+   Editor_Editor* editor = app_state->editor;
+   g_edit_view.picked_slide_idx = app_state->slide_idx;
+   g_edit_view.picked_edit_count = editor->edit_count;
+   g_edit_view.picked_cursor = editor->cursor;
+   g_edit_view.picked_mark = editor->mark;
+}
+
+void
+Edit_KeepPicked(App_State* app_state, B32 was_good) {
+   if (was_good && app_state->editor != 0) {
+      _Edit_PickedSnapshot(app_state);
+   }
 }
 
 // Gives the deck the theme after the one it has: its @theme line is
@@ -1156,7 +1202,7 @@ Edit_Deselect(App_State* app_state, StateOp_List* ops) {
          editor->cursor = g_edit_view.new_box_range.min;
          _Edit_TakeOutNewBox(app_state);
       }
-      g_edit_view.has_picked = 0;
+      g_edit_view.picked_count = 0;
       editor->mark = editor->cursor;
       g_caret_view.focus_hidden = 1;
       g_caret_view.focus_hidden_cursor = editor->cursor;
@@ -1363,7 +1409,63 @@ Edit_PreviewClick(App_State* app_state, StateOp_List* ops, Edit_PreviewClickOpPa
    if (editor == 0 || editor->edit_count != g_edit_view.hits_edit_count) {
       return;
    }
-   g_edit_view.has_picked = 0;
+   //- bgz: Ctrl: the piece added to those picked, or taken out of them. Shift
+   // with pieces picked: every piece of the kind of the first. The cursor
+   // stays where it is.
+   B32 was_good = Edit_PickedIsGood(app_state);
+   if (params->picks && (params->adds || params->picks_all)) {
+      if (!was_good) {
+         // Typing in a piece, and Ctrl+click on another: both are picked,
+         // as in other editors.
+         g_edit_view.picked_count = 0;
+         U64            target_slide = 0;
+         Deck_PlaceKind target_kind = Deck_PlaceKind_Title;
+         U64            target_idx = 0;
+         if (params->adds && !g_caret_view.focus_hidden && Look_Target(app_state, &target_slide, &target_kind, &target_idx) &&
+             target_slide == app_state->slide_idx && !(target_kind == params->kind && target_idx == params->idx)) {
+            g_edit_view.picked_kinds[0] = target_kind;
+            g_edit_view.picked_idxs[0] = target_idx;
+            g_edit_view.picked_count = 1;
+         }
+      }
+      if (params->adds) {
+         S64 at = _Edit_PickedIndexOf(params->kind, params->idx);
+         if (at >= 0) {
+            g_edit_view.picked_count -= 1;
+            for (U64 i = (U64)at; i < g_edit_view.picked_count; i += 1) {
+               g_edit_view.picked_kinds[i] = g_edit_view.picked_kinds[i + 1];
+               g_edit_view.picked_idxs[i] = g_edit_view.picked_idxs[i + 1];
+            }
+         } else if (g_edit_view.picked_count < VIEW_MAX_BOXES) {
+            g_edit_view.picked_kinds[g_edit_view.picked_count] = params->kind;
+            g_edit_view.picked_idxs[g_edit_view.picked_count] = params->idx;
+            g_edit_view.picked_count += 1;
+         }
+      } else {
+         Deck_PlaceKind kind = (g_edit_view.picked_count != 0) ? g_edit_view.picked_kinds[0] : params->kind;
+         Deck_Slide*    slide = &app_state->deck->slides[app_state->slide_idx];
+         g_edit_view.picked_count = 0;
+         for (U64 i = 0; i < g_edit_view.box_count && g_edit_view.picked_count < VIEW_MAX_BOXES; i += 1) {
+            View_Box* box = &g_edit_view.boxes[i];
+            if (box->kind == kind && !(kind == Deck_PlaceKind_Picture && box->idx >= slide->picture_count)) {
+               g_edit_view.picked_kinds[g_edit_view.picked_count] = box->kind;
+               g_edit_view.picked_idxs[g_edit_view.picked_count] = box->idx;
+               g_edit_view.picked_count += 1;
+            }
+         }
+      }
+      g_caret_view.focus_hidden = 0;
+      _Edit_PickedSnapshot(app_state);
+      return;
+   }
+
+   //- bgz: a plain press on one of several picked: they stay picked, to be
+   // dragged together (place\place.c)
+   if (params->picks && was_good && g_edit_view.picked_count > 1 && _Edit_PickedIndexOf(params->kind, params->idx) >= 0) {
+      return;
+   }
+
+   g_edit_view.picked_count = 0;
    if (!Caret_Click(app_state, params->pos, params->keeps_mark)) {
       S64 hit_idx = Edit_PreviewHitAt(params->pos);
       if (hit_idx >= 0 && g_edit_view.hits[hit_idx].text_range.max <= editor->size) {
@@ -1380,13 +1482,10 @@ Edit_PreviewClick(App_State* app_state, StateOp_List* ops, Edit_PreviewClickOpPa
    _Edit_TakeOutNewBox(app_state);
 
    if (params->picks && !params->keeps_mark) {
-      g_edit_view.has_picked = 1;
-      g_edit_view.picked_kind = params->kind;
-      g_edit_view.picked_idx = params->idx;
-      g_edit_view.picked_slide_idx = app_state->slide_idx;
-      g_edit_view.picked_edit_count = editor->edit_count;
-      g_edit_view.picked_cursor = editor->cursor;
-      g_edit_view.picked_mark = editor->mark;
+      g_edit_view.picked_kinds[0] = params->kind;
+      g_edit_view.picked_idxs[0] = params->idx;
+      g_edit_view.picked_count = 1;
+      _Edit_PickedSnapshot(app_state);
    }
 }
 STATE_OP(Edit_PreviewClick)
@@ -1404,7 +1503,7 @@ Edit_AddTextBox(App_State* app_state, StateOp_List* ops, Edit_AddTextBoxOpParams
    if (editor == 0 || editor->edit_count != g_edit_view.hits_edit_count) {
       return;
    }
-   g_edit_view.has_picked = 0;
+   g_edit_view.picked_count = 0;
    U64 slide_idx = app_state->slide_idx;
    // One made before and left as it was: this one is in its place.
    if (g_edit_view.has_new_box) {
@@ -1416,19 +1515,21 @@ Edit_AddTextBox(App_State* app_state, StateOp_List* ops, Edit_AddTextBoxOpParams
 }
 STATE_OP(Edit_AddTextBox)
 
-// Delete or Backspace with a piece picked whole: the piece taken out
-// (_Edit_DeletePiece).
+// Delete or Backspace with pieces picked whole: all of them taken out
+// (_Edit_DeletePieces).
 void
 Edit_DeletePiece(App_State* app_state, StateOp_List* ops) {
    Editor_Editor* editor = app_state->editor;
-   if (editor == 0 || !Edit_PieceIsPicked(app_state, g_edit_view.picked_kind, g_edit_view.picked_idx)) {
+   if (editor == 0 || !Edit_PickedIsGood(app_state)) {
       return;
    }
-   g_edit_view.has_picked = 0;
+   U64 count = g_edit_view.picked_count;
+   g_edit_view.picked_count = 0;
    FR_SyncDeck(app_state);
-   Deck_PlaceKind kind = g_edit_view.picked_kind;
-   if (_Edit_DeletePiece(app_state, g_edit_view.picked_slide_idx, kind, g_edit_view.picked_idx)) {
-      StateOp_App_Notice(ops)->notice = PushStr8F(ops->arena, "%S taken out. Ctrl+Z brings it back", _Edit_PieceName(kind));
+   if (_Edit_DeletePieces(app_state, g_edit_view.picked_slide_idx, g_edit_view.picked_kinds, g_edit_view.picked_idxs, count)) {
+      String8 what = (count == 1) ? _Edit_PieceName(g_edit_view.picked_kinds[0])
+                                  : PushStr8F(ops->arena, "%llu pieces", (unsigned long long)count);
+      StateOp_App_Notice(ops)->notice = PushStr8F(ops->arena, "%S taken out. Ctrl+Z brings %s back", what, (count == 1) ? "it" : "them");
    }
 }
 STATE_OP_NO_PARAMS(Edit_DeletePiece)
@@ -1537,8 +1638,7 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
    //- bgz: a piece of the slide picked whole - a picture clicked, or a box
    // clicked away from its words: Delete or Backspace takes it out, instead
    // of a letter
-   if (Edit_PieceIsPicked(app_state, g_edit_view.picked_kind, g_edit_view.picked_idx) &&
-       g_place_view.drag.state != Place_DragState_Dragging) {
+   if (Edit_PickedIsGood(app_state) && g_place_view.drag.state != Place_DragState_Dragging) {
       B32 is_delete = Core_WM_KeyPress(events, window, 0, WM_Key_Delete);
       B32 is_backspace = Core_WM_KeyPress(events, window, 0, WM_Key_Backspace);
       if (is_delete || is_backspace) {
@@ -2046,12 +2146,12 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
             Vec2F32 corners[4] = {box->rect.min, V2F32(box->rect.max.x, box->rect.min.y), V2F32(box->rect.min.x, box->rect.max.y),
                                   box->rect.max};
             UI_ColorTag(Str8Lit("focus")) {
-               FR_BuildEdge(box->rect, edge, UI_ColorFromSlot(UI_ColorSlot_Border), "###edit picked edge");
+               FR_BuildEdge(box->rect, edge, UI_ColorFromSlot(UI_ColorSlot_Border), "###edit picked edge %llu", (unsigned long long)i);
                for (U64 k = 0; k < ArrayCount(corners); k += 1) {
                   UI_SetNextBackgroundColor(UI_ColorFromSlot(UI_ColorSlot_Border));
                   FR_BuildRectBox(UI_BoxFlag_DrawBackground,
                                   R2F32P(corners[k].x - half, corners[k].y - half, corners[k].x + half, corners[k].y + half),
-                                  "###edit picked corner %llu", (unsigned long long)k);
+                                  "###edit picked corner %llu %llu", (unsigned long long)i, (unsigned long long)k);
                }
             }
          }
@@ -2068,8 +2168,7 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
          caption = Str8Lit("Drag across the words to select them      Double-click a word, triple-click a line");
       } else if (has_picked && !can_move) {
          caption = Str8Lit("Delete takes it out      Click its words to type in them      Esc lets go of it");
-      } else if (can_move && has_picked && hover.has_piece && hover.kind == g_edit_view.picked_kind &&
-                 hover.idx == g_edit_view.picked_idx) {
+      } else if (can_move && has_picked && hover.has_piece && Edit_PieceIsPicked(app_state, hover.kind, hover.idx)) {
          caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out");
       } else if (open_space_hot) {
          caption = Str8Lit("Drag to draw a text box");

@@ -472,6 +472,16 @@ Editor_ReplaceRange(Editor_Editor* editor, U64 start, U64 end, String8 string) {
 }
 
 void
+Editor_JoinUndoSince(Editor_Editor* editor, U64 undo_count_before) {
+   // The first change's step holds the text from before all of them. With
+   // the history full, older steps were let go of along the way and the
+   // count says nothing: each stays its own.
+   if (undo_count_before < ED_MAX_UNDO && editor->undo_count > undo_count_before + 1) {
+      editor->undo_count = undo_count_before + 1;
+   }
+}
+
+void
 Editor_WrapSelection(Editor_Editor* editor, String8 mark, String8 placeholder) {
    U64 start = Min(editor->cursor, editor->mark);
    U64 end = Max(editor->cursor, editor->mark);

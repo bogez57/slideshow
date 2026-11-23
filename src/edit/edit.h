@@ -66,15 +66,19 @@ struct Edit_View {
    U64     new_box_edit_count;
    Rng1U64 new_box_range;
 
-   // A piece picked whole: a picture clicked, or the title or a block of
+   // The pieces picked whole: a picture clicked, or the title or a block of
    // words clicked in its box away from the words - where it is taken hold
-   // of to be moved. Delete or Backspace then takes all of it out
-   // (Edit_DeletePiece). Picked for as long as the text, the cursor and the
-   // slide are as the click left them: typing, or the cursor going
-   // anywhere, and it is not (Edit_PieceIsPicked).
-   B32            has_picked;
-   Deck_PlaceKind picked_kind;
-   U64            picked_idx;
+   // of to be moved. Ctrl+click adds a piece to them, or takes it out, and
+   // Shift+click picks every piece of the kind of the first. Delete or
+   // Backspace takes all of them out (Edit_DeletePiece), a drag of one moves
+   // them all (place\place.c), and Ctrl and the wheel over one sizes the
+   // words of them all (look\look.c). Picked for as long as the text, the
+   // cursor and the slide are as the click left them: typing, or the cursor
+   // going anywhere, and they are not (Edit_PieceIsPicked) - but what is
+   // done to them keeps them picked (Edit_KeepPicked).
+   U64            picked_count; // 0: none
+   Deck_PlaceKind picked_kinds[VIEW_MAX_BOXES];
+   U64            picked_idxs[VIEW_MAX_BOXES];
    U64            picked_slide_idx;
    U64            picked_edit_count;
    U64            picked_cursor;
@@ -96,9 +100,15 @@ void Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_di
 S64 Edit_PreviewHitAt(Vec2F32 pos);
 
 // Whether the piece of the preview's slide of kind and idx is picked whole
-// (g_edit_view.has_picked) and still is: Delete takes it out. The caret is
+// (g_edit_view.picked_idxs) and still is: Delete takes it out. The caret is
 // not drawn in a block or a title picked so.
 B32 Edit_PieceIsPicked(const App_State* app_state, Deck_PlaceKind kind, U64 idx);
+// Whether any piece is picked, and still is.
+B32 Edit_PickedIsGood(const App_State* app_state);
+// After an op that changed the text for the pieces picked - moved or sized
+// them - with was_good what Edit_PickedIsGood said before: they stay picked.
+// For ops only.
+void Edit_KeepPicked(App_State* app_state, B32 was_good);
 
 // Writes a line that is about one piece of a slide - an @place, @size or
 // @color line, for the idx-th picture or block of the body, or the title:
@@ -117,12 +127,17 @@ void Edit_TakeOutLine(Editor_Editor* editor, Rng1U64 line);
 // words there, or the picture's name (keeps_mark: selecting from where the
 // cursor was). picks: the press was on the piece of kind and idx away from
 // its words - a picture, or the box of the title or a block - so the piece
-// is picked whole as well (g_edit_view.has_picked).
+// is picked whole as well (g_edit_view.picked_count). adds: Ctrl was down -
+// the piece is added to those picked, or taken out of them, and the cursor
+// does not move. picks_all: Shift was down with pieces picked - every piece
+// of the kind of the first is picked.
 typedef struct Edit_PreviewClickOpParams Edit_PreviewClickOpParams;
 struct Edit_PreviewClickOpParams {
    Vec2F32        pos;
    B32            keeps_mark;
    B32            picks;
+   B32            adds;
+   B32            picks_all;
    Deck_PlaceKind kind;
    U64            idx;
 };

@@ -8,7 +8,7 @@ The edit screen: the size and the colour of a slide's words - the title's, or a 
 
 ## Functions
 
-- `Look_Input`: the keys. Pushes `Look_StepSize`.
+- `Look_Input`: the keys. Pushes `Look_StepSize`. Ctrl and the wheel over a piece of the preview push it too (place), for that piece - or for every piece picked whole, over one of them - as one step to undo.
 - Ops: `Look_StepSize`, `Look_SetColor`: larger, smaller or usual; a colour with a name or the theme's. Each writes or takes out a line of the text.
 - `Look_Describe`, `Look_ColorIsNow`, `Look_SizeIsUsual`: what the piece has now, for the Format panel.
 - `Look_Target`: the piece the cursor is in.
