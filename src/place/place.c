@@ -18,6 +18,8 @@
 //                     to the edges and middles of the slide's other boxes,
 //                     when it comes near one. A line shows what it is on,
 //                     and an outline the other box the line is from
+//    pick it          click it away from its words - a picture anywhere:
+//                     Delete then takes it out (edit\edit.c)
 //    put it back      right-click it: where the layout would have it
 //    give up a drag   Esc - or F5, which presents
 //
@@ -703,8 +705,15 @@ Place_WriteLine(App_State* app_state, StateOp_List* ops, Place_WriteLineOpParams
    if (editor != 0 && editor->edit_count == params->edit_count && app_state->parsed_edit_count == editor->edit_count &&
        params->slide_idx < deck->slide_count) {
       Deck_Slide* slide = &deck->slides[params->slide_idx];
+      B32 was_picked = Edit_PieceIsPicked(app_state, params->kind, params->idx);
       _Place_WriteLine(editor, slide, params->kind, params->idx, _Place_PlaceOf(slide, params->kind, params->idx), params->rect);
       editor->last_input_us = NowTimeUS();
+      // Picked whole before it was moved, it still is (edit\edit.c).
+      if (was_picked) {
+         g_edit_view.picked_edit_count = editor->edit_count;
+         g_edit_view.picked_cursor = editor->cursor;
+         g_edit_view.picked_mark = editor->mark;
+      }
    }
 }
 STATE_OP(Place_WriteLine)
@@ -961,6 +970,11 @@ _Place_Signal(const App_State* app_state, UI_Box* box, B32 has_piece, Deck_Place
             Edit_PreviewClickOpParams* click = StateOp_Edit_PreviewClick(app_state->op_list);
             click->pos = pos;
             click->keeps_mark = !!(signal.event_flags & WM_Modifier_Shift);
+            // Away from the words, the piece is picked whole: Delete takes
+            // it out (edit\edit.c).
+            click->picks = (piece != 0);
+            click->kind = kind;
+            click->idx = idx;
             if (piece != 0) {
                _Place_Begin(app_state, piece, 0, pos, Place_DragState_Pressed);
             }

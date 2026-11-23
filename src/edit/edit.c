@@ -62,6 +62,12 @@
 //    move a piece     drag the picture or the body in the preview, or a
 //                     corner of it to resize it. Right-click puts it back
 //                     (place\place.c)
+//    add a text box   click the slide where nothing is: a box there, its
+//                     words selected to be typed over. Left as it is, it
+//                     goes again when something else is clicked
+//    take a piece out click a picture, or the title or a block away from its
+//                     words - where it is taken hold of - and press Delete
+//                     or Backspace. Ctrl+Z brings it back
 //    add a picture    drop an image or a video on the window: one more on the
 //                     slide. With a picture selected - click it - that one
 //                     is changed for it
@@ -456,6 +462,287 @@ Edit_TakeOutLine(Editor_Editor* editor, Rng1U64 line) {
       }
       _Edit_ReplaceKeepingCursor(editor, start, end, Str8Lit(""));
    }
+}
+
+////////////////////////////////
+//~ bgz: text boxes made and pieces taken out, from the preview
+//
+// A click on the slide where nothing is - no words, no picture, no box -
+// makes a text box there, as presentation programs do: a block of its own,
+//
+//    @box
+//    @place text 0.300 0.400 0.400 0.150
+//    Text
+//
+// written at the end of the slide's lines, with "Text" selected to be typed
+// over. Left as it is - clicked away from, Esc, another slide - it is taken
+// out again (_Edit_TakeOutNewBox). Anything done to it keeps it: a key, a
+// drag.
+//
+// A piece picked whole (g_edit_view.has_picked) - a picture clicked, or the
+// title or a block clicked in its box away from the words - is taken out by
+// Delete or Backspace, all of its lines in one step to undo: a picture's
+// line and its @place line; a block's lines, its @box line and its @place,
+// @size and @color lines; the title's words, with its own lines, the slide
+// kept by a --- in the title's place.
+
+// The size of a text box a click makes, in parts of the page.
+#define _EDIT_NEW_BOX_W 0.4f
+#define _EDIT_NEW_BOX_H 0.15f
+
+// What a click makes the new box's words: selected, to be typed over.
+#define _EDIT_NEW_BOX_WORDS "Text"
+
+// Takes out the text box a click made, if nothing has been done to it
+// since - unless the cursor is in it: clicked again, it is being typed in.
+// 1 if it was taken out.
+PRIVATE B32
+_Edit_TakeOutNewBox(App_State* app_state) {
+   B32            result = 0;
+   Editor_Editor* editor = app_state->editor;
+   if (g_edit_view.has_new_box && editor != 0) {
+      Rng1U64 range = g_edit_view.new_box_range;
+      B32     is_untouched = (editor->edit_count == g_edit_view.new_box_edit_count && range.max <= editor->size);
+      B32     is_in_it = (editor->cursor > range.min && editor->cursor <= range.max);
+      if (!is_untouched) {
+         g_edit_view.has_new_box = 0;
+      } else if (!is_in_it) {
+         _Edit_ReplaceKeepingCursor(editor, range.min, range.max, Str8Lit(""));
+         editor->mark = editor->cursor;
+         g_edit_view.has_new_box = 0;
+         result = 1;
+      }
+   }
+   return result;
+}
+
+// A text box on slide_idx with its top left at at, in parts of the page: see
+// above. The deck has to be of the text as it is.
+PRIVATE void
+_Edit_AddTextBox(App_State* app_state, StateOp_List* ops, U64 slide_idx, Vec2F32 at) {
+   Editor_Editor* editor = app_state->editor;
+   Deck_Deck*     deck = app_state->deck;
+   if (slide_idx >= deck->slide_count) {
+      return;
+   }
+   Deck_Slide* slide = &deck->slides[slide_idx];
+   if (slide->box_count >= DECK_MAX_BOXES && slide->boxes[slide->box_count - 1].item_count != 0) {
+      StateOp_App_Notice(ops)->notice = Str8Lit("A slide can have 8 text boxes at most");
+      return;
+   }
+
+   // Under the slide's last line that has anything on it: the empty lines
+   // between it and the next slide stay where they are.
+   String8 text = Editor_Text(editor);
+   Rng1U64 range = _Edit_TextRangeFromSlide(editor, deck, slide_idx);
+   U64     end = range.max;
+   while (end > range.min && (text.str[end - 1] == '\n' || text.str[end - 1] == ' ' || text.str[end - 1] == '\t')) {
+      end -= 1;
+   }
+
+   // All of it on the page.
+   F32 x = Clamp(0.0f, at.x, 1.0f - _EDIT_NEW_BOX_W);
+   F32 y = Clamp(0.0f, at.y, 1.0f - _EDIT_NEW_BOX_H);
+
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 added = PushStr8F(scratch.arena, "\n\n@box\n@place text %.3f %.3f %.3f %.3f\n%s", x, y, _EDIT_NEW_BOX_W,
+                             _EDIT_NEW_BOX_H, _EDIT_NEW_BOX_WORDS);
+   Editor_ReplaceRange(editor, end, end, added);
+   U64 words_end = end + added.size;
+   editor->mark = words_end - (sizeof(_EDIT_NEW_BOX_WORDS) - 1);
+   editor->cursor = words_end;
+   editor->last_input_us = NowTimeUS();
+   g_caret_view.focus_hidden = 0;
+   ScratchEnd(scratch);
+
+   g_edit_view.has_new_box = 1;
+   g_edit_view.new_box_edit_count = editor->edit_count;
+   g_edit_view.new_box_range = R1U64(end, words_end);
+}
+
+// The line of the text pos is on, from its start to past its ending - or,
+// for the text's last line with none, from the ending before it.
+PRIVATE Rng1U64
+_Edit_WholeLineAt(String8 text, U64 pos) {
+   U64 start = Min(pos, text.size);
+   U64 end = start;
+   while (start > 0 && text.str[start - 1] != '\n') start -= 1;
+   while (end < text.size && text.str[end] != '\n') end += 1;
+   if (end < text.size) {
+      end += 1;
+   } else if (start > 0) {
+      start -= 1;
+   }
+   return R1U64(start, end);
+}
+
+// Lines of the text to take out of it, or to write over: what a piece taken
+// out is written in.
+#define _EDIT_MAX_PIECE_LINES 256
+typedef struct _Edit_PieceLines _Edit_PieceLines;
+struct _Edit_PieceLines {
+   Rng1U64 lines[_EDIT_MAX_PIECE_LINES]; // whole lines, as _Edit_WholeLineAt
+   String8 put[_EDIT_MAX_PIECE_LINES];   // what goes in the line's place: empty to take it out
+   U64     count;
+};
+
+PRIVATE void
+_Edit_PieceLinesAdd(_Edit_PieceLines* lines, String8 text, U64 pos, String8 put) {
+   if (lines->count < _EDIT_MAX_PIECE_LINES && pos <= text.size) {
+      Rng1U64 line = _Edit_WholeLineAt(text, pos);
+      for (U64 i = 0; i < lines->count; i += 1) {
+         if (lines->lines[i].min == line.min) {
+            return;
+         }
+      }
+      lines->lines[lines->count] = line;
+      lines->put[lines->count] = put;
+      lines->count += 1;
+   }
+}
+
+// What the piece of kind and idx on slide_idx is a name for, in the notice
+// that says it was taken out.
+PRIVATE String8
+_Edit_PieceName(Deck_PlaceKind kind) {
+   String8 result = Str8Lit("The text box");
+   if (kind == Deck_PlaceKind_Picture) {
+      result = Str8Lit("The picture");
+   } else if (kind == Deck_PlaceKind_Title) {
+      result = Str8Lit("The title");
+   }
+   return result;
+}
+
+// Takes the piece of kind and idx out of slide_idx: see above. The deck has
+// to be of the text as it is. 1 if anything was.
+PRIVATE B32
+_Edit_DeletePiece(App_State* app_state, U64 slide_idx, Deck_PlaceKind kind, U64 idx) {
+   Editor_Editor* editor = app_state->editor;
+   Deck_Deck*     deck = app_state->deck;
+   if (slide_idx >= deck->slide_count) {
+      return 0;
+   }
+   Deck_Slide* slide = &deck->slides[slide_idx];
+   String8     text = Editor_Text(editor);
+   Temp        scratch = ScratchBegin(0, 0);
+   _Edit_PieceLines* lines = PushArray(scratch.arena, _Edit_PieceLines, 1);
+   String8           none = Str8Lit("");
+
+   if (kind == Deck_PlaceKind_Picture && idx < slide->picture_count) {
+      Deck_Picture* picture = &slide->pictures[idx];
+      _Edit_PieceLinesAdd(lines, text, picture->range.min, none);
+      if (picture->place.has_line) {
+         _Edit_PieceLinesAdd(lines, text, picture->place.line.min, none);
+      }
+   } else if (kind == Deck_PlaceKind_Text && idx < slide->box_count) {
+      Deck_Box* block = &slide->boxes[idx];
+      Deck_Item* item = block->first_item;
+      for (U64 i = 0; i < block->item_count && item != 0; i += 1, item = item->next) {
+         _Edit_PieceLinesAdd(lines, text, item->text_range.min, none);
+      }
+      // Its @box line, which starts it: the slide's first block has none.
+      if (block->text_pos != slide->text_pos) {
+         _Edit_PieceLinesAdd(lines, text, block->text_pos, none);
+      }
+      if (block->place.has_line) {
+         _Edit_PieceLinesAdd(lines, text, block->place.line.min, none);
+      }
+      if (block->look.has_size) {
+         _Edit_PieceLinesAdd(lines, text, block->look.size_line.min, none);
+      }
+      if (block->look.has_color) {
+         _Edit_PieceLinesAdd(lines, text, block->look.color_line.min, none);
+      }
+   } else if (kind == Deck_PlaceKind_Title && slide->title.size != 0) {
+      // The title's line starts the slide: a --- in its place goes on doing
+      // that, with no title.
+      _Edit_PieceLinesAdd(lines, text, slide->title_range.min, Str8Lit("---\n"));
+      Deck_Place* place = &slide->places[Deck_PlaceKind_Title];
+      if (place->has_line) {
+         _Edit_PieceLinesAdd(lines, text, place->line.min, none);
+      }
+      if (slide->title_look.has_size) {
+         _Edit_PieceLinesAdd(lines, text, slide->title_look.size_line.min, none);
+      }
+      if (slide->title_look.has_color) {
+         _Edit_PieceLinesAdd(lines, text, slide->title_look.color_line.min, none);
+      }
+   }
+
+   B32 result = (lines->count != 0);
+   if (result) {
+      // In the order they are in the text.
+      for (U64 i = 1; i < lines->count; i += 1) {
+         for (U64 k = i; k > 0 && lines->lines[k - 1].min > lines->lines[k].min; k -= 1) {
+            Rng1U64 line = lines->lines[k - 1];
+            String8 put = lines->put[k - 1];
+            lines->lines[k - 1] = lines->lines[k];
+            lines->put[k - 1] = lines->put[k];
+            lines->lines[k] = line;
+            lines->put[k] = put;
+         }
+      }
+
+      // All of it as one change, from the first line to the last: one Ctrl+Z
+      // brings it all back.
+      U64 span_min = lines->lines[0].min;
+      U64 span_max = lines->lines[lines->count - 1].max;
+      String8List kept = {0};
+      U64         at = span_min;
+      for (U64 i = 0; i < lines->count; i += 1) {
+         Rng1U64 line = lines->lines[i];
+         if (line.min > at) {
+            Str8ListPush(scratch.arena, &kept, Str8Substr(text, R1U64(at, line.min)));
+         }
+         if (lines->put[i].size != 0) {
+            // The last line, with no ending, was taken from the one before.
+            B32 has_ending = (line.max > line.min && text.str[line.max - 1] == '\n');
+            String8 put = has_ending ? lines->put[i] : PushStr8F(scratch.arena, "\n%S", Str8Prefix(lines->put[i], lines->put[i].size - 1));
+            Str8ListPush(scratch.arena, &kept, put);
+         }
+         at = Max(at, line.max);
+      }
+      String8 replaced = Str8ListJoin(scratch.arena, &kept, 0);
+
+      // An empty line left on either side of where the lines were: one of
+      // them goes too, as the slide's lines were written apart.
+      B32 empty_above = (span_min >= 2 && text.str[span_min - 1] == '\n' && text.str[span_min - 2] == '\n');
+      B32 empty_below = (span_max >= text.size || text.str[span_max] == '\n');
+      if (replaced.size == 0 && empty_above && empty_below) {
+         span_min -= 1;
+      }
+
+      // The cursor at the end of a line that is still the slide's: the last
+      // kept between the lines taken out, or the one above them - the
+      // title's or --- line at least is never taken out. Not on the slide
+      // before, for lines above the slide's first that were about it.
+      U64 slide_pos = slide->text_pos;
+      Editor_ReplaceRange(editor, span_min, span_max, replaced);
+      U64 cursor = (span_min > 0) ? span_min - 1 : 0;
+      if (replaced.size != 0) {
+         cursor = span_min + replaced.size - (replaced.str[replaced.size - 1] == '\n' ? 1 : 0);
+      } else if (slide_pos >= span_min) {
+         cursor = span_min;
+      }
+      Editor_SetCursor(editor, Min(cursor, editor->size));
+      editor->mark = editor->cursor;
+      editor->last_input_us = NowTimeUS();
+      g_caret_view.focus_hidden = 1;
+      g_caret_view.focus_hidden_cursor = editor->cursor;
+   }
+
+   ScratchEnd(scratch);
+   return result;
+}
+
+B32
+Edit_PieceIsPicked(const App_State* app_state, Deck_PlaceKind kind, U64 idx) {
+   Editor_Editor* editor = app_state->editor;
+   return (g_edit_view.has_picked && editor != 0 && editor->edit_count == g_edit_view.picked_edit_count &&
+           editor->cursor == g_edit_view.picked_cursor && editor->mark == g_edit_view.picked_mark &&
+           app_state->slide_idx == g_edit_view.picked_slide_idx && kind == g_edit_view.picked_kind &&
+           idx == g_edit_view.picked_idx && !g_caret_view.focus_hidden);
 }
 
 // Gives the deck the theme after the one it has: its @theme line is
@@ -854,6 +1141,12 @@ Edit_Deselect(App_State* app_state, StateOp_List* ops) {
    UnusedVariable(ops);
    Editor_Editor* editor = app_state->editor;
    if (editor != 0) {
+      // A text box a click made and left as it was goes.
+      if (g_edit_view.has_new_box) {
+         editor->cursor = g_edit_view.new_box_range.min;
+         _Edit_TakeOutNewBox(app_state);
+      }
+      g_edit_view.has_picked = 0;
       editor->mark = editor->cursor;
       g_caret_view.focus_hidden = 1;
       g_caret_view.focus_hidden_cursor = editor->cursor;
@@ -960,6 +1253,12 @@ Edit_GoToSlide(App_State* app_state, StateOp_List* ops, Edit_GoToSlideOpParams* 
    UnusedVariable(ops);
    Editor_Editor* editor = app_state->editor;
    if (editor != 0) {
+      // Not with a text box a click made and left as it was, which would
+      // move the slides after it.
+      if (g_edit_view.has_new_box) {
+         editor->cursor = editor->mark = g_edit_view.new_box_range.min;
+         _Edit_TakeOutNewBox(app_state);
+      }
       FR_SyncDeck(app_state);
       if (params->slide_idx < app_state->deck->slide_count) {
          Editor_SetCursor(editor, Min(app_state->deck->slides[params->slide_idx].text_pos, editor->size));
@@ -1054,6 +1353,7 @@ Edit_PreviewClick(App_State* app_state, StateOp_List* ops, Edit_PreviewClickOpPa
    if (editor == 0 || editor->edit_count != g_edit_view.hits_edit_count) {
       return;
    }
+   g_edit_view.has_picked = 0;
    if (!Caret_Click(app_state, params->pos, params->keeps_mark)) {
       S64 hit_idx = Edit_PreviewHitAt(params->pos);
       if (hit_idx >= 0 && g_edit_view.hits[hit_idx].text_range.max <= editor->size) {
@@ -1064,8 +1364,64 @@ Edit_PreviewClick(App_State* app_state, StateOp_List* ops, Edit_PreviewClickOpPa
          editor->last_input_us = NowTimeUS();
       }
    }
+
+   // A text box a click made and left as it was goes, now that the cursor
+   // is somewhere else - which it stays in.
+   _Edit_TakeOutNewBox(app_state);
+
+   if (params->picks && !params->keeps_mark) {
+      g_edit_view.has_picked = 1;
+      g_edit_view.picked_kind = params->kind;
+      g_edit_view.picked_idx = params->idx;
+      g_edit_view.picked_slide_idx = app_state->slide_idx;
+      g_edit_view.picked_edit_count = editor->edit_count;
+      g_edit_view.picked_cursor = editor->cursor;
+      g_edit_view.picked_mark = editor->mark;
+   }
 }
 STATE_OP(Edit_PreviewClick)
+
+// A press on the preview's slide where nothing is: a text box there
+// (_Edit_AddTextBox), at pos, in parts of the page. From the slide as it
+// was last laid out: nothing if the text has changed since.
+typedef struct Edit_AddTextBoxOpParams Edit_AddTextBoxOpParams;
+struct Edit_AddTextBoxOpParams {
+   Vec2F32 pos;
+};
+void
+Edit_AddTextBox(App_State* app_state, StateOp_List* ops, Edit_AddTextBoxOpParams* params) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || editor->edit_count != g_edit_view.hits_edit_count) {
+      return;
+   }
+   g_edit_view.has_picked = 0;
+   U64 slide_idx = app_state->slide_idx;
+   // One made before and left as it was: this one is in its place.
+   if (g_edit_view.has_new_box) {
+      editor->cursor = editor->mark = g_edit_view.new_box_range.min;
+      _Edit_TakeOutNewBox(app_state);
+   }
+   FR_SyncDeck(app_state);
+   _Edit_AddTextBox(app_state, ops, slide_idx, params->pos);
+}
+STATE_OP(Edit_AddTextBox)
+
+// Delete or Backspace with a piece picked whole: the piece taken out
+// (_Edit_DeletePiece).
+void
+Edit_DeletePiece(App_State* app_state, StateOp_List* ops) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || !Edit_PieceIsPicked(app_state, g_edit_view.picked_kind, g_edit_view.picked_idx)) {
+      return;
+   }
+   g_edit_view.has_picked = 0;
+   FR_SyncDeck(app_state);
+   Deck_PlaceKind kind = g_edit_view.picked_kind;
+   if (_Edit_DeletePiece(app_state, g_edit_view.picked_slide_idx, kind, g_edit_view.picked_idx)) {
+      StateOp_App_Notice(ops)->notice = PushStr8F(ops->arena, "%S taken out. Ctrl+Z brings it back", _Edit_PieceName(kind));
+   }
+}
+STATE_OP_NO_PARAMS(Edit_DeletePiece)
 
 ////////////////////////////////
 //~ bgz: input
@@ -1165,6 +1521,18 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       B32 move_later = Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Right);
       if (move_earlier || move_later) {
          StateOp_Edit_MoveSlide(ops)->to_later = move_later;
+      }
+   }
+
+   //- bgz: a piece of the slide picked whole - a picture clicked, or a box
+   // clicked away from its words: Delete or Backspace takes it out, instead
+   // of a letter
+   if (Edit_PieceIsPicked(app_state, g_edit_view.picked_kind, g_edit_view.picked_idx) &&
+       g_place_view.drag.state != Place_DragState_Dragging) {
+      B32 is_delete = Core_WM_KeyPress(events, window, 0, WM_Key_Delete);
+      B32 is_backspace = Core_WM_KeyPress(events, window, 0, WM_Key_Backspace);
+      if (is_delete || is_backspace) {
+         StateOp_Edit_DeletePiece(ops);
       }
    }
 
@@ -1518,6 +1886,21 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
    changed |= Place_BuildHits(app_state, ui, interactive, &hover);
    changed |= Caret_BuildRooms(app_state, ui, interactive);
 
+   //- bgz: the slide's open space, under all of those: a press there makes a
+   // text box where it was (Edit_AddTextBox). Built after them, so it is
+   // asked last: only where nothing else is.
+   B32 open_space_hot = 0;
+   if (interactive && Place_BoxesAreGood(app_state) && g_place_view.drag.state == Place_DragState_None) {
+      Rng2F32   page = g_edit_view.page;
+      UI_Signal signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, page, "###edit open space"));
+      open_space_hot = UI_Hovering(signal) && !hover.is_over;
+      if (signal.f & UI_SignalFlag_LeftPressed) {
+         Vec2F32 pos = UI_DragStartMouse();
+         Vec2F32 page_dim = Dim2F32(page);
+         StateOp_Edit_AddTextBox(ops)->pos = V2F32((pos.x - page.min.x) / page_dim.x, (pos.y - page.min.y) / page_dim.y);
+      }
+   }
+
    //- bgz: the row of small slides - a press goes to the slide - and the +
    // that adds one after the slide showing
    S64 thumb_hot = -1;
@@ -1601,6 +1984,30 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
          }
       }
 
+      // A piece picked whole: its corners, in the same blue, as a
+      // presentation program shows a box picked - and what Delete does is
+      // said under the slide.
+      B32 has_picked = 0;
+      for (U64 i = 0; i < g_edit_view.box_count; i += 1) {
+         View_Box* box = &g_edit_view.boxes[i];
+         if (Edit_PieceIsPicked(app_state, box->kind, box->idx) && Place_BoxesAreGood(app_state)) {
+            has_picked = 1;
+            F32 half = (F32)(S32)(4.0f * ui);
+            F32 edge = Max(1.0f, (F32)(S32)(1.5f * ui));
+            Vec2F32 corners[4] = {box->rect.min, V2F32(box->rect.max.x, box->rect.min.y), V2F32(box->rect.min.x, box->rect.max.y),
+                                  box->rect.max};
+            UI_ColorTag(Str8Lit("focus")) {
+               FR_BuildEdge(box->rect, edge, UI_ColorFromSlot(UI_ColorSlot_Border), "###edit picked edge");
+               for (U64 k = 0; k < ArrayCount(corners); k += 1) {
+                  UI_SetNextBackgroundColor(UI_ColorFromSlot(UI_ColorSlot_Border));
+                  FR_BuildRectBox(UI_BoxFlag_DrawBackground,
+                                  R2F32P(corners[k].x - half, corners[k].y - half, corners[k].x + half, corners[k].y + half),
+                                  "###edit picked corner %llu", (unsigned long long)k);
+               }
+            }
+         }
+      }
+
       // Right at the words a drag selects them (place\place.c): said there,
       // and while it does, instead of how the box is moved.
       B32 is_at_words = (g_place_view.drag.state == Place_DragState_Selecting ||
@@ -1608,6 +2015,13 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
                           Place_IsAtWords(hover.kind, hover.idx, Core_WM_MouseFromWindow(app_state->window))));
       if (is_at_words) {
          caption = Str8Lit("Drag across the words to select them      Double-click a word, triple-click a line");
+      } else if (has_picked && !can_move) {
+         caption = Str8Lit("Delete takes it out      Click its words to type in them      Esc lets go of it");
+      } else if (can_move && has_picked && hover.has_piece && hover.kind == g_edit_view.picked_kind &&
+                 hover.idx == g_edit_view.picked_idx) {
+         caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out");
+      } else if (open_space_hot) {
+         caption = Str8Lit("Click to add a text box here");
       } else if (can_move) {
          caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click puts it back");
       } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {

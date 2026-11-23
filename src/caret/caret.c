@@ -868,7 +868,10 @@ Caret_BuildLook(const App_State* app_state, F32 ui) {
 
       //- bgz: the caret, on top: solid just after input, then blinking, as
       // the editor's is. In the colour of the words, which shows on the theme.
-      if (caret.is_found && caret.rect.min.y >= box->room.min.y - 1.0f && caret.rect.max.y <= box->room.max.y + 1.0f) {
+      // Not in a box picked whole (edit\edit.c): Delete takes all of it out,
+      // not a letter at the caret.
+      if (caret.is_found && caret.rect.min.y >= box->room.min.y - 1.0f && caret.rect.max.y <= box->room.max.y + 1.0f &&
+          !Edit_PieceIsPicked(app_state, kind, idx)) {
          U64 since_input_us = NowTimeUS() - editor->last_input_us;
          B32 is_on = (since_input_us < 500000) || ((since_input_us / 500000) % 2 == 0);
          if (is_on) {
