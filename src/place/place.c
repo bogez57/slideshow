@@ -32,8 +32,8 @@
 // The mouse says which it would be (_Place_HoverCursor): over a handle the
 // arrow that resizes the way it does, the four-way arrow while a piece is
 // dragged, and the bar that text is typed at right at the title's and blocks'
-// words (Place_IsAtWords) - the plain arrow in the rest of their boxes, which
-// is where they are taken hold of to be moved.
+// words (Place_IsAtWords) - the four-way arrow in the rest of their boxes,
+// and over a picture, which is where they are taken hold of to be moved.
 //
 // What comes of it is a line of the deck's text - "@place picture 0.55 0.2
 // 0.4 0.6", in parts of the page (deck.h) - written when the button comes
@@ -914,7 +914,7 @@ Place_IsAtWords(Deck_PlaceKind kind, U64 idx, Vec2F32 pos) {
 //    the title's or a       the bar that text is typed at: a click puts the
 //    block's words          caret at the letter (caret\caret.c)
 //    (Place_IsAtWords)
-//    the rest of their box, the arrow
+//    the rest of their box, the four-way arrow: it moves
 //    and a picture
 
 PRIVATE WM_Cursor
@@ -933,6 +933,9 @@ _Place_HoverCursor(const App_State* app_state, B32 has_piece, Deck_PlaceKind kin
       result = WM_Cursor_UpDownLeftRight;
    } else if (has_piece && Place_IsAtWords(kind, idx, Core_WM_MouseFromWindow(app_state->window))) {
       result = WM_Cursor_IBar;
+   } else if (has_piece) {
+      // Where it is taken hold of to be moved: the arrow that says so.
+      result = WM_Cursor_UpDownLeftRight;
    }
    return result;
 }
