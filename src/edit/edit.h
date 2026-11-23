@@ -47,7 +47,16 @@ struct Edit_View {
    U64           pictures_scanned_us; // 0: look now
    UI_ScrollRows pictures_scroll;
 
-   // A text box just made by a click on the slide's open space
+   // A text box being drawn with the mouse on the slide's open space: from
+   // where the button went down to where the mouse is, in pixels.
+   // draw_is_box: the mouse has gone far enough for it to be a box, not a
+   // click.
+   B32     is_drawing;
+   B32     draw_is_box;
+   Vec2F32 draw_from;
+   Vec2F32 draw_to;
+
+   // A text box just drawn on the slide's open space
    // (Edit_AddTextBox), while nothing has been done to it: where its lines
    // are in the text, and the editor's edit_count once they were written.
    // Left like that - clicked away from, or Esc - it is taken out again, as

@@ -62,9 +62,10 @@
 //    move a piece     drag the picture or the body in the preview, or a
 //                     corner of it to resize it. Right-click puts it back
 //                     (place\place.c)
-//    add a text box   click the slide where nothing is: a box there, its
-//                     words selected to be typed over. Left as it is, it
-//                     goes again when something else is clicked
+//    add a text box   drag on the slide where nothing is: a box as large as
+//                     the mouse makes it, its words selected to be typed
+//                     over. Left as it is, it goes again when something
+//                     else is clicked
 //    take a piece out click a picture, or the title or a block away from its
 //                     words - where it is taken hold of - and press Delete
 //                     or Backspace. Ctrl+Z brings it back
@@ -467,15 +468,17 @@ Edit_TakeOutLine(Editor_Editor* editor, Rng1U64 line) {
 ////////////////////////////////
 //~ bgz: text boxes made and pieces taken out, from the preview
 //
-// A click on the slide where nothing is - no words, no picture, no box -
-// makes a text box there, as presentation programs do: a block of its own,
+// A press on the slide where nothing is - no words, no picture, no box -
+// and a drag draws a text box there, as large as the mouse makes it, as
+// presentation programs do: a block of its own,
 //
 //    @box
 //    @place text 0.300 0.400 0.400 0.150
 //    Text
 //
 // written at the end of the slide's lines, with "Text" selected to be typed
-// over. Left as it is - clicked away from, Esc, another slide - it is taken
+// over. A click there with no drag makes nothing: it lets go of what is
+// selected, as Esc does. Left as it is - clicked away from, Esc, another slide - it is taken
 // out again (_Edit_TakeOutNewBox). Anything done to it keeps it: a key, a
 // drag.
 //
@@ -486,9 +489,14 @@ Edit_TakeOutLine(Editor_Editor* editor, Rng1U64 line) {
 // @size and @color lines; the title's words, with its own lines, the slide
 // kept by a --- in the title's place.
 
-// The size of a text box a click makes, in parts of the page.
-#define _EDIT_NEW_BOX_W 0.4f
-#define _EDIT_NEW_BOX_H 0.15f
+// The least a text box drawn is made, in parts of the page: a drag that
+// barely moved still gives a box a word fits in.
+#define _EDIT_NEW_BOX_MIN_W 0.08f
+#define _EDIT_NEW_BOX_MIN_H 0.06f
+
+// How far the mouse goes with the button down on open space before it is
+// drawing a box and not a click. In UI units.
+#define _EDIT_DRAW_START 4.0f
 
 // What a click makes the new box's words: selected, to be typed over.
 #define _EDIT_NEW_BOX_WORDS "Text"
@@ -516,10 +524,10 @@ _Edit_TakeOutNewBox(App_State* app_state) {
    return result;
 }
 
-// A text box on slide_idx with its top left at at, in parts of the page: see
-// above. The deck has to be of the text as it is.
+// A text box on slide_idx where rect is, in parts of the page: see above.
+// The deck has to be of the text as it is.
 PRIVATE void
-_Edit_AddTextBox(App_State* app_state, StateOp_List* ops, U64 slide_idx, Vec2F32 at) {
+_Edit_AddTextBox(App_State* app_state, StateOp_List* ops, U64 slide_idx, Rng2F32 rect) {
    Editor_Editor* editor = app_state->editor;
    Deck_Deck*     deck = app_state->deck;
    if (slide_idx >= deck->slide_count) {
@@ -540,13 +548,15 @@ _Edit_AddTextBox(App_State* app_state, StateOp_List* ops, U64 slide_idx, Vec2F32
       end -= 1;
    }
 
-   // All of it on the page.
-   F32 x = Clamp(0.0f, at.x, 1.0f - _EDIT_NEW_BOX_W);
-   F32 y = Clamp(0.0f, at.y, 1.0f - _EDIT_NEW_BOX_H);
+   // All of it on the page, and no smaller than a word needs.
+   F32 w = Clamp(_EDIT_NEW_BOX_MIN_W, rect.max.x - rect.min.x, 1.0f);
+   F32 h = Clamp(_EDIT_NEW_BOX_MIN_H, rect.max.y - rect.min.y, 1.0f);
+   F32 x = Clamp(0.0f, rect.min.x, 1.0f - w);
+   F32 y = Clamp(0.0f, rect.min.y, 1.0f - h);
 
    Temp    scratch = ScratchBegin(0, 0);
-   String8 added = PushStr8F(scratch.arena, "\n\n@box\n@place text %.3f %.3f %.3f %.3f\n%s", x, y, _EDIT_NEW_BOX_W,
-                             _EDIT_NEW_BOX_H, _EDIT_NEW_BOX_WORDS);
+   String8 added = PushStr8F(scratch.arena, "\n\n@box\n@place text %.3f %.3f %.3f %.3f\n%s", x, y, w, h,
+                             _EDIT_NEW_BOX_WORDS);
    Editor_ReplaceRange(editor, end, end, added);
    U64 words_end = end + added.size;
    editor->mark = words_end - (sizeof(_EDIT_NEW_BOX_WORDS) - 1);
@@ -1381,12 +1391,12 @@ Edit_PreviewClick(App_State* app_state, StateOp_List* ops, Edit_PreviewClickOpPa
 }
 STATE_OP(Edit_PreviewClick)
 
-// A press on the preview's slide where nothing is: a text box there
-// (_Edit_AddTextBox), at pos, in parts of the page. From the slide as it
+// A box drawn on the preview's slide where nothing is: a text box there
+// (_Edit_AddTextBox), at rect, in parts of the page. From the slide as it
 // was last laid out: nothing if the text has changed since.
 typedef struct Edit_AddTextBoxOpParams Edit_AddTextBoxOpParams;
 struct Edit_AddTextBoxOpParams {
-   Vec2F32 pos;
+   Rng2F32 rect;
 };
 void
 Edit_AddTextBox(App_State* app_state, StateOp_List* ops, Edit_AddTextBoxOpParams* params) {
@@ -1402,7 +1412,7 @@ Edit_AddTextBox(App_State* app_state, StateOp_List* ops, Edit_AddTextBoxOpParams
       _Edit_TakeOutNewBox(app_state);
    }
    FR_SyncDeck(app_state);
-   _Edit_AddTextBox(app_state, ops, slide_idx, params->pos);
+   _Edit_AddTextBox(app_state, ops, slide_idx, params->rect);
 }
 STATE_OP(Edit_AddTextBox)
 
@@ -1886,19 +1896,48 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
    changed |= Place_BuildHits(app_state, ui, interactive, &hover);
    changed |= Caret_BuildRooms(app_state, ui, interactive);
 
-   //- bgz: the slide's open space, under all of those: a press there makes a
-   // text box where it was (Edit_AddTextBox). Built after them, so it is
-   // asked last: only where nothing else is.
+   //- bgz: the slide's open space, under all of those: a press there and a
+   // drag draw a text box, as large as the mouse makes it (Edit_AddTextBox),
+   // and a click with no drag lets go of what is selected. Built after
+   // them, so it is asked last: only where nothing else is. Built while a
+   // box is drawn whatever else goes on, or the UI lets go of it.
    B32 open_space_hot = 0;
-   if (interactive && Place_BoxesAreGood(app_state) && g_place_view.drag.state == Place_DragState_None) {
+   if (interactive && ((Place_BoxesAreGood(app_state) && g_place_view.drag.state == Place_DragState_None) ||
+                       g_edit_view.is_drawing)) {
       Rng2F32   page = g_edit_view.page;
-      UI_Signal signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, page, "###edit open space"));
+      UI_Box*   space = FR_BuildRectBox(UI_BoxFlag_MouseClickable, page, "###edit open space");
+      space->hover_cursor = WM_Cursor_Pointer;
+      UI_Signal signal = UI_SignalFromBox(space);
       open_space_hot = UI_Hovering(signal) && !hover.is_over;
+      Vec2F32 mouse = Core_WM_MouseFromWindow(app_state->window);
       if (signal.f & UI_SignalFlag_LeftPressed) {
-         Vec2F32 pos = UI_DragStartMouse();
-         Vec2F32 page_dim = Dim2F32(page);
-         StateOp_Edit_AddTextBox(ops)->pos = V2F32((pos.x - page.min.x) / page_dim.x, (pos.y - page.min.y) / page_dim.y);
+         g_edit_view.is_drawing = 1;
+         g_edit_view.draw_from = UI_DragStartMouse();
+         g_edit_view.draw_is_box = 0;
       }
+      if (g_edit_view.is_drawing) {
+         F32 gone_x = mouse.x - g_edit_view.draw_from.x;
+         F32 gone_y = mouse.y - g_edit_view.draw_from.y;
+         F32 reach = _EDIT_DRAW_START * ui;
+         if (gone_x > reach || gone_x < -reach || gone_y > reach || gone_y < -reach) {
+            g_edit_view.draw_is_box = 1;
+         }
+         g_edit_view.draw_to = V2F32(Clamp(page.min.x, mouse.x, page.max.x), Clamp(page.min.y, mouse.y, page.max.y));
+      }
+      if (g_edit_view.is_drawing && (signal.f & UI_SignalFlag_LeftReleased)) {
+         g_edit_view.is_drawing = 0;
+         Vec2F32 page_dim = Dim2F32(page);
+         if (!g_edit_view.draw_is_box) {
+            StateOp_Edit_Deselect(ops);
+         } else if (page_dim.x > 0 && page_dim.y > 0) {
+            Vec2F32 a = g_edit_view.draw_from;
+            Vec2F32 b = g_edit_view.draw_to;
+            StateOp_Edit_AddTextBox(ops)->rect = R2F32P((Min(a.x, b.x) - page.min.x) / page_dim.x, (Min(a.y, b.y) - page.min.y) / page_dim.y,
+                                                        (Max(a.x, b.x) - page.min.x) / page_dim.x, (Max(a.y, b.y) - page.min.y) / page_dim.y);
+         }
+      }
+   } else {
+      g_edit_view.is_drawing = 0;
    }
 
    //- bgz: the row of small slides - a press goes to the slide - and the +
@@ -1984,6 +2023,16 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
          }
       }
 
+      // A text box being drawn: its outline, where the mouse has it.
+      if (g_edit_view.is_drawing && g_edit_view.draw_is_box) {
+         Vec2F32 a = g_edit_view.draw_from;
+         Vec2F32 b = g_edit_view.draw_to;
+         UI_ColorTag(Str8Lit("focus")) {
+            FR_BuildEdge(R2F32P(Min(a.x, b.x), Min(a.y, b.y), Max(a.x, b.x), Max(a.y, b.y)), Max(1.0f, (F32)(S32)(1.5f * ui)),
+                         UI_ColorFromSlot(UI_ColorSlot_Border), "###edit drawn box");
+         }
+      }
+
       // A piece picked whole: its corners, in the same blue, as a
       // presentation program shows a box picked - and what Delete does is
       // said under the slide.
@@ -2013,7 +2062,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       B32 is_at_words = (g_place_view.drag.state == Place_DragState_Selecting ||
                          (can_move && hover.has_piece && hover.corner == 0 &&
                           Place_IsAtWords(hover.kind, hover.idx, Core_WM_MouseFromWindow(app_state->window))));
-      if (is_at_words) {
+      if (g_edit_view.is_drawing && g_edit_view.draw_is_box) {
+         caption = Str8Lit("Let go to make the text box");
+      } else if (is_at_words) {
          caption = Str8Lit("Drag across the words to select them      Double-click a word, triple-click a line");
       } else if (has_picked && !can_move) {
          caption = Str8Lit("Delete takes it out      Click its words to type in them      Esc lets go of it");
@@ -2021,7 +2072,7 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
                  hover.idx == g_edit_view.picked_idx) {
          caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out");
       } else if (open_space_hot) {
-         caption = Str8Lit("Click to add a text box here");
+         caption = Str8Lit("Drag to draw a text box");
       } else if (can_move) {
          caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click puts it back");
       } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
