@@ -34,7 +34,8 @@
 //                     Ctrl+Shift+V down: the same room between each two
 //    size its words   Ctrl and the wheel over the title or a block
 //                     (look\look.c)
-//    put it back      right-click it: where the layout would have it
+//    put it back      right-click it, and "Put back where the layout has it"
+//                     in the menu (edit\edit.c)
 //    give up a drag   Esc - or F5, which presents
 //
 // The mouse says which it would be (_Place_HoverCursor): over a handle the
@@ -1240,10 +1241,10 @@ _Place_Signal(const App_State* app_state, UI_Box* box, B32 has_piece, Deck_Place
    }
    result |= Place_SelectHeld(app_state, signal);
 
+   // A right-click opens the edit screen's menu on the piece (edit\edit.c):
+   // putting it back where the layout has it is a line of that.
    if ((signal.f & UI_SignalFlag_RightPressed) && piece != 0) {
-      Place_RemoveLineOpParams* remove = StateOp_Place_RemoveLine(app_state->op_list);
-      remove->kind = kind;
-      remove->idx = idx;
+      Edit_OpenMenu(app_state, Core_WM_MouseFromWindow(app_state->window), 1, kind, idx);
    }
 
    // The wheel over a block's words moves them (caret\caret.c). Over

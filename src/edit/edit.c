@@ -60,8 +60,9 @@
 //    edit a piece     click it in the preview, and type: the caret is on
 //                     the slide, at the letter clicked (caret\caret.c)
 //    move a piece     drag the picture or the body in the preview, or a
-//                     corner of it to resize it. Right-click puts it back
-//                     (place\place.c)
+//                     corner of it to resize it (place\place.c)
+//    the menu         right-click a piece, or the slide where nothing is:
+//                     what can be done there, each with its key beside it
 //    add a text box   drag on the slide where nothing is: a box as large as
 //                     the mouse makes it, its words selected to be typed
 //                     over. Left as it is, it goes again when something
@@ -1997,6 +1998,11 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
    Editor_Editor* editor = app_state->editor;
    _Edit_Layout   layout = _Edit_LayoutFromWindowDim(app_state, window_dim);
 
+   //- bgz: the right-click menu: Esc closes it, before Esc does anything else
+   if (g_edit_view.menu_open && Core_WM_KeyPress(events, window, 0, WM_Key_Esc)) {
+      g_edit_view.menu_open = 0;
+   }
+
    //- bgz: a piece of the slide dragged by the mouse (place\place.c): Esc
    // gives it up, before Esc does anything else
    Place_Keys(app_state);
@@ -2460,12 +2466,248 @@ _Edit_LayoutPreview(const App_State* app_state, Rng2F32 page, F32 ui) {
    Caret_KeepRuns(&hits);
 }
 
+////////////////////////////////
+//~ bgz: the right-click menu
+//
+// A right-click on the preview's slide opens a menu where the mouse is, of
+// what can be done there, each line with its key beside it - so the keys do
+// not have to be remembered, and are learned from it. On a piece: the piece
+// is picked first, alone, unless it is one of those picked already, and the
+// lines are about all that are picked. On open space: what is not about a
+// piece. A click on a line does it and closes the menu; a click anywhere
+// else, or Esc, closes it. Larger and smaller words leave it open, to be
+// clicked again.
+//
+// It is built first of the preview's boxes (_Edit_BuildPreview), so it is
+// over everything there and asked before it, with a box the size of the
+// window under its lines that takes the click anywhere else. What a line
+// does is the op its key pushes.
+
+typedef enum _Edit_MenuItemKind {
+   _Edit_MenuItem_Separator,
+   _Edit_MenuItem_Copy,
+   _Edit_MenuItem_Cut,
+   _Edit_MenuItem_Paste,
+   _Edit_MenuItem_Duplicate,
+   _Edit_MenuItem_Delete,
+   _Edit_MenuItem_Front,
+   _Edit_MenuItem_Back,
+   _Edit_MenuItem_Larger,
+   _Edit_MenuItem_Smaller,
+   _Edit_MenuItem_Arrange, // with arrange: lined up, or spaced
+   _Edit_MenuItem_PutBack,
+   _Edit_MenuItem_PickAll,
+} _Edit_MenuItemKind;
+
+typedef struct _Edit_MenuItem _Edit_MenuItem;
+struct _Edit_MenuItem {
+   _Edit_MenuItemKind kind;
+   String8            name;
+   String8            keys;
+   Place_ArrangeKind  arrange;
+};
+
+#define _EDIT_MENU_MAX_ITEMS 32
+
+void
+Edit_OpenMenu(const App_State* app_state, Vec2F32 pos, B32 has_piece, Deck_PlaceKind kind, U64 idx) {
+   g_edit_view.menu_open = 1;
+   g_edit_view.menu_pos = pos;
+   g_edit_view.menu_has_piece = has_piece;
+   g_edit_view.menu_kind = kind;
+   g_edit_view.menu_idx = idx;
+   // Not one of those picked: it is picked alone, as a click on it would.
+   if (has_piece && !Edit_PieceIsPicked(app_state, kind, idx)) {
+      Edit_PreviewClickOpParams* click = StateOp_Edit_PreviewClick(app_state->op_list);
+      click->pos = pos;
+      click->picks = 1;
+      click->picks_only = 1;
+      click->kind = kind;
+      click->idx = idx;
+   }
+}
+
+PRIVATE void
+_Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactive) {
+   if (!g_edit_view.menu_open) {
+      return;
+   }
+   // Gone with what it was about: the slide, or the pieces picked.
+   if (!interactive || !Place_BoxesAreGood(app_state) || (g_edit_view.menu_has_piece && !Edit_PickedIsGood(app_state))) {
+      g_edit_view.menu_open = 0;
+      return;
+   }
+   StateOp_List* ops = app_state->op_list;
+   F32           ui = layout->ui;
+
+   //- bgz: its lines
+   _Edit_MenuItem items[_EDIT_MENU_MAX_ITEMS] = {0};
+   U64            count = 0;
+#define _Edit_MenuAdd(kind_, name_, keys_) \
+   (items[count].kind = (kind_), items[count].name = Str8Lit(name_), items[count].keys = Str8Lit(keys_), count += 1)
+#define _Edit_MenuAddArrange(arrange_, name_, keys_) \
+   (items[count].arrange = (arrange_), _Edit_MenuAdd(_Edit_MenuItem_Arrange, name_, keys_))
+   U64 picked = g_edit_view.picked_count;
+   B32 has_words = 0;
+   for (U64 i = 0; i < picked; i += 1) {
+      has_words |= (g_edit_view.picked_kinds[i] != Deck_PlaceKind_Picture);
+   }
+   if (g_edit_view.menu_has_piece) {
+      _Edit_MenuAdd(_Edit_MenuItem_Copy, "Copy", "Ctrl+C");
+      _Edit_MenuAdd(_Edit_MenuItem_Cut, "Cut", "Ctrl+X");
+      if (g_edit_view.clip_count != 0) {
+         _Edit_MenuAdd(_Edit_MenuItem_Paste, "Paste", "Ctrl+V");
+      }
+      _Edit_MenuAdd(_Edit_MenuItem_Duplicate, "Duplicate", "Ctrl+D");
+      _Edit_MenuAdd(_Edit_MenuItem_Delete, "Delete", "Del");
+      _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+      _Edit_MenuAdd(_Edit_MenuItem_Front, "Bring to front", "Ctrl+Shift+]");
+      _Edit_MenuAdd(_Edit_MenuItem_Back, "Send to back", "Ctrl+Shift+[");
+      if (has_words) {
+         _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+         _Edit_MenuAdd(_Edit_MenuItem_Larger, "Larger words", "Ctrl+Wheel up");
+         _Edit_MenuAdd(_Edit_MenuItem_Smaller, "Smaller words", "Ctrl+Wheel down");
+      }
+      if (picked >= 2) {
+         _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+         _Edit_MenuAddArrange(Place_ArrangeKind_Left, "Line up left edges", "Ctrl+Shift+Left");
+         _Edit_MenuAddArrange(Place_ArrangeKind_Right, "Line up right edges", "Ctrl+Shift+Right");
+         _Edit_MenuAddArrange(Place_ArrangeKind_Top, "Line up tops", "Ctrl+Shift+Up");
+         _Edit_MenuAddArrange(Place_ArrangeKind_Bottom, "Line up bottoms", "Ctrl+Shift+Down");
+         _Edit_MenuAddArrange(Place_ArrangeKind_CenterX, "Centre on one line down", "Ctrl+Shift+C");
+         _Edit_MenuAddArrange(Place_ArrangeKind_CenterY, "Centre on one line across", "Ctrl+Shift+M");
+      }
+      if (picked >= 3) {
+         _Edit_MenuAddArrange(Place_ArrangeKind_SpaceX, "Space evenly across", "Ctrl+Shift+H");
+         _Edit_MenuAddArrange(Place_ArrangeKind_SpaceY, "Space evenly down", "Ctrl+Shift+V");
+      }
+      _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+      _Edit_MenuAdd(_Edit_MenuItem_PutBack, "Put back where the layout has it", "");
+   } else {
+      if (g_edit_view.clip_count != 0) {
+         _Edit_MenuAdd(_Edit_MenuItem_Paste, "Paste", "Ctrl+V");
+      }
+      _Edit_MenuAdd(_Edit_MenuItem_PickAll, "Select everything on the slide", "");
+   }
+#undef _Edit_MenuAdd
+#undef _Edit_MenuAddArrange
+
+   //- bgz: how large it is, and where: all of it in the preview
+   FNT_Tag font = app_state->fonts.regular;
+   F32     px = layout->ui_px;
+   F32     line_h = Text_LineHeight(font, px);
+   F32     row_h = (F32)(S32)(line_h * 1.5f);
+   F32     sep_h = (F32)(S32)(row_h * 0.4f);
+   F32     pad = (F32)(S32)(12.0f * ui);
+   F32     name_w = 0;
+   F32     keys_w = 0;
+   F32     height = pad;
+   for (U64 i = 0; i < count; i += 1) {
+      name_w = Max(name_w, Text_Width(font, px, items[i].name));
+      keys_w = Max(keys_w, Text_Width(font, px, items[i].keys));
+      height += (items[i].kind == _Edit_MenuItem_Separator) ? sep_h : row_h;
+   }
+   F32     width = (F32)(S32)(pad + name_w + pad * 2.0f + keys_w + pad);
+   Rng2F32 within = layout->preview;
+   F32     x = Clamp(within.min.x, g_edit_view.menu_pos.x, Max(within.max.x - width, within.min.x));
+   F32     y = Clamp(within.min.y, g_edit_view.menu_pos.y, Max(within.max.y - height, within.min.y));
+   x = (F32)(S32)x;
+   y = (F32)(S32)y;
+   Rng2F32 menu = R2F32P(x, y, x + width, y + height);
+
+   Vec4F32 name_color = V4F32(0.93f, 0.93f, 0.93f, 1.0f);
+   Vec4F32 keys_color = V4F32(0.60f, 0.62f, 0.66f, 1.0f);
+
+   //- bgz: the lines, each over its wash when the mouse is on it
+   B32 closes = 0;
+   F32 row_y = y + (F32)(S32)(pad * 0.5f);
+   for (U64 i = 0; i < count; i += 1) {
+      _Edit_MenuItem* item = &items[i];
+      if (item->kind == _Edit_MenuItem_Separator) {
+         F32 line_y = (F32)(S32)(row_y + sep_h * 0.5f);
+         UI_SetNextBackgroundColor(V4F32(1, 1, 1, 0.14f));
+         FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(x + pad * 0.5f, line_y, x + width - pad * 0.5f, line_y + 1.0f),
+                         "###edit menu sep %llu", (unsigned long long)i);
+         row_y += sep_h;
+         continue;
+      }
+      Rng2F32   row = R2F32P(x, row_y, x + width, row_y + row_h);
+      F32       text_y = (F32)(S32)(row_y + (row_h - line_h) * 0.5f);
+      UI_Signal signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, row, "###edit menu row %llu", (unsigned long long)i));
+      FR_BuildWords(font, px, V2F32(x + pad, text_y), name_color, item->name, "###edit menu name %llu", (unsigned long long)i);
+      if (item->keys.size != 0) {
+         FR_BuildWords(font, px, V2F32(x + width - pad - Text_Width(font, px, item->keys), text_y), keys_color, item->keys,
+                       "###edit menu keys %llu", (unsigned long long)i);
+      }
+      if (UI_Hovering(signal)) {
+         UI_SetNextBackgroundColor(V4F32(0.30f, 0.50f, 0.95f, 0.55f));
+         FR_BuildRectBox(UI_BoxFlag_DrawBackground, row, "###edit menu hot");
+      }
+      if (signal.f & UI_SignalFlag_LeftPressed) {
+         closes = 1;
+         switch (item->kind) {
+         case _Edit_MenuItem_Copy: StateOp_Edit_CopyPieces(ops)->is_cut = 0; break;
+         case _Edit_MenuItem_Cut: StateOp_Edit_CopyPieces(ops)->is_cut = 1; break;
+         case _Edit_MenuItem_Paste: StateOp_Edit_PastePieces(ops); break;
+         case _Edit_MenuItem_Duplicate: StateOp_Edit_DuplicatePieces(ops); break;
+         case _Edit_MenuItem_Delete: StateOp_Edit_DeletePiece(ops); break;
+         case _Edit_MenuItem_Front: StateOp_Edit_OrderPieces(ops)->to_back = 0; break;
+         case _Edit_MenuItem_Back: StateOp_Edit_OrderPieces(ops)->to_back = 1; break;
+         case _Edit_MenuItem_Arrange: StateOp_Place_Arrange(ops)->kind = item->arrange; break;
+         case _Edit_MenuItem_Larger:
+         case _Edit_MenuItem_Smaller: {
+            // The words of all picked: left open, to be clicked again.
+            for (U64 k = 0; k < picked; k += 1) {
+               if (g_edit_view.picked_kinds[k] != Deck_PlaceKind_Picture) {
+                  Look_StepSizeOpParams* step = StateOp_Look_StepSize(ops);
+                  step->direction = (item->kind == _Edit_MenuItem_Larger) ? 1 : -1;
+                  step->has_piece = 1;
+                  step->kind = g_edit_view.picked_kinds[k];
+                  step->idx = g_edit_view.picked_idxs[k];
+                  step->with_picked = 1;
+                  break;
+               }
+            }
+            closes = 0;
+         } break;
+         case _Edit_MenuItem_PutBack: {
+            Place_RemoveLineOpParams* remove = StateOp_Place_RemoveLine(ops);
+            remove->kind = g_edit_view.menu_kind;
+            remove->idx = g_edit_view.menu_idx;
+         } break;
+         case _Edit_MenuItem_PickAll: StateOp_Edit_PickRect(ops)->rect = g_edit_view.page; break;
+         default: break;
+         }
+      }
+      row_y += row_h;
+   }
+
+   //- bgz: its edge and its ground, under its lines
+   FR_BuildEdge(menu, 1.0f, V4F32(1, 1, 1, 0.22f), "###edit menu edge");
+   UI_SetNextBackgroundColor(V4F32(0.13f, 0.14f, 0.17f, 1.0f));
+   UI_Signal ground = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_DrawBackground | UI_BoxFlag_MouseClickable, menu, "###edit menu ground"));
+   UnusedVariable(ground); // a click between its lines does nothing
+
+   //- bgz: anywhere else: a click closes it, and is not a click on what is
+   // there
+   UI_Signal away = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, R2F32P(0, 0, 100000.0f, 100000.0f), "###edit menu away"));
+   if (away.f & (UI_SignalFlag_LeftPressed | UI_SignalFlag_RightPressed)) {
+      closes = 1;
+   }
+   if (closes) {
+      g_edit_view.menu_open = 0;
+   }
+}
+
 PRIVATE void
 _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interactive) {
    Editor_Editor* editor = app_state->editor;
    Deck_Deck*     deck = app_state->deck;
    StateOp_List*  ops = app_state->op_list;
    F32            ui = layout->ui;
+
+   //- bgz: the right-click menu, over everything else here
+   _Edit_BuildMenu(app_state, layout, interactive);
 
    //- bgz: 1, 2: what the mouse holds, then the slide laid out. The deck is
    // of the text as it is, and the slide is the one the cursor is on:
@@ -2510,6 +2752,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       UI_Signal signal = UI_SignalFromBox(space);
       open_space_hot = UI_Hovering(signal) && !hover.is_over;
       Vec2F32 mouse = Core_WM_MouseFromWindow(app_state->window);
+      if ((signal.f & UI_SignalFlag_RightPressed) && !g_edit_view.is_drawing) {
+         Edit_OpenMenu(app_state, mouse, 0, Deck_PlaceKind_Title, 0);
+      }
       if (signal.f & UI_SignalFlag_LeftPressed) {
          g_edit_view.is_drawing = 1;
          g_edit_view.draw_from = UI_DragStartMouse();
@@ -2685,11 +2930,11 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       } else if (has_picked && !can_move) {
          caption = Str8Lit("Delete takes it out      Click its words to type in them      Esc lets go of it");
       } else if (can_move && has_picked && hover.has_piece && Edit_PieceIsPicked(app_state, hover.kind, hover.idx)) {
-         caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out");
+         caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out      Right-click for more");
       } else if (open_space_hot) {
          caption = Str8Lit("Drag to draw a text box      Ctrl+drag selects what the box touches");
       } else if (can_move) {
-         caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click puts it back");
+         caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click for more");
       } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
          // A picture line typed past the most a slide can have: not on the
          // slide, which should not go unsaid.

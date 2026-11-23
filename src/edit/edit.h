@@ -96,6 +96,15 @@ struct Edit_View {
    U64            picked_cursor;
    U64            picked_mark;
 
+   // The menu a right-click on the preview's slide opens (edit.c, "the
+   // right-click menu"): where its top left is, in pixels, and whether it
+   // was opened on a piece - menu_kind, menu_idx - or on open space.
+   B32            menu_open;
+   Vec2F32        menu_pos;
+   B32            menu_has_piece;
+   Deck_PlaceKind menu_kind;
+   U64            menu_idx;
+
    // The pieces copied whole, on clip_arena, and the text put on the
    // system's clipboard for them: Ctrl+V pastes them as pieces while the
    // clipboard still has that text, else it is text again, the editor's.
@@ -127,6 +136,10 @@ S64 Edit_PreviewHitAt(Vec2F32 pos);
 // (g_edit_view.picked_idxs) and still is: Delete takes it out. The caret is
 // not drawn in a block or a title picked so.
 B32 Edit_PieceIsPicked(const App_State* app_state, Deck_PlaceKind kind, U64 idx);
+// A right-click on the preview's slide at pos, in pixels: its menu opens
+// there. has_piece: on the piece of kind and idx, which is picked - alone,
+// if it was not picked already. Not an op: the menu is the screen's own.
+void Edit_OpenMenu(const App_State* app_state, Vec2F32 pos, B32 has_piece, Deck_PlaceKind kind, U64 idx);
 // Whether any piece is picked, and still is.
 B32 Edit_PickedIsGood(const App_State* app_state);
 // After an op that changed the text for the pieces picked - moved or sized
