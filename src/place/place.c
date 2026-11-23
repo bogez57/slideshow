@@ -1055,6 +1055,58 @@ Place_Keys(const App_State* app_state) {
    }
 }
 
+// Ctrl and the wheel, from the window's events - the UI gives its boxes no
+// wheel that has Ctrl with it, so this is not one of their signals: over
+// the title or a block of the slide, its words are made larger - the wheel
+// turned up - or smaller, a step a notch (look\look.c). Of all those picked
+// whole, if it is one of them - or if the mouse is over none, anywhere on
+// the window. Pushes ops.
+void
+Place_CtrlWheel(const App_State* app_state) {
+   if (!Place_BoxesAreGood(app_state)) {
+      return;
+   }
+   for (WM_Event* event = app_state->events->first; event != 0; event = event->next) {
+      if (event->kind != WM_EventKind_Scroll || event->modifiers != WM_Modifier_Ctrl || event->delta.y == 0) {
+         continue;
+      }
+      // The window's mouse: where the wheel was turned.
+      View_Box*      box = Place_BoxAt(app_state, Core_WM_MouseFromWindow(app_state->window));
+      B32            has_target = (box != 0 && box->kind != Deck_PlaceKind_Picture);
+      Deck_PlaceKind kind = has_target ? box->kind : Deck_PlaceKind_Text;
+      U64            idx = has_target ? box->idx : 0;
+      B32            with_picked = has_target && Edit_PieceIsPicked(app_state, kind, idx);
+      if (!has_target && box == 0 && Edit_PickedIsGood(app_state)) {
+         for (U64 i = 0; i < g_edit_view.picked_count && !has_target; i += 1) {
+            if (g_edit_view.picked_kinds[i] != Deck_PlaceKind_Picture) {
+               has_target = 1;
+               with_picked = 1;
+               kind = g_edit_view.picked_kinds[i];
+               idx = g_edit_view.picked_idxs[i];
+            }
+         }
+      }
+      if (!has_target) {
+         continue;
+      }
+      // A notch is 120, down is over 0. A touchpad's small movements are a
+      // step each: no more than a few an event.
+      S32 notches = (S32)(event->delta.y / 120.0f + ((event->delta.y > 0) ? 0.5f : -0.5f));
+      if (notches == 0) {
+         notches = (event->delta.y > 0) ? 1 : -1;
+      }
+      notches = Clamp(-4, notches, 4);
+      for (S32 n = 0; n < ((notches < 0) ? -notches : notches); n += 1) {
+         Look_StepSizeOpParams* step = StateOp_Look_StepSize(app_state->op_list);
+         step->direction = (notches < 0) ? 1 : -1;
+         step->has_piece = 1;
+         step->kind = kind;
+         step->idx = idx;
+         step->with_picked = with_picked;
+      }
+   }
+}
+
 void
 Place_BeforeLayout(const App_State* app_state, F32 ui) {
    Place_Drag* drag = &g_place_view.drag;
@@ -1354,26 +1406,9 @@ _Place_Signal(const App_State* app_state, UI_Box* box, B32 has_piece, Deck_Place
    // The wheel over a block's words moves them (caret\caret.c). Over
    // anything else of the slide it does nothing - not the block under a
    // picture.
-   //
-   // With Ctrl down, over the title or a block, it makes their words larger
-   // - the wheel turned up - or smaller: a step a notch (look\look.c). Of all
-   // those picked whole, if it is one of them.
-   if (signal.scroll.y != 0 && has_piece && kind != Deck_PlaceKind_Picture && Core_WM_KeyIsDown(WM_Key_Ctrl)) {
-      S32 notches = (S32)((F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH + ((signal.scroll.y > 0) ? 0.5f : -0.5f));
-      if (notches == 0) {
-         notches = (signal.scroll.y > 0) ? 1 : -1;
-      }
-      notches = Clamp(-4, notches, 4);
-      B32 is_picked = Edit_PieceIsPicked(app_state, kind, idx);
-      for (S32 n = 0; n < ((notches < 0) ? -notches : notches); n += 1) {
-         Look_StepSizeOpParams* step = StateOp_Look_StepSize(app_state->op_list);
-         step->direction = (notches < 0) ? 1 : -1;
-         step->has_piece = 1;
-         step->kind = kind;
-         step->idx = idx;
-         step->with_picked = is_picked;
-      }
-   } else if (signal.scroll.y != 0 && has_piece && kind == Deck_PlaceKind_Text) {
+   // With Ctrl down the wheel sizes words, and does not come here: the UI
+   // gives a box no wheel that has Ctrl with it (Place_CtrlWheel).
+   if (signal.scroll.y != 0 && has_piece && kind == Deck_PlaceKind_Text) {
       Caret_ScrollBlock(app_state, idx, (F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH);
       result = 1;
    }

@@ -132,6 +132,9 @@ struct Place_Hover {
 // second takes it off again.
 void Place_GiveUp(void);
 void Place_Keys(const App_State* app_state);
+// With the edit screen's keys: Ctrl and the wheel over the title or a block,
+// or with pieces picked, sizes their words. Pushes Look_StepSize.
+void Place_CtrlWheel(const App_State* app_state);
 void Place_BeforeLayout(const App_State* app_state, F32 ui);
 B32  Place_BuildCorners(const App_State* app_state, F32 ui, B32 interactive, Place_Hover* hover);
 B32  Place_BuildHits(const App_State* app_state, F32 ui, B32 interactive, Place_Hover* hover);

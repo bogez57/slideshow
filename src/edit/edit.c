@@ -2041,8 +2041,10 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       StateOp_Edit_Wrap(ops)->is_code = 1;
    }
 
-   // The words the cursor is in, larger and smaller (look\look.c).
+   // The words the cursor is in, larger and smaller (look\look.c) - and
+   // with Ctrl and the wheel, those the mouse is over, or those picked.
    Look_Input(app_state, ops);
+   Place_CtrlWheel(app_state);
 
    if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_S)) {
       StateOp_Edit_Save(ops);
