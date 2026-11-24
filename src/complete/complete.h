@@ -18,6 +18,7 @@
 //    @theme        the themes. @layout: the layouts. @video: how it plays
 //    @color        the colours with names, for the block's words - and
 //                  title, for the title's instead
+//    @align        left, center, right - and title
 //
 // Where no list has what comes next, a hint is drawn after the cursor, dim,
 // as if typed: the four numbers of @place, fewer as each is written; the

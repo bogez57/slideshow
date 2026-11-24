@@ -131,10 +131,13 @@ _Caret_PlaceFromPos(const App_State* app_state, View_Run* runs, U64 run_count, U
          for (U64 i = 0; i < g_edit_view.box_count; i += 1) {
             View_Box* box = &g_edit_view.boxes[i];
             if (box->kind == Deck_PlaceKind_Text && box->idx == idx) {
-               // Where its first letter will be: in the middle, when the
-               // slide puts every line there.
-               B32 centered = (app_state->deck->slides[app_state->slide_idx].layout == Deck_Layout_Center);
-               left = centered ? (box->room.min.x + box->room.max.x) * 0.5f : box->room.min.x;
+               // Where its first letter will be: in the middle or at the
+               // right, when the slide or the block's @align puts every
+               // line there.
+               Deck_Slide* on_slide = &app_state->deck->slides[app_state->slide_idx];
+               Deck_Align  align = (idx < on_slide->box_count) ? Deck_AlignOf(on_slide, &on_slide->boxes[idx].look) : Deck_Align_Left;
+               F32         across = (align == Deck_Align_Right) ? 1.0f : (align == Deck_Align_Center) ? 0.5f : 0.0f;
+               left = box->room.min.x + (box->room.max.x - box->room.min.x) * across;
             }
          }
          F32 line_h = above->rect.max.y - above->rect.min.y;

@@ -180,6 +180,16 @@ _View_PushRun(Arena* arena, _View_RunsOf* runs_of, FNT_Tag font, F32 px, String8
    }
 }
 
+// How far across the room it has a line's left end is, as a part of what
+// the line leaves of it: by a Deck_Align, which is what the "centered" of
+// the functions below is - 0 against the left, as it was when it was only
+// whether to put lines in the middle.
+PRIVATE F32
+_View_AlignT(B32 centered) {
+   F32 result = (centered == Deck_Align_Right) ? 1.0f : (centered == Deck_Align_Center) ? 0.5f : 0.0f;
+   return result;
+}
+
 // Lines of wrapped text from top down, each starting at x. Returns the y
 // under the last. With do_draw 0 nothing is drawn: it only measures.
 // centered puts each line in the middle of max_width. widest_out, if not 0,
@@ -196,7 +206,7 @@ _View_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 
       if (do_draw) {
          F32 line_w = (centered || widest_out != 0 || runs_of != 0) ? Text_Width(font, px, node->string) : 0;
          // Centered: each line in the middle of the width it could have had.
-         F32 line_x = centered ? x + (max_width - line_w) * 0.5f : x;
+         F32 line_x = centered ? x + (max_width - line_w) * _View_AlignT(centered) : x;
          Text_Draw(font, px, V2F32(line_x, y), color, node->string);
          _View_PushRun(arena, runs_of, font, px, text, node->string, line_x, y, line_w);
          widest = Max(widest, line_w);
@@ -405,7 +415,7 @@ _View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 
          F32     box_bottom = y + baseline + cap_h * 0.42f;
          Vec4F32 box_color = _View_Faded(colors->body, alpha * 0.13f);
 
-         F32 piece_x = centered ? x + (max_width - line_w) * 0.5f : x;
+         F32 piece_x = centered ? x + (max_width - line_w) * _View_AlignT(centered) : x;
          for (_View_Piece *piece = line_first, *prev = 0; piece != line_end; prev = piece, piece = piece->next) {
             // The space between two words of one piece of code is code too:
             // the box goes on under it, one box under them all.
@@ -453,7 +463,8 @@ _View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 
 PRIVATE F32
 _View_Body(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Slide* slide, Deck_Box* box, U64 box_idx, Rng2F32 rect,
            Rng2F32 shown, F32 scale, F32 alpha, View_HitList* hits) {
-   B32 centered = (slide->layout == Deck_Layout_Center);
+   // A Deck_Align: the block's own (@align), or the layout's.
+   B32 centered = (B32)Deck_AlignOf(slide, &box->look);
    F32 unit = scale * (box->look.has_size ? box->look.size : 1.0f);
    F32 y = rect.min.y;
 
@@ -533,7 +544,7 @@ _View_Body(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Slid
          // A bullet with no text yet still takes up its line, and has a
          // run with no letters: where the first will go.
          if (item->text.size == 0) {
-            F32 empty_x = centered ? (rect.min.x + rect.max.x) * 0.5f : text_x;
+            F32 empty_x = centered ? rect.min.x + Dim2F32(rect).x * _View_AlignT(centered) : text_x;
             _View_PushRun(arena, &runs_of, fonts->regular, px, item->text, item->text, empty_x, y, 0);
             y += Text_LineHeight(fonts->regular, px);
          }
@@ -553,8 +564,8 @@ _View_Body(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Slid
          F32     hit_w = Max(widest, body_px * 3.0f);
          Rng2F32 hit_rect = R2F32P(item_x, item_y, text_x + hit_w, y);
          if (centered) {
-            F32 middle = (rect.min.x + rect.max.x) * 0.5f;
-            hit_rect = R2F32P(middle - hit_w * 0.5f, item_y, middle + hit_w * 0.5f, y);
+            F32 hit_x = rect.min.x + (Dim2F32(rect).x - hit_w) * _View_AlignT(centered);
+            hit_rect = R2F32P(hit_x, item_y, hit_x + hit_w, y);
          }
          _View_PushHit(arena, hits, Intersect2F32(hit_rect, shown), item->text_range);
       }
@@ -744,6 +755,10 @@ _View_Title(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Sli
    // Its words at a size and in a colour of their own, where the slide says
    // (@size title, @color title). The bar under it stays as it is.
    Deck_Look* look = &slide->title_look;
+   // Its own side (@align title), over what the caller has for it.
+   if (look->has_align) {
+      centered = (B32)look->align;
+   }
    F32        size = look->has_size ? look->size : 1.0f;
    Vec4F32    color = look->has_color ? look->color : colors->title;
    F32        px = (is_big ? _VIEW_BIG_TITLE_PX : _VIEW_TITLE_PX) * scale * size;
@@ -755,7 +770,7 @@ _View_Title(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Sli
                        !measure, centered, &widest, &runs_of);
    if (slide->title.size == 0) {
       // No words yet: a run with no letters, where the first will go.
-      _View_PushRun(arena, &runs_of, fonts->bold, px, slide->title, slide->title, centered ? rect.min.x + width * 0.5f : rect.min.x,
+      _View_PushRun(arena, &runs_of, fonts->bold, px, slide->title, slide->title, centered ? rect.min.x + width * _View_AlignT(centered) : rect.min.x,
                     rect.min.y, 0);
    }
    y = Max(y, rect.min.y + line_height); // a title with no words yet still has its line
@@ -766,7 +781,7 @@ _View_Title(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Sli
    if (!measure) {
       // A title with no words yet is still something to click.
       widest = Max(widest, px * 2.0f);
-      F32 title_x = centered ? rect.min.x + (width - widest) * 0.5f : rect.min.x;
+      F32 title_x = centered ? rect.min.x + (width - widest) * _View_AlignT(centered) : rect.min.x;
       _View_PushHit(arena, hits, R2F32P(title_x, rect.min.y, title_x + widest, y), slide->title_range);
 
       // The box to move it by: placed, as wide as the place. Not placed, as
@@ -783,7 +798,7 @@ _View_Title(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Sli
       _View_PushBox(hits, Deck_PlaceKind_Title, 0, box, size, R2F32P(rect.min.x, rect.min.y, rect.max.x, y), y);
 
       // The bar under it is under its start - or its middle, when centered.
-      F32 bar_x = centered ? rect.min.x + (width - bar_w) * 0.5f : rect.min.x;
+      F32 bar_x = centered ? rect.min.x + (width - bar_w) * _View_AlignT(centered) : rect.min.x;
       Core_D_Rect(R2F32P(bar_x, y + bar_gap, bar_x + bar_w, y + bar_gap + bar_h), R2F32P(0, 0, 1, 1),
                   _View_Faded(colors->accent, alpha));
    }

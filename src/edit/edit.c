@@ -728,6 +728,9 @@ _Edit_DeletePieces(App_State* app_state, U64 slide_idx, Deck_PlaceKind* kinds, U
          if (block->look.has_color) {
             _Edit_PieceLinesAdd(lines, text, block->look.color_line.min, none);
          }
+         if (block->look.has_align) {
+            _Edit_PieceLinesAdd(lines, text, block->look.align_line.min, none);
+         }
       } else if (kind == Deck_PlaceKind_Title && slide->title.size != 0) {
          // The title's line starts the slide: a --- in its place goes on doing
          // that, with no title.
@@ -741,6 +744,9 @@ _Edit_DeletePieces(App_State* app_state, U64 slide_idx, Deck_PlaceKind* kinds, U
          }
          if (slide->title_look.has_color) {
             _Edit_PieceLinesAdd(lines, text, slide->title_look.color_line.min, none);
+         }
+         if (slide->title_look.has_align) {
+            _Edit_PieceLinesAdd(lines, text, slide->title_look.align_line.min, none);
          }
       }
    }
@@ -968,6 +974,9 @@ _Edit_ClipFromPicked(Arena* arena, const App_State* app_state, Edit_ClipPiece* p
       }
       if (look != 0 && look->has_color) {
          Str8ListPush(arena, &looks, _Edit_ColorLineAsText(arena, text, look->color_line));
+      }
+      if (look != 0 && look->has_align) {
+         Str8ListPush(arena, &looks, PushStr8F(arena, "@align %S\n", Deck_AlignName(look->align)));
       }
       piece.lines = Str8ListJoin(arena, &lines, 0);
       piece.looks = Str8ListJoin(arena, &looks, 0);

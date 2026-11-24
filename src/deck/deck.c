@@ -218,6 +218,21 @@ Deck_LayoutName(Deck_Layout layout) {
 }
 
 String8
+Deck_AlignName(Deck_Align align) {
+   String8 names[Deck_Align_COUNT] = {Str8Lit("left"), Str8Lit("center"), Str8Lit("right")};
+   return names[(align < Deck_Align_COUNT) ? align : 0];
+}
+
+Deck_Align
+Deck_AlignOf(Deck_Slide* slide, Deck_Look* look) {
+   Deck_Align result = (slide->layout == Deck_Layout_Center) ? Deck_Align_Center : Deck_Align_Left;
+   if (look->has_align) {
+      result = look->align;
+   }
+   return result;
+}
+
+String8
 Deck_PlaceName(Deck_PlaceKind kind) {
    String8 names[Deck_PlaceKind_COUNT] = {Str8Lit("picture"), Str8Lit("text"), Str8Lit("title")};
    return names[(kind < Deck_PlaceKind_COUNT) ? kind : 0];
@@ -432,9 +447,9 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          continue;
       }
 
-      //- bgz: @theme, @layout, @video, @place, @box, @size, @color and @note: about the deck or the slide, not on it
+      //- bgz: @theme, @layout, @video, @place, @box, @size, @color, @align and @note: about the deck or the slide, not on it
       //
-      // Only those eight: any other line that starts with an @ is a paragraph.
+      // Only those nine, and @slide: any other line that starts with an @ is a paragraph.
       // A name that is not one of the names gives the first, as no line would.
       if (line.str[0] == '@') {
          U64 word_end = 0;
@@ -562,7 +577,8 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          B32 is_size = Str8Match(word, Str8Lit("@size"), StringMatchFlag_CaseInsensitive);
          B32 is_color = (Str8Match(word, Str8Lit("@color"), StringMatchFlag_CaseInsensitive) ||
                          Str8Match(word, Str8Lit("@colour"), StringMatchFlag_CaseInsensitive));
-         if (is_size || is_color) {
+         B32 is_align = Str8Match(word, Str8Lit("@align"), StringMatchFlag_CaseInsensitive);
+         if (is_size || is_color || is_align) {
             // Whose words - title, or text - then the size or the colour.
             // Without the first it is the text's. The first such line of a
             // title, or of a block, is the one that counts; one that does
@@ -589,6 +605,24 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                look->has_size = 1;
                look->size = Clamp(DECK_SIZE_MIN, size, DECK_SIZE_MAX);
                look->size_line = line_range;
+            }
+            if (is_align && !look->has_align) {
+               // "centre" and "middle" are the middle too.
+               String8 side = _Deck_Trim(value);
+               for (U64 i = 0; i < Deck_Align_COUNT; i += 1) {
+                  if (Str8Match(side, Deck_AlignName((Deck_Align)i), StringMatchFlag_CaseInsensitive)) {
+                     look->has_align = 1;
+                     look->align = (Deck_Align)i;
+                  }
+               }
+               if (Str8Match(side, Str8Lit("centre"), StringMatchFlag_CaseInsensitive) ||
+                   Str8Match(side, Str8Lit("middle"), StringMatchFlag_CaseInsensitive)) {
+                  look->has_align = 1;
+                  look->align = Deck_Align_Center;
+               }
+               if (look->has_align) {
+                  look->align_line = line_range;
+               }
             }
             if (is_color && !look->has_color && Deck_ColorFromString(value, &color)) {
                look->has_color = 1;
@@ -683,6 +717,11 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
             bare_look->has_color = 1;
             bare_look->color = waiting_bare_look.color;
             bare_look->color_line = waiting_bare_look.color_line;
+         }
+         if (waiting_bare_look.has_align && !bare_look->has_align) {
+            bare_look->has_align = 1;
+            bare_look->align = waiting_bare_look.align;
+            bare_look->align_line = waiting_bare_look.align_line;
          }
          if (waiting_bare_place.is_set && !bare_place->is_set) {
             *bare_place = waiting_bare_place;

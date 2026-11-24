@@ -13,6 +13,7 @@ PRIVATE Complete_Item _complete_lines[] = {
     {Str8LitComp("@place"), Str8LitComp("where a picture, the text or the title goes"), 1},
     {Str8LitComp("@size"), Str8LitComp("how large this block's words are"), 1},
     {Str8LitComp("@color"), Str8LitComp("the colour of this block's words"), 1},
+    {Str8LitComp("@align"), Str8LitComp("this block's lines left, center or right"), 1},
     {Str8LitComp("@layout"), Str8LitComp("how this slide is laid out"), 1},
     {Str8LitComp("@theme"), Str8LitComp("the whole deck's colours"), 1},
     {Str8LitComp("@video"), Str8LitComp("how this slide's video plays"), 1},
@@ -27,6 +28,13 @@ PRIVATE Complete_Item _complete_place[] = {
 // @size and @color are the block's words' unless they say title: a number
 // or a colour comes at once, and "title" is the one word there is to offer.
 PRIVATE Complete_Item _complete_title[] = {
+    {Str8LitComp("title"), Str8LitComp("the slide's title, not this block's words"), 1},
+};
+
+PRIVATE Complete_Item _complete_align[] = {
+    {Str8LitComp("left"), Str8LitComp("every line against the left"), 0},
+    {Str8LitComp("center"), Str8LitComp("every line in the middle"), 0},
+    {Str8LitComp("right"), Str8LitComp("every line against the right"), 0},
     {Str8LitComp("title"), Str8LitComp("the slide's title, not this block's words"), 1},
 };
 
@@ -140,6 +148,12 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
       // Not before something is typed: a number is what mostly comes, and
       // the hint says so.
       _Complete_From(_complete_title);
+   } else if (word_count == 1 && _Complete_WordIs(0, "@align")) {
+      _Complete_From(_complete_align);
+   } else if (word_count == 2 && _Complete_WordIs(0, "@align") && (_Complete_WordIs(1, "title") || _Complete_WordIs(1, "text"))) {
+      // The three sides, without "title" again.
+      from = _complete_align;
+      from_count = 3;
    } else if (word_count == 1 && _Complete_WordIs(0, "@layout")) {
       _Complete_From(_complete_layouts);
    } else if (word_count == 1 && _Complete_WordIs(0, "@theme")) {

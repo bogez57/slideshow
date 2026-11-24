@@ -87,6 +87,12 @@
 //                       of the theme's
 //    @color #ffcc00     the same for the body's words, or the block's. The
 //                       edit screen writes these four too (look\look.c)
+//    @align center      which side the lines of the block it is in are
+//                       against: left, center or right. Centered or to the
+//                       right, bullets are lines like any other, without
+//                       their dots. "@align title right" is the title's, as
+//                       with @size and @color. Without the line: as the
+//                       slide's layout has it
 //    @note Say this     a note for whoever presents, on the slide it is in: not
 //                       drawn on the slide, shown beside it on request
 //    anything else      a paragraph. Each line is its own
@@ -153,6 +159,15 @@ struct Deck_Place {
 // How the words of a title, or of a block of the body, look where the
 // deck's text says so: from @size and @color lines. Without them, the size
 // is view.c's and the colour the theme's.
+// Where each line of some words is, across the room they have. The names,
+// as written after @align, are in deck.c (Deck_AlignName), in this order.
+typedef enum Deck_Align {
+   Deck_Align_Left,
+   Deck_Align_Center,
+   Deck_Align_Right,
+   Deck_Align_COUNT,
+} Deck_Align;
+
 typedef struct Deck_Look Deck_Look;
 struct Deck_Look {
    B32     has_size;
@@ -163,6 +178,12 @@ struct Deck_Look {
    // is one: for the edit screen to write over.
    Rng1U64 size_line;
    Rng1U64 color_line;
+
+   // From an @align line: which side its lines are against, or the middle.
+   // Without one, as the slide's layout has it (Deck_AlignOf).
+   B32        has_align;
+   Deck_Align align;
+   Rng1U64    align_line;
 };
 
 // The smallest and the largest an @size line can make words.
@@ -326,6 +347,14 @@ struct Deck_Deck {
 // As written after @theme and @layout.
 String8 Deck_ThemeName(Deck_Theme theme);
 String8 Deck_LayoutName(Deck_Layout layout);
+// As written after @align.
+String8 Deck_AlignName(Deck_Align align);
+
+// How a title's or a block's lines are set across their room: its @align
+// line's, or with none, in the middle on a slide whose layout is center and
+// against the left on any other.
+Deck_Align Deck_AlignOf(Deck_Slide* slide, Deck_Look* look);
+
 // As written after @place.
 String8 Deck_PlaceName(Deck_PlaceKind kind);
 
