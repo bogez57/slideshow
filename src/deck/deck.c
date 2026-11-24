@@ -504,6 +504,14 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
             if (Str8Match(kind_name, Str8Lit("video"), StringMatchFlag_CaseInsensitive)) {
                kind = Deck_PlaceKind_Picture;
             }
+            // Without saying what, the block's words - as @size and @color:
+            // the numbers start at once.
+            F32 first_number = 0;
+            String8 as_number = kind_name;
+            if (kind == Deck_PlaceKind_COUNT && _Deck_TakeNumber(&as_number, &first_number)) {
+               kind = Deck_PlaceKind_Text;
+               numbers = name;
+            }
 
             F32 x = 0, y = 0, w = 0, h = 0;
             if (kind != Deck_PlaceKind_COUNT && _Deck_TakeNumber(&numbers, &x) && _Deck_TakeNumber(&numbers, &y) &&

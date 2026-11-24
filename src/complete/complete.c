@@ -10,8 +10,8 @@ PRIVATE Complete_Item _complete_lines[] = {
     {Str8LitComp("@note"), Str8LitComp("a note to yourself, not on the slide"), 1},
     {Str8LitComp("@box"), Str8LitComp("another block of words, to place on its own"), 0},
     {Str8LitComp("@place"), Str8LitComp("where a picture, the text or the title goes"), 1},
-    {Str8LitComp("@size"), Str8LitComp("how large the words are"), 1},
-    {Str8LitComp("@color"), Str8LitComp("the colour of the words"), 1},
+    {Str8LitComp("@size"), Str8LitComp("how large this block's words are"), 1},
+    {Str8LitComp("@color"), Str8LitComp("the colour of this block's words"), 1},
     {Str8LitComp("@layout"), Str8LitComp("how this slide is laid out"), 1},
     {Str8LitComp("@theme"), Str8LitComp("the whole deck's colours"), 1},
     {Str8LitComp("@video"), Str8LitComp("how this slide's video plays"), 1},
@@ -23,14 +23,10 @@ PRIVATE Complete_Item _complete_place[] = {
     {Str8LitComp("title"), Str8LitComp("then left top width height, 0 to 1"), 1},
 };
 
-PRIVATE Complete_Item _complete_size[] = {
-    {Str8LitComp("title"), Str8LitComp("then a number: 1.5 is half as large again"), 1},
-    {Str8LitComp("text"), Str8LitComp("then a number: 0.8 is a little smaller"), 1},
-};
-
-PRIVATE Complete_Item _complete_color[] = {
-    {Str8LitComp("title"), Str8LitComp("then a colour's name, or #rrggbb"), 1},
-    {Str8LitComp("text"), Str8LitComp("then a colour's name, or #rrggbb"), 1},
+// @size and @color are the block's words' unless they say title: a number
+// or a colour comes at once, and "title" is the one word there is to offer.
+PRIVATE Complete_Item _complete_title[] = {
+    {Str8LitComp("title"), Str8LitComp("the slide's title, not this block's words"), 1},
 };
 
 PRIVATE Complete_Item _complete_video[] = {
@@ -139,24 +135,31 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
       _Complete_From(_complete_lines);
    } else if (word_count == 1 && _Complete_WordIs(0, "@place")) {
       _Complete_From(_complete_place);
-   } else if (word_count == 1 && _Complete_WordIs(0, "@size")) {
-      _Complete_From(_complete_size);
-   } else if (word_count == 1 && _Complete_WordIs(0, "@color")) {
-      _Complete_From(_complete_color);
+   } else if (word_count == 1 && _Complete_WordIs(0, "@size") && prefix.size != 0) {
+      // Not before something is typed: a number is what mostly comes, and
+      // the hint says so.
+      _Complete_From(_complete_title);
    } else if (word_count == 1 && _Complete_WordIs(0, "@layout")) {
       _Complete_From(_complete_layouts);
    } else if (word_count == 1 && _Complete_WordIs(0, "@theme")) {
       _Complete_From(_complete_themes);
    } else if (word_count >= 1 && word_count <= 2 && _Complete_WordIs(0, "@video")) {
       _Complete_From(_complete_video);
-   } else if (word_count == 2 && _Complete_WordIs(0, "@color")) {
-      // The colours with names, as the deck layer has them.
-      colors = PushArray(arena, Complete_Item, DECK_NAMED_COLOR_COUNT);
+   } else if (_Complete_WordIs(0, "@color") &&
+              (word_count == 1 || (word_count == 2 && (_Complete_WordIs(1, "title") || _Complete_WordIs(1, "text"))))) {
+      // The colours with names, as the deck layer has them - for this
+      // block's words, or after "title" for the title's. And "title"
+      // itself, last, where it can still be said.
+      colors = PushArray(arena, Complete_Item, DECK_NAMED_COLOR_COUNT + 1);
       for (U64 i = 0; i < DECK_NAMED_COLOR_COUNT; i += 1) {
          colors[i].name = Deck_NamedColorFromIdx(i).name;
       }
       from = colors;
       from_count = DECK_NAMED_COLOR_COUNT;
+      if (word_count == 1) {
+         colors[from_count] = _complete_title[0];
+         from_count += 1;
+      }
    }
 #undef _Complete_From
 #undef _Complete_WordIs
@@ -207,6 +210,13 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
    return result;
 }
 
+// Whether a word starts as a number does: a digit, a point or a minus.
+PRIVATE B32
+_Complete_IsNumber(String8 word) {
+   B32 result = (word.size != 0 && ((word.str[0] >= '0' && word.str[0] <= '9') || word.str[0] == '.' || word.str[0] == '-'));
+   return result;
+}
+
 // What an @ line still wants where no list has it: a few dim words after
 // the cursor, as if typed - the numbers of @place, one by one as they are
 // written; the number of @size; the words of @note. Empty: nothing to say.
@@ -222,11 +232,14 @@ _Complete_HintFromState(const App_State* app_state, Arena* arena) {
 #define _Complete_WordIs(idx_, name_) Str8Match(line.words[idx_], Str8Lit(name_), StringMatchFlag_CaseInsensitive)
    B32 at_space = (line.prefix.size == 0);
 
-   if (_Complete_WordIs(0, "@place") && line.word_count >= 2) {
+   // @place with no kind after it is the block's words: the numbers start
+   // a word sooner.
+   B32 place_has_kind = (line.word_count >= 2 && !_Complete_IsNumber(line.words[1]));
+   if (_Complete_WordIs(0, "@place") && (line.word_count >= 2 || (!at_space && _Complete_IsNumber(line.prefix)))) {
       // The numbers there are still to write: all four after the kind, and
       // one fewer for each written. With one being typed, those after it.
       char* names[4] = {"left", "top", "width", "height"};
-      U64   written = line.word_count - 2 + (at_space ? 0 : 1);
+      U64   written = line.word_count - (place_has_kind ? 2 : 1) + (at_space ? 0 : 1);
       if (written < 4 || (written == 4 && !at_space)) {
          String8List parts = {0};
          for (U64 i = written; i < 4; i += 1) {
@@ -235,9 +248,11 @@ _Complete_HintFromState(const App_State* app_state, Arena* arena) {
          Str8ListPush(arena, &parts, Str8Lit("    each a part of the slide, 0 to 1"));
          result = Str8ListJoin(arena, &parts, 0);
       }
-   } else if (_Complete_WordIs(0, "@size") && line.word_count == 2 && at_space) {
-      result = Str8Lit("1.5    times the usual size: 0.5 is half");
-   } else if (_Complete_WordIs(0, "@color") && line.word_count == 2 && !at_space && line.prefix.str[0] == '#') {
+   } else if (_Complete_WordIs(0, "@size") && at_space &&
+              (line.word_count == 1 || (line.word_count == 2 && !_Complete_IsNumber(line.words[1])))) {
+      result = (line.word_count == 1) ? Str8Lit("1.5    times the usual size, for this block's words. Or: title 1.5")
+                                      : Str8Lit("1.5    times the usual size: 0.5 is half");
+   } else if (_Complete_WordIs(0, "@color") && line.word_count >= 1 && line.word_count <= 2 && !at_space && line.prefix.str[0] == '#') {
       // The names are the list's. A # is the other way to say a colour.
       String8 pattern = Str8Lit("#rrggbb");
       if (line.prefix.size < pattern.size) {

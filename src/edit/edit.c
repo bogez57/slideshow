@@ -887,18 +887,26 @@ _Edit_LineAt(Arena* arena, String8 text, U64 pos) {
    return PushStr8F(arena, "%S\n", Str8Substr(text, R1U64(start, end)));
 }
 
-// An @color line of the title's or a block's, as a block's: what follows its
-// second word, after "@color text".
+// An @color line of the title's or a block's, as a block's: the colour,
+// which is what follows "@color" - and the "title" or "text" after that, if
+// the line says whose.
 PRIVATE String8
 _Edit_ColorLineAsText(Arena* arena, String8 text, Rng1U64 line) {
    String8 whole = Str8Substr(text, R1U64(Min(line.min, text.size), Min(line.max, text.size)));
    U64     at = 0;
    for (U32 word = 0; word < 2; word += 1) {
       while (at < whole.size && (whole.str[at] == ' ' || whole.str[at] == '\t')) at += 1;
+      U64 word_start = at;
       while (at < whole.size && whole.str[at] != ' ' && whole.str[at] != '\t') at += 1;
+      String8 name = Str8Substr(whole, R1U64(word_start, at));
+      if (word == 1 && !Str8Match(name, Str8Lit("title"), StringMatchFlag_CaseInsensitive) &&
+          !Str8Match(name, Str8Lit("text"), StringMatchFlag_CaseInsensitive)) {
+         // The colour itself.
+         at = word_start;
+      }
    }
    while (at < whole.size && (whole.str[at] == ' ' || whole.str[at] == '\t')) at += 1;
-   return PushStr8F(arena, "@color text %S\n", Str8Skip(whole, at));
+   return PushStr8F(arena, "@color %S\n", Str8Skip(whole, at));
 }
 
 // The pieces picked, as they are written (Edit_ClipPiece), into pieces, on
@@ -953,7 +961,7 @@ _Edit_ClipFromPicked(Arena* arena, const App_State* app_state, Edit_ClipPiece* p
          continue;
       }
       if (look != 0 && look->has_size) {
-         Str8ListPush(arena, &looks, PushStr8F(arena, "@size text %.2f\n", look->size));
+         Str8ListPush(arena, &looks, PushStr8F(arena, "@size %.2f\n", look->size));
       }
       if (look != 0 && look->has_color) {
          Str8ListPush(arena, &looks, _Edit_ColorLineAsText(arena, text, look->color_line));

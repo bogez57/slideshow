@@ -16,7 +16,8 @@
 //                  slide. @video file is the same, for a video
 //    @place        what can come next: picture, text, title
 //    @theme        the themes. @layout: the layouts. @video: how it plays
-//    @color text   the colours with names
+//    @color        the colours with names, for the block's words - and
+//                  title, for the title's instead
 //
 // Where no list has what comes next, a hint is drawn after the cursor, dim,
 // as if typed: the four numbers of @place, fewer as each is written; the

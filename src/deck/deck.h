@@ -68,15 +68,17 @@
 //                       The edit screen writes all three, from the mouse
 //    @size title 1.5    how large the title's words are, as so many times
 //                       their usual size (0.5 is half)
-//    @size text 0.8     the same for the body's words - on a slide with
-//                       @box lines, those of the block the line is in
+//    @size 0.8          the same for the body's words - on a slide with
+//                       @box lines, those of the block the line is in.
+//                       Whose words need not be said: a line that does not
+//                       say title is the block's. "@size text 0.8" is the
+//                       same, and so it is for @color and @place
 //    @color title red   the colour of the title's words: one of the names
 //                       in deck.c (Deck_NamedColorFromIdx) - white, black,
 //                       gray, red, orange, yellow, green, blue, purple,
 //                       pink - or #rrggbb, as a web page has it. In place
 //                       of the theme's
-//    @color text #ffcc00
-//                       the same for the body's words, or the block's. The
+//    @color #ffcc00     the same for the body's words, or the block's. The
 //                       edit screen writes these four too (look\look.c)
 //    @note Say this     a note for whoever presents, on the slide it is in: not
 //                       drawn on the slide, shown beside it on request

@@ -13,7 +13,7 @@
 //                     (deck.h) and the theme's
 //
 // What comes of it is a line of the deck's text, as with a piece moved by
-// the mouse (place\place.c): "@size title 1.21", "@color text orange"
+// the mouse (place\place.c): "@size title 1.21", "@color orange"
 // (deck.h), over the one the piece has or as a new line beside it. The text
 // is still all there is to a deck: the line can be changed by hand - any
 // size, any #rrggbb - and Ctrl+Z takes a change back. Usual and the theme's
@@ -94,7 +94,10 @@ _Look_WriteSize(Editor_Editor* editor, Deck_Slide* slide, Deck_PlaceKind kind, U
    Deck_Look* look = Look_Of(slide, kind, idx);
    if (has_size) {
       Temp    scratch = ScratchBegin(0, 0);
-      String8 line = PushStr8F(scratch.arena, "@size %S %.2f", Deck_PlaceName(kind), size);
+      // A block's without saying whose: an @size line is its block's words'
+      // unless it says title.
+      String8 line = (kind == Deck_PlaceKind_Title) ? PushStr8F(scratch.arena, "@size title %.2f", size)
+                                                    : PushStr8F(scratch.arena, "@size %.2f", size);
       Edit_PutLineFor(editor, slide, kind, idx, look->has_size, look->size_line, line);
       ScratchEnd(scratch);
    } else if (look->has_size) {
@@ -108,7 +111,8 @@ _Look_WriteColor(Editor_Editor* editor, Deck_Slide* slide, Deck_PlaceKind kind, 
    Deck_Look* look = Look_Of(slide, kind, idx);
    if (color.size != 0) {
       Temp    scratch = ScratchBegin(0, 0);
-      String8 line = PushStr8F(scratch.arena, "@color %S %S", Deck_PlaceName(kind), color);
+      String8 line = (kind == Deck_PlaceKind_Title) ? PushStr8F(scratch.arena, "@color title %S", color)
+                                                    : PushStr8F(scratch.arena, "@color %S", color);
       Edit_PutLineFor(editor, slide, kind, idx, look->has_color, look->color_line, line);
       ScratchEnd(scratch);
    } else if (look->has_color) {
