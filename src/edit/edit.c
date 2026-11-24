@@ -60,6 +60,8 @@
 //                     line away, and the preview has the window. Again, or
 //                     F1, brings them back
 //    fullscreen       F11 or Alt+Return. Esc leaves it
+//    @ lines          type @ in the text: a list of what can be written,
+//                     Tab or Return to take one (complete\complete.c)
 //    the text's keys  as vim has them, in three modes (vim\vim.c). Esc is
 //                     back to command mode
 //    deselect         Esc: nothing selected, and no box in the preview
@@ -2049,6 +2051,11 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
    // gives it up, before Esc does anything else
    Place_Keys(app_state);
 
+   //- bgz: the list under an @ line being typed (complete\complete.c): its
+   // keys - Up, Down, Tab, Return, Esc - while it shows, before they are
+   // anything else's
+   Complete_Input(app_state, ops);
+
    //- bgz: the screen's own keys, taken before the editor sees them
    B32 is_fullscreen = Core_WM_WindowIsFullscreen(window);
    if (Core_WM_KeyPress(events, window, 0, WM_Key_F11) ||
@@ -3123,6 +3130,10 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
    UI_BoxFlags click_flags = interactive ? UI_BoxFlag_Clickable : 0;
 
    B32 shows_text = !app_state->hide_text;
+
+   //- bgz: the list under an @ line being typed (complete\complete.c).
+   // Built first: over everything.
+   Complete_Build(app_state, layout.editor_box, window_dim, ui, layout.ui_px);
 
    //- bgz: the dividers: a strip over the edge between the left side and
    // the preview, and one over the Format panel's top edge, each dragged to

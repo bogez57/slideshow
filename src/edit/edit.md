@@ -27,7 +27,7 @@ The screen's own, `g_edit_view` (`Edit_View`, edit.h), written with no op:
 
 ## Functions and ops
 
-- `Edit_Input`: the screen's keys, then the text's (`Vim_KeyInput`, vim: vim's keys by its mode, then the editor's). Pushes ops.
+- `Edit_Input`: the keys of the list under an @ line (complete), then the screen's keys, then the text's (`Vim_KeyInput`, vim: vim's keys by its mode, then the editor's). Pushes ops.
 - `Edit_Build`: the whole screen, in FrameWork's UI build. Lays the preview's slide out into `g_edit_view`, and pushes ops for clicks.
 - `Edit_OpenMenu`: a right-click on the preview's slide opens its menu there - copy, delete, front and back, lining up - each line pushing the op its key does. place calls it for a right-click on a piece.
 - `Edit_PreviewHitAt`: which piece of the preview a point is on.

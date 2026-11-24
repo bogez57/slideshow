@@ -181,4 +181,9 @@ void Editor_Press(Editor_Editor* editor, Arena* arena, Editor_Box box, Vec2F32 p
 void Editor_Drag(Editor_Editor* editor, Arena* arena, Editor_Box box, Vec2F32 pos);
 void Editor_Wheel(Editor_Editor* editor, Editor_Box box, F32 notches);
 
+// Where in box the character at pos is drawn, as it was last scrolled: its
+// cell. Zero if that is scrolled out of the box. The rows are laid out on
+// arena.
+Rng2F32 Editor_RectFromPos(Editor_Editor* editor, Arena* arena, Editor_Box box, U64 pos);
+
 void Editor_Draw(Editor_Editor* editor, Arena* arena, Editor_Box box);

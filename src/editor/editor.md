@@ -12,7 +12,7 @@ A plain text editor for one file: the text, the cursor and selection, undo, and 
 - The text: `Editor_Text`, `Editor_ReplaceRange`, `Editor_Insert`, `Editor_InsertLine`, `Editor_WrapSelection`, `Editor_SetCursor`, `Editor_JoinUndoSince` (several changes undone as one: a move of several pieces, a size for several).
 - Positions: `Editor_LineStart`, `Editor_LineEnd`, `Editor_PrevChar`, `Editor_NextChar`, `Editor_SelectionMin`, `Editor_SelectionMax`. `Editor_CleanText`: text from the clipboard, as the editor keeps text.
 - `block_cursor`, `selects_lines`: how the cursor is drawn and what a selection takes in, set by vim.
-- Its box: `Editor_Input` (keys), `Editor_Press`, `Editor_Drag`, `Editor_Wheel`, `Editor_Draw`.
+- Its box: `Editor_Input` (keys), `Editor_Press`, `Editor_Drag`, `Editor_Wheel`, `Editor_Draw`, `Editor_RectFromPos` (where a character is drawn).
 
 ## Used by
 
@@ -20,4 +20,5 @@ A plain text editor for one file: the text, the cursor and selection, undo, and 
 - frame.c: opens and closes it with a text deck, reads its text into the deck, and reads the file again when something else writes it.
 - caret, look, place: the text, the cursor, and lines written for a piece of a slide.
 - vim: the keys in command and visual mode, which move the cursor and change the text through the functions above, and `Editor_Input` for the rest.
+- complete: the line the cursor is in, where its word is drawn, and the name written over it.
 - open: unsaved changes, before another deck is opened.

@@ -85,6 +85,10 @@ struct App_State {
    // The mode the keys in the text are in, as vim has modes (vim\vim.h).
    Vim_State vim;
 
+   // The list under an @ line as it is typed: what was chosen in it
+   // (complete\complete.h).
+   Complete_State complete;
+
    // The watch on the folder the text deck's file is in: something written
    // there is when the file is looked at (FR_SyncDeck). 0 for a folder of
    // images, and when the folder could not be watched - then the file is

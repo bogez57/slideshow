@@ -808,6 +808,22 @@ Editor_Drag(Editor_Editor* editor, Arena* arena, Editor_Box box, Vec2F32 pos) {
    }
 }
 
+Rng2F32
+Editor_RectFromPos(Editor_Editor* editor, Arena* arena, Editor_Box box, U64 pos) {
+   Rng2F32         result = {0};
+   _Editor_Metrics metrics = _Editor_MetricsFromBox(box);
+   Editor_RowArray rows = _Editor_Layout(arena, editor, metrics.columns);
+   pos = Min(pos, editor->size);
+
+   U64 row_idx = _Editor_RowFromPos(rows, pos);
+   F32 x = metrics.text_rect.min.x + (F32)_Editor_ColumnCount(editor, rows.v[row_idx].start, pos) * metrics.char_w;
+   F32 y = metrics.text_rect.min.y + (F32)row_idx * metrics.row_h - editor->scroll_y;
+   if (y + metrics.row_h > box.rect.min.y && y < box.rect.max.y) {
+      result = R2F32P(x, y, x + metrics.char_w, y + metrics.row_h);
+   }
+   return result;
+}
+
 void
 Editor_Wheel(Editor_Editor* editor, Editor_Box box, F32 notches) {
    _Editor_Metrics metrics = _Editor_MetricsFromBox(box);
