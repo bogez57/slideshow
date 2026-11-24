@@ -275,10 +275,23 @@ _FR_RememberRecent(App_State* app_state, String8 path) {
 
 B32
 FR_OpenPath(App_State* app_state, String8 path) {
-   if (app_state->editor != 0 && Editor_HasUnsavedChanges(app_state->editor)) {
-      StateOp_App_Notice(app_state->op_list)->notice = Str8Lit("Unsaved changes. Save (Ctrl+S) before opening something else.");
+   // Not over unsaved changes, unless they were chosen to be let go: the
+   // path is kept, and the open screen asks what to do with them (its foot:
+   // Open_Build, Open_Resolve).
+   if (app_state->editor != 0 && Editor_HasUnsavedChanges(app_state->editor) && !app_state->open_discards) {
+      if (path.size <= sizeof(app_state->pending_open)) {
+         MemoryCopy(app_state->pending_open, path.str, path.size);
+         app_state->pending_open_size = path.size;
+         app_state->pending_open_is_new = 0;
+         if (!app_state->show_open) {
+            StateOp_Open_Show(app_state->op_list);
+         }
+      } else {
+         StateOp_App_Notice(app_state->op_list)->notice = Str8Lit("Unsaved changes. Save (Ctrl+S) before opening something else.");
+      }
       return 0;
    }
+   app_state->pending_open_size = 0;
 
    U64        first_slide = 0;
    Deck_Deck* deck = Deck_OpenPath(path, &first_slide);

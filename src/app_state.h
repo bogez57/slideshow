@@ -119,6 +119,17 @@ struct App_State {
    // opened lately and what is in a folder, to pick a deck from. Its rows and
    // where they are scrolled to are open.c's own.
    B32     show_open;
+
+   // A deck that was to be opened while the one that is open had unsaved
+   // changes: the open screen asks what to do with them - save, let go, or
+   // not open it after all (open\open.c). pending_open_size 0: none.
+   // pending_open_is_new: it is a new deck, still to be made.
+   // open_discards: set by the op that answers, while it opens the deck, for
+   // the changes to be let go.
+   U8  pending_open[1024];
+   U64 pending_open_size;
+   B32 pending_open_is_new;
+   B32 open_discards;
    Arena*  open_arena;  // open_folder
    String8 open_folder; // whole, from the drive. Empty: the list of drives
 

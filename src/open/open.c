@@ -287,6 +287,8 @@ void
 Open_Close(App_State* app_state, StateOp_List* ops) {
    UnusedVariable(ops);
    app_state->show_open = 0;
+   // And with it, a deck that was waiting on the unsaved changes.
+   app_state->pending_open_size = 0;
 }
 STATE_OP_NO_PARAMS(Open_Close)
 
@@ -296,7 +298,7 @@ void
 Open_NewDeck(App_State* app_state, StateOp_List* ops, Open_NewDeckOpParams* params) {
    // Asked first, so that a deck that cannot be opened now - unsaved
    // changes in the one that is - does not leave a file behind.
-   B32 can_open = !(app_state->editor != 0 && Editor_HasUnsavedChanges(app_state->editor));
+   B32 can_open = !(app_state->editor != 0 && Editor_HasUnsavedChanges(app_state->editor) && !app_state->open_discards);
    if (can_open && !WriteDataToFilePath(params->path, Str8Lit("# Title\n"))) {
       StateOp_App_Notice(ops)->notice = Str8Lit("Could not make a file in this folder");
    } else if (FR_OpenPath(app_state, params->path)) {
@@ -305,9 +307,52 @@ Open_NewDeck(App_State* app_state, StateOp_List* ops, Open_NewDeckOpParams* para
          Editor_SetCursor(app_state->editor, 7);
          app_state->editor->mark = 2;
       }
+   } else if (app_state->pending_open_size != 0) {
+      // It waits on the unsaved changes, and is made when they are answered.
+      app_state->pending_open_is_new = 1;
    }
 }
 STATE_OP(Open_NewDeck)
+
+// The answer to "unsaved changes", for the deck that was to be opened
+// (App_State's pending_open): saved first, or let go, and then it is
+// opened. With neither, it is not opened after all.
+typedef struct Open_ResolveOpParams Open_ResolveOpParams;
+struct Open_ResolveOpParams {
+   B32 saves;
+   B32 discards;
+};
+void
+Open_Resolve(App_State* app_state, StateOp_List* ops, Open_ResolveOpParams* params) {
+   if (app_state->pending_open_size == 0) {
+      return;
+   }
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 path = PushStr8Copy(scratch.arena, Str8(app_state->pending_open, app_state->pending_open_size));
+   B32     is_new = app_state->pending_open_is_new;
+   app_state->pending_open_size = 0;
+
+   B32 opens = params->discards;
+   if (params->saves && app_state->editor != 0) {
+      opens = Editor_Save(app_state->editor);
+      if (!opens) {
+         StateOp_App_Notice(ops)->notice = Str8Lit("Could not save: the file could not be written. Nothing was opened.");
+      }
+   }
+   if (opens) {
+      app_state->open_discards = params->discards;
+      if (is_new) {
+         Open_NewDeckOpParams new_deck = {0};
+         new_deck.path = path;
+         Open_NewDeck(app_state, ops, &new_deck);
+      } else if (FR_OpenPath(app_state, path)) {
+         app_state->show_open = 0;
+      }
+      app_state->open_discards = 0;
+   }
+   ScratchEnd(scratch);
+}
+STATE_OP(Open_Resolve)
 
 ////////////////////////////////
 //~ bgz: layout
@@ -402,6 +447,11 @@ Open_Input(const App_State* app_state, StateOp_List* ops) {
    if (Core_WM_KeyPress(events, window, 0, WM_Key_Esc) || Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_O)) {
       StateOp_Open_Close(ops);
       return;
+   }
+   // With a deck waiting on unsaved changes, Ctrl+S is the first answer:
+   // save, and open it.
+   if (app_state->pending_open_size != 0 && Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_S)) {
+      StateOp_Open_Resolve(ops)->saves = 1;
    }
    if (Core_WM_KeyPress(events, window, 0, WM_Key_F11) || Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_Return)) {
       StateOp_App_ToggleFullscreen(ops);
@@ -659,7 +709,35 @@ Open_Build(const App_State* app_state, Vec2F32 window_dim) {
             UI_SetNextChildLayoutAxis(Axis2_X);
             UI_SetNextColorTag(Str8Lit("panel_bar"));
             UI_Box* foot = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###open foot");
-            UI_Parent(foot) {
+            // With a deck waiting on unsaved changes, the question and its
+            // three answers are here, in the buttons' place.
+            B32 asks = (app_state->pending_open_size != 0);
+            if (asks) UI_Parent(foot) {
+               UI_Spacer(UI_Px(pad, 1));
+               UI_SetNextPrefWidth(UI_TextDim(1, 1));
+               UI_SetNextPrefHeight(UI_Px(foot_h, 1));
+               UI_SetNextColorTag(Str8Lit("notice"));
+               UI_Label(Str8Lit("Unsaved changes:"));
+               UI_Spacer(UI_Px(12.0f * ui, 1));
+               char* answers[3] = {"Save and open", "Discard and open", "Cancel"};
+               for (U64 i = 0; i < ArrayCount(answers); i += 1) {
+                  UI_SetNextPrefWidth(UI_ChildrenSum(1));
+                  UI_SetNextPrefHeight(UI_Px(foot_h, 1));
+                  UI_SetNextChildLayoutAxis(Axis2_Y);
+                  UI_Box* cell = UI_BuildBoxFromStringf(0, "open answer cell %llu", (unsigned long long)i);
+                  UI_Parent(cell) {
+                     UI_SetNextPrefWidth(UI_Px(0, 1));
+                     UI_Spacer(UI_Px((foot_h - button_h) * 0.5f, 1));
+                     if (_Open_BuildButton(Str8CString(answers[i]), button_h, ui, 10 + i)) {
+                        Open_ResolveOpParams* resolve = StateOp_Open_Resolve(app_state->op_list);
+                        resolve->saves = (i == 0);
+                        resolve->discards = (i == 1);
+                     }
+                  }
+                  UI_Spacer(UI_Px(10.0f * ui, 1));
+               }
+            }
+            if (!asks) UI_Parent(foot) {
                UI_Spacer(UI_Px(pad, 1));
                for (U64 i = 0; i < _open_view.action_count; i += 1) {
                   // A column, to put the button in the strip's middle.
