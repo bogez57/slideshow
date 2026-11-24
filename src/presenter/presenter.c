@@ -309,8 +309,11 @@ _Presenter_Build(const App_State* app_state, Vec2F32 window_dim) {
          // Where in the deck, and how long it has been: worked out first, for
          // the room they take under the next slide. Both shrink to fit across
          // the column.
-         String8 count = PushStr8F(UI_BuildArena(), "Slide %llu of %llu", (unsigned long long)(slide_idx + 1),
-                                   (unsigned long long)deck->slide_count);
+         // Of the slides that are shown: boards are not counted.
+         U64     shown_count = 0;
+         U64     shown_number = Deck_ShownNumber(deck, slide_idx, &shown_count);
+         String8 count = PushStr8F(UI_BuildArena(), "Slide %llu of %llu", (unsigned long long)shown_number,
+                                   (unsigned long long)shown_count);
          F32 count_w = Text_Width(fonts->regular, count_px, count);
          if (count_w > right_w && count_w > 0) {
             count_px = (F32)(S32)Max(count_px * right_w / count_w, 8.0f);
@@ -460,17 +463,26 @@ _Presenter_Build(const App_State* app_state, Vec2F32 window_dim) {
          F32 thumb_h = strip_h;
          F32 thumb_w = (F32)(S32)(thumb_h * VIEW_PAGE_W / VIEW_PAGE_H);
          F32 step = thumb_w + gap;
-         F32 all_w = step * (F32)deck->slide_count - gap;
+         // The slides that are shown: a board has no place in the row.
+         U64 row_count = 0;
+         U64 row_showing = Deck_ShownNumber(deck, slide_idx, &row_count);
+         row_showing = (row_showing != 0) ? row_showing - 1 : 0;
+         F32 all_w = step * (F32)row_count - gap;
          F32 strip_w = Dim2F32(strip).x;
          F32 scroll = 0;
          if (all_w > strip_w) {
-            scroll = Clamp(0.0f, step * (F32)slide_idx + thumb_w * 0.5f - strip_w * 0.5f, all_w - strip_w);
+            scroll = Clamp(0.0f, step * (F32)row_showing + thumb_w * 0.5f - strip_w * 0.5f, all_w - strip_w);
          }
 
          // Only the part of each inside the strip shows, and can be clicked.
          UI_Box* strip_box = FR_BuildRectBox(UI_BoxFlag_Clip, strip, "###presenter strip");
+         U64     row_idx = 0;
          UI_Parent(strip_box) for (U64 i = 0; i < deck->slide_count; i += 1) {
-            F32     x = strip.min.x + step * (F32)i - scroll;
+            if (deck->slides[i].is_canvas) {
+               continue;
+            }
+            F32     x = strip.min.x + step * (F32)row_idx - scroll;
+            row_idx += 1;
             Rng2F32 rect = R2F32P(x, strip.min.y, x + thumb_w, strip.max.y);
             if (rect.max.x <= strip.min.x || rect.min.x >= strip.max.x) {
                continue;

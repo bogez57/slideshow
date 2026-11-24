@@ -884,8 +884,11 @@ _FR_BuildPresentation(const App_State* app_state, Vec2F32 window_dim) {
       Deck_Slide* slide = &deck->slides[app_state->slide_idx];
       String8     name = Str8SkipLastSlash(deck->file.size != 0 ? deck->file
                                                                     : (slide->picture_count != 0 ? slide->pictures[0].path : Str8Lit("")));
-      String8     text = PushStr8F(UI_BuildArena(), "%llu / %llu   %S", (unsigned long long)(app_state->slide_idx + 1),
-                                   (unsigned long long)deck->slide_count, name);
+      // Of the slides that are shown: boards are not counted.
+      U64         shown_count = 0;
+      U64         shown_number = Deck_ShownNumber(deck, app_state->slide_idx, &shown_count);
+      String8     text = PushStr8F(UI_BuildArena(), "%llu / %llu   %S", (unsigned long long)shown_number,
+                                   (unsigned long long)shown_count, name);
 
       F32 px = 18.0f * scale;
       F32 pad = 8.0f * scale;

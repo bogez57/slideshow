@@ -63,6 +63,18 @@ struct Edit_View {
    F32     board_zoom;
    B32     board_panning;
    Vec2F32 board_pan_mouse;
+   // The cursor and the text as the board last saw them: when they change
+   // it goes to where the cursor is, if that does not show.
+   U64 board_seen_cursor;
+   U64 board_seen_edit_count;
+   U64 board_seen_slide_idx;
+   // The deck's file board_at and board_zoom are of, and what of them is
+   // written in the program's own folder (board.txt), to be where it was
+   // the next time that deck is opened.
+   U8      board_file[1024];
+   U64     board_file_size;
+   Vec2F32 board_saved_at;
+   F32     board_saved_zoom;
 
    // Where the two dividers were dragged to: the one between the left side
    // and the preview, as the part of the window's width the left side has,

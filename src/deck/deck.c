@@ -858,6 +858,25 @@ Deck_SlideToShow(Deck_Deck* deck, U64 slide_idx, S32 dir) {
 }
 
 U64
+Deck_ShownNumber(Deck_Deck* deck, U64 slide_idx, U64* count_out) {
+   U64 result = 0;
+   U64 count = 0;
+   for (U64 i = 0; i < deck->slide_count; i += 1) {
+      if (!deck->slides[i].is_canvas) {
+         count += 1;
+         if (i <= slide_idx) {
+            result = count;
+         }
+      }
+   }
+   if (slide_idx < deck->slide_count && deck->slides[slide_idx].is_canvas) {
+      result += 1;
+   }
+   *count_out = count;
+   return result;
+}
+
+U64
 Deck_SlideFromTextPos(Deck_Deck* deck, U64 text_pos) {
    U64 result = 0;
 

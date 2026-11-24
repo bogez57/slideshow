@@ -205,6 +205,20 @@ struct _Edit_Layout {
    F32 mono_px; // the editor's
 };
 
+// A board's page, where the window was moved to over it: base is the page
+// with nothing moved, where a slide's is.
+PRIVATE Rng2F32
+_Edit_BoardPage(Rng2F32 base) {
+   B32     is_moved = (g_edit_view.board_zoom > 0);
+   F32     zoom = is_moved ? g_edit_view.board_zoom : 1.0f;
+   Vec2F32 at = is_moved ? g_edit_view.board_at : V2F32(0.5f, 0.5f);
+   Vec2F32 dim = Dim2F32(base);
+   Vec2F32 middle = V2F32(base.min.x + dim.x * 0.5f, base.min.y + dim.y * 0.5f);
+   F32     x = (F32)(S32)(middle.x - at.x * dim.x * zoom);
+   F32     y = (F32)(S32)(middle.y - at.y * dim.y * zoom);
+   return R2F32P(x, y, x + dim.x * zoom, y + dim.y * zoom);
+}
+
 PRIVATE _Edit_Layout
 _Edit_LayoutFromWindowDim(const App_State* app_state, Vec2F32 window_dim) {
    _Edit_Layout result = {0};
@@ -290,15 +304,8 @@ _Edit_LayoutFromWindowDim(const App_State* app_state, Vec2F32 window_dim) {
       // where the window was moved to over it (_Edit_BoardInput).
       Deck_Deck* deck = app_state->deck;
       if (deck != 0 && app_state->slide_idx < deck->slide_count && deck->slides[app_state->slide_idx].is_canvas) {
-         B32     is_moved = (g_edit_view.board_zoom > 0);
-         F32     zoom = is_moved ? g_edit_view.board_zoom : 1.0f;
-         Vec2F32 at = is_moved ? g_edit_view.board_at : V2F32(0.5f, 0.5f);
-         Vec2F32 dim = Dim2F32(result.board_base);
-         Vec2F32 middle = V2F32(result.board_base.min.x + dim.x * 0.5f, result.board_base.min.y + dim.y * 0.5f);
-         F32     x = (F32)(S32)(middle.x - at.x * dim.x * zoom);
-         F32     y = (F32)(S32)(middle.y - at.y * dim.y * zoom);
          result.is_board = 1;
-         result.page = R2F32P(x, y, x + dim.x * zoom, y + dim.y * zoom);
+         result.page = _Edit_BoardPage(result.board_base);
          result.board = R2F32P(left_w + 1.0f, 0, window_dim.x, thumbs_y - caption_h);
          result.caption = R2F32P(result.board.min.x, result.board.max.y, result.board.max.x, result.board.max.y + caption_h);
       }
@@ -2189,8 +2196,134 @@ STATE_OP(Edit_PickRect)
 #define _EDIT_BOARD_ZOOM_STEP 1.15f  // a notch of the wheel
 #define _EDIT_BOARD_WHEEL     0.12f  // how far a notch moves it, in parts of the page as shown
 
+// Where the board was is kept in the program's own folder, in board.txt,
+// for the deck worked on last: three whole numbers - across, down and zoom,
+// each times _EDIT_BOARD_FILE_UNIT - and under them the deck's file.
+#define _EDIT_BOARD_FILE_UNIT 10000.0f
+
+PRIVATE String8
+_Edit_BoardFilePath(Arena* arena) {
+   Temp    scratch = ScratchBegin(&arena, 1);
+   String8 result = PushStr8F(arena, "%S\\board.txt", FR_LocalFolder(scratch.arena));
+   ScratchEnd(scratch);
+   return result;
+}
+
+// Not being able to write it loses only where the board was.
+PRIVATE void
+_Edit_BoardSave(void) {
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 data = PushStr8F(scratch.arena, "%d %d %d\n%S\n", (int)(g_edit_view.board_at.x * _EDIT_BOARD_FILE_UNIT),
+                            (int)(g_edit_view.board_at.y * _EDIT_BOARD_FILE_UNIT), (int)(g_edit_view.board_zoom * _EDIT_BOARD_FILE_UNIT),
+                            Str8(g_edit_view.board_file, g_edit_view.board_file_size));
+   WriteDataToFilePath(_Edit_BoardFilePath(scratch.arena), data);
+   g_edit_view.board_saved_at = g_edit_view.board_at;
+   g_edit_view.board_saved_zoom = g_edit_view.board_zoom;
+   ScratchEnd(scratch);
+}
+
+// The board as it was left, if what is written is of this deck's file: else
+// not moved.
+PRIVATE void
+_Edit_BoardLoad(void) {
+   g_edit_view.board_zoom = 0;
+   g_edit_view.board_at = V2F32(0.5f, 0.5f);
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 data = DataFromFilePath(scratch.arena, _Edit_BoardFilePath(scratch.arena));
+   S64     numbers[3] = {0};
+   U64     pos = 0;
+   B32     ok = 1;
+   for (U64 i = 0; i < ArrayCount(numbers) && ok; i += 1) {
+      while (pos < data.size && data.str[pos] == ' ') pos += 1;
+      B32 is_negative = (pos < data.size && data.str[pos] == '-');
+      pos += is_negative ? 1 : 0;
+      U64 digit_count = 0;
+      for (; pos < data.size && data.str[pos] >= '0' && data.str[pos] <= '9' && digit_count < 9; pos += 1, digit_count += 1) {
+         numbers[i] = numbers[i] * 10 + (S64)(data.str[pos] - '0');
+      }
+      numbers[i] = is_negative ? -numbers[i] : numbers[i];
+      ok = (digit_count != 0);
+   }
+   while (pos < data.size && data.str[pos] != '\n') pos += 1;
+   String8 file = Str8SkipChopWhitespace(Str8Skip(data, Min(pos, data.size)));
+   if (ok && Str8Match(file, Str8(g_edit_view.board_file, g_edit_view.board_file_size), StringMatchFlag_CaseInsensitive)) {
+      F32 zoom = (F32)numbers[2] / _EDIT_BOARD_FILE_UNIT;
+      if (zoom >= _EDIT_BOARD_ZOOM_MIN && zoom <= _EDIT_BOARD_ZOOM_MAX) {
+         g_edit_view.board_zoom = zoom;
+         g_edit_view.board_at = V2F32(Clamp(-DECK_CANVAS_REACH, (F32)numbers[0] / _EDIT_BOARD_FILE_UNIT, DECK_CANVAS_REACH),
+                                      Clamp(-DECK_CANVAS_REACH, (F32)numbers[1] / _EDIT_BOARD_FILE_UNIT, DECK_CANVAS_REACH));
+      }
+   }
+   g_edit_view.board_saved_at = g_edit_view.board_at;
+   g_edit_view.board_saved_zoom = g_edit_view.board_zoom;
+   ScratchEnd(scratch);
+}
+
+// The cursor has gone somewhere, or the text has changed, and where the
+// cursor is on the board does not show: the board is moved until it does.
+// Only for what is done in the text - the mouse not over the board - or
+// typed: a click or a drag on the board leaves it where it is. 1 if it
+// moved, and the slide is to be laid out again. After the slide is laid out.
+PRIVATE B32
+_Edit_BoardFollow(const App_State* app_state, F32 ui) {
+   Editor_Editor* editor = app_state->editor;
+   Vec2F32        base_dim = Dim2F32(g_edit_view.board_base);
+   if (editor == 0 || base_dim.x <= 0 || base_dim.y <= 0) {
+      return 0;
+   }
+   B32 has_moved = (editor->cursor != g_edit_view.board_seen_cursor || editor->edit_count != g_edit_view.board_seen_edit_count ||
+                    app_state->slide_idx != g_edit_view.board_seen_slide_idx);
+   g_edit_view.board_seen_cursor = editor->cursor;
+   g_edit_view.board_seen_edit_count = editor->edit_count;
+   g_edit_view.board_seen_slide_idx = app_state->slide_idx;
+
+   Rng2F32 board = g_edit_view.board;
+   Vec2F32 mouse = Core_WM_MouseFromWindow(app_state->window);
+   B32     is_typing = (app_state->vim.mode == Vim_Mode_Insert && g_place_view.drag.state == Place_DragState_None);
+   Rng2F32 rect = {0};
+   if (!has_moved || g_edit_view.board_panning || Core_WM_KeyIsDown(WM_Key_LeftMouseButton) ||
+       (Contains2F32(board, mouse) && !is_typing) || !Caret_RectOfCursor(app_state, &rect)) {
+      return 0;
+   }
+
+   // With some room around it, where the board is large enough for that.
+   Vec2F32 board_dim = Dim2F32(board);
+   F32     pad_x = Min(40.0f * ui, board_dim.x * 0.25f);
+   F32     pad_y = Min(40.0f * ui, board_dim.y * 0.25f);
+   F32     dx = 0;
+   F32     dy = 0;
+   if (rect.min.x < board.min.x + pad_x) {
+      dx = rect.min.x - (board.min.x + pad_x);
+   } else if (rect.max.x > board.max.x - pad_x) {
+      dx = Min(rect.max.x - (board.max.x - pad_x), rect.min.x - (board.min.x + pad_x));
+   }
+   if (rect.min.y < board.min.y + pad_y) {
+      dy = rect.min.y - (board.min.y + pad_y);
+   } else if (rect.max.y > board.max.y - pad_y) {
+      dy = Min(rect.max.y - (board.max.y - pad_y), rect.min.y - (board.min.y + pad_y));
+   }
+   if (dx == 0 && dy == 0) {
+      return 0;
+   }
+   if (g_edit_view.board_zoom <= 0) {
+      g_edit_view.board_zoom = 1.0f;
+      g_edit_view.board_at = V2F32(0.5f, 0.5f);
+   }
+   g_edit_view.board_at.x += dx / (base_dim.x * g_edit_view.board_zoom);
+   g_edit_view.board_at.y += dy / (base_dim.y * g_edit_view.board_zoom);
+   return 1;
+}
+
 PRIVATE void
 _Edit_BoardInput(const App_State* app_state) {
+   // Another deck: its board where it was left, if it is the one written.
+   String8 file = (app_state->editor != 0) ? app_state->editor->file : Str8Lit("");
+   if (!Str8Match(file, Str8(g_edit_view.board_file, g_edit_view.board_file_size), 0)) {
+      g_edit_view.board_file_size = Min(file.size, sizeof(g_edit_view.board_file));
+      MemoryCopy(g_edit_view.board_file, file.str, g_edit_view.board_file_size);
+      _Edit_BoardLoad();
+   }
+
    Vec2F32 base_dim = Dim2F32(g_edit_view.board_base);
    if (!g_edit_view.is_board || base_dim.x <= 0 || base_dim.y <= 0) {
       g_edit_view.board_panning = 0;
@@ -2199,7 +2332,11 @@ _Edit_BoardInput(const App_State* app_state) {
    if (g_edit_view.board_zoom <= 0) {
       g_edit_view.board_zoom = 1.0f;
       g_edit_view.board_at = V2F32(0.5f, 0.5f);
+      g_edit_view.board_saved_at = g_edit_view.board_at;
+      g_edit_view.board_saved_zoom = g_edit_view.board_zoom;
    }
+   Vec2F32 at_before = g_edit_view.board_at;
+   F32     zoom_before = g_edit_view.board_zoom;
    Vec2F32 mouse = Core_WM_MouseFromWindow(app_state->window);
    Vec2F32 middle = V2F32(g_edit_view.board_base.min.x + base_dim.x * 0.5f, g_edit_view.board_base.min.y + base_dim.y * 0.5f);
    B32     is_over = Contains2F32(g_edit_view.board, mouse) && !g_edit_view.menu_open;
@@ -2242,6 +2379,15 @@ _Edit_BoardInput(const App_State* app_state) {
 
    g_edit_view.board_zoom = zoom;
    g_edit_view.board_at = V2F32(Clamp(-DECK_CANVAS_REACH, at.x, DECK_CANVAS_REACH), Clamp(-DECK_CANVAS_REACH, at.y, DECK_CANVAS_REACH));
+
+   // Written once it has come to rest somewhere new, not at every notch.
+   B32 is_at_rest = (!g_edit_view.board_panning && g_edit_view.board_zoom == zoom_before && g_edit_view.board_at.x == at_before.x &&
+                     g_edit_view.board_at.y == at_before.y);
+   B32 is_new = (g_edit_view.board_zoom != g_edit_view.board_saved_zoom || g_edit_view.board_at.x != g_edit_view.board_saved_at.x ||
+                 g_edit_view.board_at.y != g_edit_view.board_saved_at.y);
+   if (is_at_rest && is_new && g_edit_view.board_file_size != 0) {
+      _Edit_BoardSave();
+   }
 }
 
 ////////////////////////////////
@@ -3066,6 +3212,11 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
    Place_BeforeLayout(app_state, ui);
    Caret_BeforeLayout(app_state);
    _Edit_LayoutPreview(app_state, layout->page, ui);
+   // A board goes to where the cursor is, and is laid out again there.
+   if (layout->is_board && _Edit_BoardFollow(app_state, ui)) {
+      layout->page = _Edit_BoardPage(layout->board_base);
+      _Edit_LayoutPreview(app_state, layout->page, ui);
+   }
 
    //- bgz: 3: the boxes that are clicked. What a click does to the text or
    // the cursor is an op, run at the start of the next frame; changed is for

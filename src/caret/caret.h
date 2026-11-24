@@ -89,6 +89,11 @@ void Caret_BeforeLayout(const App_State* app_state);
 B32  Caret_BuildBars(const App_State* app_state, F32 ui, B32 interactive);
 B32  Caret_BuildRooms(const App_State* app_state, F32 ui, B32 interactive);
 B32  Caret_BuildLook(const App_State* app_state, F32 ui);
+// Where the cursor is on the preview's slide as it was last laid out, in
+// pixels: the caret's line. 0 if the cursor is not in words that are on the
+// slide - on a line that is about a piece, say. For a board to be moved to
+// it (edit\edit.c).
+B32  Caret_RectOfCursor(const App_State* app_state, Rng2F32* rect_out);
 // Presenting: a block with more words than room is moved through by the
 // wheel over it, as far as it was in the edit screen when the slide came
 // up. Caret_PresentAfterDraw, after Caret_BeforeDraw and the slide's

@@ -395,6 +395,10 @@ Deck_Deck* Deck_OpenText(String8 text, String8 file);
 // (dir over 0) or back: not a board. slide_count if there is none that way.
 U64 Deck_SlideToShow(Deck_Deck* deck, U64 slide_idx, S32 dir);
 
+// Which of the slides that are shown slide_idx is, from 1 - or, for a
+// board, the one after it would be - and into count_out how many are shown.
+U64 Deck_ShownNumber(Deck_Deck* deck, U64 slide_idx, U64* count_out);
+
 // The slide a position in the deck's text is on: the last that begins at or
 // before it. 0 if there are no slides.
 U64 Deck_SlideFromTextPos(Deck_Deck* deck, U64 text_pos);

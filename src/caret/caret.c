@@ -769,6 +769,19 @@ _Caret_BoxOfCursor(const App_State* app_state, View_Box* boxes, U64 box_count, V
 }
 
 B32
+Caret_RectOfCursor(const App_State* app_state, Rng2F32* rect_out) {
+   B32 result = 0;
+   if (app_state->editor != 0 && app_state->slide_idx < app_state->deck->slide_count && _Caret_RunsAreGood(app_state)) {
+      _Caret_Place caret = _Caret_PlaceFromPos(app_state, g_edit_view.runs, g_edit_view.run_count, app_state->editor->cursor);
+      if (caret.is_found) {
+         *rect_out = caret.rect;
+         result = 1;
+      }
+   }
+   return result;
+}
+
+B32
 Caret_Follow(const App_State* app_state, View_HitList* hits) {
    Deck_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
    Editor_Editor*  editor = app_state->editor;

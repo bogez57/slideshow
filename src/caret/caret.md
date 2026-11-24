@@ -21,6 +21,7 @@ The runs of letters it reads are edit's (`g_edit_view.runs`). A scroll is put on
 - Ops: `Caret_PressRoom` (a press in the room of the words), `Caret_DragSelect` (selecting by dragging), `Caret_SelectWord`, `Caret_SelectLine` (a double and a triple click).
 - `Caret_BeforeDraw`, `Caret_Follow`, `Caret_KeepRuns`: around the preview's slide as it is laid out.
 - `Caret_BeforeLayout`, `Caret_BuildBars`, `Caret_BuildRooms`, `Caret_BuildLook`: its UI boxes.
+- `Caret_RectOfCursor`: where the cursor is on the preview's slide, for edit to move a board to it.
 - `Caret_PresentAfterDraw`, `Caret_PresentWheel`: presenting.
 - `Caret_BeforeDrawOf`, `Caret_AfterDrawOf`: another drawing of a slide, with its blocks where they were.
 
