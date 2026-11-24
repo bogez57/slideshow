@@ -11,6 +11,9 @@
 // for its names.
 //
 //    @             the @ lines there are: @note, @box, @place, ...
+//    @picture      not a line of the format: taking it opens Windows'
+//                  open-file window, and the picture picked is put on the
+//                  slide. @video file is the same, for a video
 //    @place        what can come next: picture, text, title
 //    @theme        the themes. @layout: the layouts. @video: how it plays
 //    @color text   the colours with names
@@ -49,6 +52,9 @@ struct Complete_Item {
    String8 name;       // as written into the text
    String8 what;       // what it does, in a few words
    B32     takes_more; // something comes after it on the line: a space is written too
+   // Taking it writes nothing: Windows' open-file window comes up, and the
+   // picture or video picked there is put on the slide, in the line's place.
+   B32 picks_file;
 };
 
 // The list as it is now. count 0: it is not showing.
@@ -64,6 +70,7 @@ struct Complete_List {
    U64     cursor;
    U64     edit_count;
    String8 prefix;
+   U64     line_start; // the line's @
 };
 
 Complete_List Complete_ListFromState(const App_State* app_state, Arena* arena);

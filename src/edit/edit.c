@@ -1600,10 +1600,7 @@ STATE_OP(Edit_GoToSlide)
 
 // An image or video file dropped on the window: on the slide the cursor is
 // on, and into the deck's folder (_Edit_DropPicture). path: on ops->arena.
-typedef struct Edit_DropPictureOpParams Edit_DropPictureOpParams;
-struct Edit_DropPictureOpParams {
-   String8 path;
-};
+// (Its params are in edit.h: complete pushes it too.)
 void
 Edit_DropPicture(App_State* app_state, StateOp_List* ops, Edit_DropPictureOpParams* params) {
    UnusedVariable(ops);

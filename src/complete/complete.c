@@ -6,6 +6,7 @@
 // short: it is read at a glance, while typing.
 
 PRIVATE Complete_Item _complete_lines[] = {
+    {Str8LitComp("@picture"), Str8LitComp("pick a picture file to put on this slide"), 0, 1},
     {Str8LitComp("@note"), Str8LitComp("a note to yourself, not on the slide"), 1},
     {Str8LitComp("@box"), Str8LitComp("another block of words, to place on its own"), 0},
     {Str8LitComp("@place"), Str8LitComp("where a picture, the text or the title goes"), 1},
@@ -33,6 +34,7 @@ PRIVATE Complete_Item _complete_color[] = {
 };
 
 PRIVATE Complete_Item _complete_video[] = {
+    {Str8LitComp("file"), Str8LitComp("pick a video file to put on this slide"), 0, 1},
     {Str8LitComp("loop"), Str8LitComp("starts over at its end"), 0},
     {Str8LitComp("mute"), Str8LitComp("no sound"), 0},
     {Str8LitComp("manual"), Str8LitComp("waits for K to start"), 0},
@@ -145,7 +147,8 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
       for (U64 word_idx = 1; word_idx < word_count; word_idx += 1) {
          is_written |= (from == _complete_video && Str8Match(words[word_idx], name, StringMatchFlag_CaseInsensitive));
       }
-      if (is_written) {
+      // A file is picked in the line's place: not once the line has more.
+      if (is_written || (from[i].picks_file && word_count > 1)) {
          continue;
       }
       if (name.size >= prefix.size && Str8Match(Str8Prefix(name, prefix.size), prefix, StringMatchFlag_CaseInsensitive)) {
@@ -155,11 +158,12 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
    }
 
    // Nothing left to say when the one thing it could be is written out.
-   if (result.count == 1 && !result.v[0].takes_more && result.v[0].name.size == prefix.size) {
+   if (result.count == 1 && !result.v[0].takes_more && !result.v[0].picks_file && result.v[0].name.size == prefix.size) {
       result.count = 0;
    }
 
    result.word_start = word_start;
+   result.line_start = first;
    result.cursor = cursor;
    result.edit_count = editor->edit_count;
    result.prefix = prefix;
@@ -252,7 +256,7 @@ Complete_Input(const App_State* app_state, StateOp_List* ops) {
       //- bgz: Tab and Return take the one selected - unless it is written
       // out already, and then the key is the editor's, as with no list
       Complete_Item* item = &list.v[list.selected_idx];
-      B32            is_written = (!item->takes_more && Str8Match(item->name, list.prefix, 0));
+      B32            is_written = (!item->takes_more && !item->picks_file && Str8Match(item->name, list.prefix, 0));
       // With nothing of the word typed yet, Tab only: Return there ends a
       // line that may well be done (@video loop).
       B32 takes = 0;
@@ -260,7 +264,31 @@ Complete_Input(const App_State* app_state, StateOp_List* ops) {
          takes = Core_WM_KeyPress(events, window, 0, WM_Key_Tab) ||
                  (list.prefix.size != 0 && Core_WM_KeyPress(events, window, 0, WM_Key_Return));
       }
-      if (takes) {
+      if (takes && item->picks_file) {
+         // bgz's shell: the system's window, which does not return until it
+         // is answered. It lists every file: a picture or a video is what
+         // can be taken. Cancelled, the line is left as typed.
+         B32     is_video = Str8Match(list.v[list.selected_idx].name, Str8Lit("file"), 0);
+         String8 folder = (app_state->deck != 0) ? FR_WholePath(scratch.arena, app_state->deck->folder) : Str8Zero();
+         String8 picked = ShPickFile(ops->arena, is_video ? Str8Lit("Pick a video") : Str8Lit("Pick a picture"), folder, Str8Zero());
+         if (picked.size != 0 && (Image_NameIsImage(picked) || Video_NameIsVideo(picked))) {
+            // What was typed goes, and the file is put on the slide as one
+            // dropped on the window is: copied into the deck's folder if it
+            // is not there, and its line written.
+            Complete_AcceptOpParams* accept = StateOp_Complete_Accept(ops);
+            // The whole line, with the \n before it: the picture's line is
+            // written under the line above, or under the slide's other
+            // pictures, and no empty line is left where this one was.
+            U64 from = Editor_LineStart(app_state->editor, list.line_start);
+            accept->word_start = (from > 0) ? from - 1 : from;
+            accept->cursor = list.cursor;
+            accept->edit_count = list.edit_count;
+            accept->text = Str8Zero();
+            StateOp_Edit_DropPicture(ops)->path = picked;
+         } else if (picked.size != 0) {
+            StateOp_App_Notice(ops)->notice = Str8Lit("That is not a picture or a video.");
+         }
+      } else if (takes) {
          Complete_AcceptOpParams* accept = StateOp_Complete_Accept(ops);
          accept->word_start = list.word_start;
          accept->cursor = list.cursor;

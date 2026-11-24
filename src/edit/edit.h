@@ -167,6 +167,16 @@ void Edit_TakeOutLine(Editor_Editor* editor, Rng1U64 line);
 //
 // The one other layers push. The rest of the edit screen's are edit.c's own.
 
+// An image or video file to put on the slide the cursor is on, copied into
+// the deck's folder if it is not there: one dropped on the window, or
+// picked from the list under an @ line (complete\complete.c). path: on
+// ops->arena.
+typedef struct Edit_DropPictureOpParams Edit_DropPictureOpParams;
+struct Edit_DropPictureOpParams {
+   String8 path;
+};
+Edit_DropPictureOpParams* StateOp_Edit_DropPicture(StateOp_List* ops);
+
 // The preview: a press on the slide at pos, as a click - to the letter of the
 // words there, or the picture's name (keeps_mark: selecting from where the
 // cursor was). picks: the press was on the piece of kind and idx away from
