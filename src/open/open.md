@@ -1,6 +1,6 @@
 # open
 
-The open screen: a panel over whichever screen is up, to pick a deck without leaving the program. Its lines are the decks opened lately, then one folder: the folder above, Windows' own open-file window, a new text deck or the folder's pictures as a deck, and the folders and text decks in it. Its picture and keys are at the top of open.c.
+The open screen: a panel over whichever screen is up, to pick a deck without leaving the program. Its lines are the decks opened lately, then one folder: the folder above, the text decks and the folders in it, and last what else can be done there - a new text deck, the folder's pictures as a deck, Windows' own open-file window. The panel is as tall as its lines, up to the window's height. Its picture and keys are at the top of open.c.
 
 ## State
 

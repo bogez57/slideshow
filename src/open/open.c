@@ -9,23 +9,26 @@
 //    |  Open a deck                                 |
 //    |                                              |
 //    |  Opened lately                               |
-//    |    C:\talks\intro\slides.md                  |
-//    |  C:\talks                                    |
-//    |    ..                    the folder above    |
-//    |    Browse...             Windows' window     |
-//    |    New deck here         makes slides.md     |
-//    |    Present the pictures  12 in this folder   |
-//    |    intro\                                    |
-//    |    notes.md                                  |
+//    |    intro\slides.md          C:\talks         |
 //    |                                              |
-//    |  Click to open. Esc closes.                  |
+//    |  C:\talks                                    |
+//    |    ..                                        |
+//    |    notes.md                                  |
+//    |    intro\                                    |
+//    |                                              |
+//    |    New deck here            slides.md        |
+//    |    Present the 12 pictures here              |
+//    |    Browse...                                 |
+//    |                                              |
+//    |  Backspace: folder above      Esc: close     |
 //    +----------------------------------------------+
 //
 // The lines are the decks opened lately, then one folder: the folder above
-// it, Windows' own open-file window (bgz's ShPickFile), what can be made of
-// the folder itself - a new text deck in it, or its pictures as a deck - and
-// the folders and text decks in it. Clicking a
-// folder goes into it. Clicking anything else opens it and closes the panel.
+// it, the text decks and the folders in it, and last what else can be done
+// there - a new text deck in it, its pictures as a deck, and Windows' own
+// open-file window (bgz's ShPickFile). Clicking a folder goes into it.
+// Clicking anything else opens it and closes the panel. The panel is as tall
+// as its lines, up to the window's height, and then they scroll.
 //
 // The rows are made here (_Open_Scan) and the panel is built with the UI
 // layer (Open_Build, called from FrameWork's UI build): a dimmed backdrop
@@ -150,7 +153,7 @@ _Open_Scan(const App_State* app_state) {
 
    //- bgz: the rows
    U64       recent_count = Min(app_state->recents.count, _OPEN_RECENTS_SHOWN);
-   U64       row_cap = recent_count + folders.count + decks.count + 9;
+   U64       row_cap = recent_count + folders.count + decks.count + 12;
    Open_Row* rows = PushArray(arena, Open_Row, row_cap);
    U64       row_count = 0;
 
@@ -160,6 +163,8 @@ _Open_Scan(const App_State* app_state) {
          _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Recent, app_state->recents.v[i],
                        app_state->recents.v[i]);
       }
+      // A gap: a label that says nothing.
+      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, Str8Zero(), Str8Zero());
    }
 
    if (folder.size == 0) {
@@ -173,24 +178,28 @@ _Open_Scan(const App_State* app_state) {
       _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, folder, Str8Zero());
       _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Up, Str8Lit(".."), _Open_FolderAbove(folder));
 
-      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Browse, Str8Lit("Browse..."), folder);
-      String8 new_name = _Open_NewDeckName(scratch.arena, folder);
-      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_New, Str8Lit("New deck here"),
-                    _Open_PathInFolder(scratch.arena, folder, new_name));
-      if (picture_count != 0) {
-         String8 label = PushStr8F(scratch.arena, "Present the %llu picture%s in this folder",
-                                   (unsigned long long)picture_count, picture_count == 1 ? "" : "s");
-         _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Present, label, folder);
-      }
-
-      for (U64 i = 0; i < folders.count; i += 1) {
-         _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Folder, PushStr8F(scratch.arena, "%S\\", folders.v[i]),
-                       _Open_PathInFolder(scratch.arena, folder, folders.v[i]));
-      }
+      // What is most likely wanted first: the decks, then the folders to
+      // look for one in.
       for (U64 i = 0; i < decks.count; i += 1) {
          _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Deck, decks.v[i],
                        _Open_PathInFolder(scratch.arena, folder, decks.v[i]));
       }
+      for (U64 i = 0; i < folders.count; i += 1) {
+         _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Folder, PushStr8F(scratch.arena, "%S\\", folders.v[i]),
+                       _Open_PathInFolder(scratch.arena, folder, folders.v[i]));
+      }
+
+      // Last, after a gap, what else can be done here.
+      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, Str8Zero(), Str8Zero());
+      String8 new_name = _Open_NewDeckName(scratch.arena, folder);
+      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_New, Str8Lit("New deck here"),
+                    _Open_PathInFolder(scratch.arena, folder, new_name));
+      if (picture_count != 0) {
+         String8 label = PushStr8F(scratch.arena, "Present the %llu picture%s here", (unsigned long long)picture_count,
+                                   picture_count == 1 ? "" : "s");
+         _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Present, label, folder);
+      }
+      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Browse, Str8Lit("Browse..."), folder);
    }
 
    _open_view.rows = rows;
@@ -286,7 +295,7 @@ struct _Open_Layout {
 };
 
 PRIVATE _Open_Layout
-_Open_LayoutFromWindowDim(Vec2F32 window_dim) {
+_Open_LayoutFromWindowDim(Vec2F32 window_dim, U64 row_count) {
    _Open_Layout result = {0};
 
    F32 ui = FR_UIScale(window_dim);
@@ -295,14 +304,18 @@ _Open_LayoutFromWindowDim(Vec2F32 window_dim) {
    result.row_h = (F32)(S32)(30.0f * ui);
 
    F32 margin = 40.0f * ui;
-   F32 w = Clamp(Min(320.0f * ui, window_dim.x), window_dim.x - margin * 2.0f, 900.0f * ui);
-   F32 h = Max(window_dim.y - margin * 2.0f, Min(200.0f * ui, window_dim.y));
+   F32 w = Clamp(Min(320.0f * ui, window_dim.x), window_dim.x - margin * 2.0f, 640.0f * ui);
+   F32 title_h = (F32)(S32)(52.0f * ui);
+   F32 foot_h = (F32)(S32)(36.0f * ui);
+   // As tall as its rows, with a little room under them - up to the
+   // window's height, and then the rows scroll.
+   F32 max_h = Max(window_dim.y - margin * 2.0f, Min(200.0f * ui, window_dim.y));
+   F32 rows_h = result.row_h * (F32)Max(row_count, 6) + 10.0f * ui;
+   F32 h = Min(max_h, title_h + rows_h + foot_h);
    F32 x = (F32)(S32)((window_dim.x - w) * 0.5f);
    F32 y = (F32)(S32)((window_dim.y - h) * 0.5f);
    result.panel = R2F32P(x, y, x + w, y + h);
 
-   F32 title_h = (F32)(S32)(52.0f * ui);
-   F32 foot_h = (F32)(S32)(40.0f * ui);
    result.title = R2F32P(x, y, x + w, y + title_h);
    result.foot = R2F32P(x, y + h - foot_h, x + w, y + h);
    result.rows = R2F32P(x, result.title.max.y, x + w, Max(result.foot.min.y, result.title.max.y));
@@ -437,20 +450,20 @@ _Open_FitPath(Arena* arena, FNT_Tag font, F32 px, String8 path, F32 room) {
 
 void
 Open_Build(const App_State* app_state, Vec2F32 window_dim) {
-   _Open_Layout layout = _Open_LayoutFromWindowDim(window_dim);
+   // The rows, read again every so often, and at once for a folder just gone
+   // into. Before the layout: the panel is as tall as its rows.
+   U64 scan_us = (U64)(_OPEN_SCAN_SECONDS * 1000000.0f);
+   if (_open_view.scanned_us == 0 || NowTimeUS() - _open_view.scanned_us >= scan_us) {
+      _Open_Scan(app_state);
+   }
+
+   _Open_Layout layout = _Open_LayoutFromWindowDim(window_dim, _open_view.row_count);
    F32          ui = layout.ui;
    F32          pad = 18.0f * ui;
    F32          indent = 22.0f * ui;
    F32          panel_w = Dim2F32(layout.panel).x;
    FNT_Tag      regular = app_state->fonts.regular;
    Temp         scratch = ScratchBegin(0, 0);
-
-   // The rows, read again every so often, and at once for a folder just gone
-   // into.
-   U64 scan_us = (U64)(_OPEN_SCAN_SECONDS * 1000000.0f);
-   if (_open_view.scanned_us == 0 || NowTimeUS() - _open_view.scanned_us >= scan_us) {
-      _Open_Scan(app_state);
-   }
 
    // The row clicked, if one was.
    Open_Row* picked = 0;
@@ -496,53 +509,54 @@ Open_Build(const App_State* app_state, Vec2F32 window_dim) {
                UI_BoxFlags flags = is_label ? 0 : (UI_BoxFlag_Clickable | UI_BoxFlag_DrawBackground);
                UI_Box*     row_box = UI_ListRow(layout.row_h, 0, flags, "###open row %lld", row_idx);
 
+               // What a row is, by its colour. Little is said beside one:
+               // where a deck opened lately is, and the name a new deck gets.
                String8 color_tag = Str8Lit("");
+               String8 label = row->label;
                String8 what = {0};
+               F32     label_room = panel_w - (pad + indent) - pad;
                switch (row->kind) {
                   case Open_RowKind_Label: {
                      color_tag = Str8Lit("dim");
+                     // The folder the rows are of, with as much of its end as fits.
+                     label = _Open_FitPath(scratch.arena, app_state->fonts.bold, layout.ui_px, label, panel_w - pad * 2.0f);
                   } break;
-                  case Open_RowKind_Recent:
+                  case Open_RowKind_Recent: {
+                     color_tag = Str8Lit("deck");
+                     // The deck's name with the folder it is in, which is
+                     // what tells decks apart - most are slides.md - and the
+                     // rest of where it is beside it.
+                     String8 folder = Str8ChopLastSlash(row->path);
+                     String8 above = Str8ChopLastSlash(folder);
+                     if (above.size != 0 && above.size < folder.size) {
+                        label = Str8Skip(row->path, above.size + 1);
+                        what = above;
+                     }
+                     label = _Open_FitPath(scratch.arena, regular, layout.ui_px, label, label_room);
+                  } break;
                   case Open_RowKind_Deck: {
                      color_tag = Str8Lit("deck");
                   } break;
+                  case Open_RowKind_Up:
                   case Open_RowKind_Folder: {
                      color_tag = Str8Lit("folder");
                   } break;
-                  case Open_RowKind_Up: {
-                     color_tag = Str8Lit("folder");
-                     String8 before = Str8Lit("the folder above: ");
-                     F32     used = pad + indent + Text_Width(regular, layout.ui_px, row->label) + 18.0f * ui +
-                                Text_Width(regular, layout.ui_px, before) + pad;
-                     what = (row->path.size != 0)
-                                ? PushStr8F(scratch.arena, "%S%S", before,
-                                            _Open_FitPath(scratch.arena, regular, layout.ui_px, row->path, panel_w - used))
-                                : Str8Lit("the list of drives");
-                  } break;
-                  case Open_RowKind_Browse: {
-                     color_tag = Str8Lit("action");
-                     what = Str8Lit("Windows' own open window");
-                  } break;
                   case Open_RowKind_New: {
                      color_tag = Str8Lit("action");
-                     what = PushStr8F(scratch.arena, "makes %S, ready to write in", Str8SkipLastSlash(row->path));
+                     what = Str8SkipLastSlash(row->path);
                   } break;
+                  case Open_RowKind_Browse:
                   case Open_RowKind_Present: {
                      color_tag = Str8Lit("action");
-                     what = Str8Lit("as a slideshow, in name order");
                   } break;
+               }
+               if (what.size != 0) {
+                  F32 what_room = label_room - Text_Width(regular, layout.ui_px, label) - 18.0f * ui;
+                  what = _Open_FitPath(scratch.arena, regular, layout.ui_px, what, what_room);
                }
 
                UI_Parent(row_box) UI_PrefHeight(UI_Pct(1, 1)) UI_Font(is_label ? app_state->fonts.bold : UI_TopFont()) {
                   UI_Spacer(UI_Px(is_label ? pad : pad + indent, 1));
-                  // A whole path - a deck opened lately, the folder the rows
-                  // are of - with as much of its end as fits.
-                  String8 label = row->label;
-                  if (row->kind == Open_RowKind_Recent) {
-                     label = _Open_FitPath(scratch.arena, regular, layout.ui_px, label, panel_w - (pad + indent) - pad);
-                  } else if (is_label) {
-                     label = _Open_FitPath(scratch.arena, app_state->fonts.bold, layout.ui_px, label, panel_w - pad * 2.0f);
-                  }
                   UI_SetNextPrefWidth(UI_TextDim(1, 1));
                   UI_SetNextColorTag(color_tag);
                   UI_Label(label);
@@ -572,7 +586,7 @@ Open_Build(const App_State* app_state, Vec2F32 window_dim) {
             _Open_BuildBar(layout.foot, pad, Str8Lit("notice"), notice, "foot");
          } else {
             _Open_BuildBar(layout.foot, pad, Str8Lit("dim"),
-                           Str8Lit("Click to open. Wheel or bar to scroll. Backspace: folder above. Esc closes."), "foot");
+                           Str8Lit("Backspace: folder above      Esc: close"), "foot");
          }
       }
 
