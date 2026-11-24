@@ -1,6 +1,6 @@
 # open
 
-The open screen: a panel over whichever screen is up, to pick a deck without leaving the program. Its lines are the decks opened lately, then one folder: the folder above, the text decks and the folders in it, and last what else can be done there - a new text deck, the folder's pictures as a deck, Windows' own open-file window. The panel is as tall as its lines, up to the window's height. Its picture and keys are at the top of open.c.
+The open screen: a panel over whichever screen is up, to pick a deck without leaving the program. Three parts: the title, with the keys or a notice beside it; the list, in two sections under headings - the decks opened lately that are still there, then one folder: the folder above, its text decks, its folders - with a second column that starts at the same place on every line; and along the bottom, as buttons, what else can be done in the folder: a new text deck, its pictures as a deck, Windows' own open-file window. The panel is as tall as its lines, up to the window's height. Its picture and keys are at the top of open.c.
 
 ## State
 
@@ -12,6 +12,7 @@ In `App_State`, changed by the ops below:
 The panel's own, `_open_view` in open.c, written with no op:
 
 - `rows`, `row_count` (`Open_Row`), `arena`: the lines, made again from the folder every second while the panel is built.
+- `actions`, `action_count`: the buttons along the bottom, each a row's kind, label and path.
 - `scroll`, `scanned_us`: where the lines are scrolled to, and when the folder was last read.
 
 ## Functions and ops

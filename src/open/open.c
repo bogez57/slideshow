@@ -5,30 +5,36 @@
 // when it is started: a panel over whichever screen is up, with a line for
 // each thing that can be opened.
 //
-//    +----------------------------------------------+
-//    |  Open a deck                                 |
-//    |                                              |
-//    |  Opened lately                               |
-//    |    intro\slides.md          C:\talks         |
-//    |                                              |
-//    |  C:\talks                                    |
-//    |    ..                                        |
-//    |    notes.md                                  |
-//    |    intro\                                    |
-//    |                                              |
-//    |    New deck here            slides.md        |
-//    |    Present the 12 pictures here              |
-//    |    Browse...                                 |
-//    |                                              |
-//    |  Backspace: folder above      Esc: close     |
-//    +----------------------------------------------+
+//    +----------------------------------------------------+
+//    |  Open a deck          Backspace: up    Esc: close  |
+//    |----------------------------------------------------|
+//    |  Recent                                            |
+//    |    intro\slides.md        C:\talks                 |
+//    |    demo\slides.md         C:\work                  |
+//    |                                                    |
+//    |  talks                    C:\talks                 |
+//    |    ..                                              |
+//    |    notes.md                                        |
+//    |    intro\                                          |
+//    |----------------------------------------------------|
+//    |  [New deck]  [Present 12 pictures]  [Browse...]    |
+//    +----------------------------------------------------+
 //
-// The lines are the decks opened lately, then one folder: the folder above
-// it, the text decks and the folders in it, and last what else can be done
-// there - a new text deck in it, its pictures as a deck, and Windows' own
-// open-file window (bgz's ShPickFile). Clicking a folder goes into it.
-// Clicking anything else opens it and closes the panel. The panel is as tall
-// as its lines, up to the window's height, and then they scroll.
+// Three parts. The title, with the keys beside it - or a notice, while one
+// is up. The list, in two sections, each under a heading on a band of its
+// own: the decks opened lately that are still there, then one folder - the
+// folder above it, the text decks in it, the folders in it. And along the
+// bottom, as buttons, what else can be done in that folder: a new text deck
+// in it, its pictures as a deck, and Windows' own open-file window (bgz's
+// ShPickFile).
+//
+// A line has two columns. The second, in grey, starts at the same place on
+// every line that has one: where a deck opened lately is, and the whole path
+// of the folder beside its name.
+//
+// Clicking a folder goes into it. Clicking anything else opens it and
+// closes the panel. The panel is as tall as its lines, up to the window's
+// height, and then they scroll.
 //
 // The rows are made here (_Open_Scan) and the panel is built with the UI
 // layer (Open_Build, called from FrameWork's UI build): a dimmed backdrop
@@ -61,6 +67,11 @@ struct _Open_View {
    Open_Row*     rows;
    U64           row_count;
    UI_ScrollRows scroll;     // where the rows are scrolled to (Open_Build)
+
+   // What else can be done in the folder: the buttons along the bottom.
+   // Their kind, label and path as a row's.
+   Open_Row actions[3];
+   U64      action_count;
    U64           scanned_us; // when the folder was last read. 0: read it now
 };
 
@@ -157,16 +168,29 @@ _Open_Scan(const App_State* app_state) {
    Open_Row* rows = PushArray(arena, Open_Row, row_cap);
    U64       row_count = 0;
 
-   if (recent_count != 0) {
-      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, Str8Lit("Opened lately"), Str8Zero());
+   // A label's path is what is said in its second column.
+   //
+   // The decks opened lately that are still there: one that was moved or
+   // deleted is only a line that opens nothing.
+   {
+      B32 has_label = 0;
       for (U64 i = 0; i < recent_count; i += 1) {
-         _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Recent, app_state->recents.v[i],
-                       app_state->recents.v[i]);
+         String8 path = app_state->recents.v[i];
+         if (FilePathExists(path)) {
+            if (!has_label) {
+               _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, Str8Lit("Recent"), Str8Zero());
+               has_label = 1;
+            }
+            _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Recent, path, path);
+         }
       }
-      // A gap: a label that says nothing.
-      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, Str8Zero(), Str8Zero());
+      if (has_label) {
+         // A gap: a label that says nothing.
+         _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, Str8Zero(), Str8Zero());
+      }
    }
 
+   U64 action_count = 0;
    if (folder.size == 0) {
       // The list of drives: each is a folder, and that is all there is.
       _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, Str8Lit("Drives"), Str8Zero());
@@ -175,7 +199,11 @@ _Open_Scan(const App_State* app_state) {
          _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Folder, drive, drive);
       }
    } else {
-      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, folder, Str8Zero());
+      // The folder's own name, and beside it where it is. A drive's own
+      // folder has no name but that.
+      String8 name = Str8SkipLastSlash(folder);
+      B32     has_name = (name.size != 0 && name.size < folder.size);
+      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, has_name ? name : folder, has_name ? folder : Str8Zero());
       _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Up, Str8Lit(".."), _Open_FolderAbove(folder));
 
       // What is most likely wanted first: the decks, then the folders to
@@ -189,18 +217,19 @@ _Open_Scan(const App_State* app_state) {
                        _Open_PathInFolder(scratch.arena, folder, folders.v[i]));
       }
 
-      // Last, after a gap, what else can be done here.
-      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Label, Str8Zero(), Str8Zero());
+      //- bgz: the buttons
+      U64     action_cap = ArrayCount(_open_view.actions);
       String8 new_name = _Open_NewDeckName(scratch.arena, folder);
-      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_New, Str8Lit("New deck here"),
+      _Open_PushRow(arena, _open_view.actions, &action_count, action_cap, Open_RowKind_New, Str8Lit("New deck"),
                     _Open_PathInFolder(scratch.arena, folder, new_name));
       if (picture_count != 0) {
-         String8 label = PushStr8F(scratch.arena, "Present the %llu picture%s here", (unsigned long long)picture_count,
+         String8 label = PushStr8F(scratch.arena, "Present %llu picture%s", (unsigned long long)picture_count,
                                    picture_count == 1 ? "" : "s");
-         _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Present, label, folder);
+         _Open_PushRow(arena, _open_view.actions, &action_count, action_cap, Open_RowKind_Present, label, folder);
       }
-      _Open_PushRow(arena, rows, &row_count, row_cap, Open_RowKind_Browse, Str8Lit("Browse..."), folder);
+      _Open_PushRow(arena, _open_view.actions, &action_count, action_cap, Open_RowKind_Browse, Str8Lit("Browse..."), folder);
    }
+   _open_view.action_count = action_count;
 
    _open_view.rows = rows;
    _open_view.row_count = row_count;
@@ -306,11 +335,11 @@ _Open_LayoutFromWindowDim(Vec2F32 window_dim, U64 row_count) {
    F32 margin = 40.0f * ui;
    F32 w = Clamp(Min(320.0f * ui, window_dim.x), window_dim.x - margin * 2.0f, 640.0f * ui);
    F32 title_h = (F32)(S32)(52.0f * ui);
-   F32 foot_h = (F32)(S32)(36.0f * ui);
+   F32 foot_h = (F32)(S32)(48.0f * ui);
    // As tall as its rows, with a little room under them - up to the
    // window's height, and then the rows scroll.
    F32 max_h = Max(window_dim.y - margin * 2.0f, Min(200.0f * ui, window_dim.y));
-   F32 rows_h = result.row_h * (F32)Max(row_count, 6) + 10.0f * ui;
+   F32 rows_h = result.row_h * (F32)Max(row_count, 6) + 8.0f * ui;
    F32 h = Min(max_h, title_h + rows_h + foot_h);
    F32 x = (F32)(S32)((window_dim.x - w) * 0.5f);
    F32 y = (F32)(S32)((window_dim.y - h) * 0.5f);
@@ -405,20 +434,50 @@ Open_Input(const App_State* app_state, StateOp_List* ops) {
 // Built first in the frame's UI build, so it is drawn over everything else
 // and asked for clicks first.
 
-// A strip across the panel with a line of text in it: the title, the foot.
+// The strip across the panel's top: the title, and at its right, smaller,
+// the keys - or a notice.
 PRIVATE void
-_Open_BuildBar(Rng2F32 rect, F32 pad, String8 color_tag, String8 text, char* key) {
+_Open_BuildTitle(const App_State* app_state, Rng2F32 rect, F32 pad, F32 ui, String8 title, String8 right_tag, String8 right) {
    UI_SetNextPrefWidth(UI_Px(Dim2F32(rect).x, 1));
    UI_SetNextPrefHeight(UI_Px(Dim2F32(rect).y, 1));
    UI_SetNextChildLayoutAxis(Axis2_X);
    UI_SetNextColorTag(Str8Lit("panel_bar"));
-   UI_Box* bar = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###open %s", key);
+   UI_Box* bar = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###open title");
    UI_Parent(bar) UI_PrefHeight(UI_Pct(1, 1)) {
       UI_Spacer(UI_Px(pad, 1));
       UI_SetNextPrefWidth(UI_Pct(1, 0));
-      UI_SetNextColorTag(color_tag);
-      UI_Label(text);
+      UI_SetNextFont(app_state->fonts.bold);
+      UI_SetNextFontSize(FR_UIFontSize((F32)(S32)(20.0f * ui)));
+      UI_Label(title);
+      UI_SetNextPrefWidth(UI_TextDim(1, 1));
+      UI_SetNextColorTag(right_tag);
+      UI_Label(right);
+      UI_Spacer(UI_Px(pad, 1));
    }
+}
+
+// A button in the strip along the panel's bottom. 1 when it is clicked.
+PRIVATE B32
+_Open_BuildButton(String8 name, F32 h, F32 ui, U64 idx) {
+   UI_SetNextPrefWidth(UI_TextDim(28.0f * ui, 1));
+   UI_SetNextPrefHeight(UI_Px(h, 1));
+   UI_SetNextTextAlignment(UI_TextAlign_Center);
+   UI_SetNextBackgroundColor(V4F32(1, 1, 1, 0.07f));
+   UI_SetNextCornerRadius00(4.0f * ui);
+   UI_SetNextCornerRadius01(4.0f * ui);
+   UI_SetNextCornerRadius10(4.0f * ui);
+   UI_SetNextCornerRadius11(4.0f * ui);
+   UI_SetNextColorTag(Str8Lit("action"));
+   // Keyed by its place, showing only its name (the screen is built with
+   // UI_BoxFlag_DisableIDString: a "###" in what is shown would be shown).
+   UI_Box* button = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_DrawText | UI_BoxFlag_Clickable,
+                                           "open button %llu", (unsigned long long)idx);
+   UI_BoxEquipDisplayString(button, name);
+   UI_Signal signal = UI_SignalFromBox(button);
+   if (UI_Hovering(signal)) {
+      button->background_color = V4F32(1, 1, 1, 0.18f);
+   }
+   return !!UI_Clicked(signal);
 }
 
 // A path that is wider than room, px tall in font, with its front left off -
@@ -462,6 +521,8 @@ Open_Build(const App_State* app_state, Vec2F32 window_dim) {
    F32          pad = 18.0f * ui;
    F32          indent = 22.0f * ui;
    F32          panel_w = Dim2F32(layout.panel).x;
+   // Where the second column starts.
+   F32          second_x = (F32)(S32)(panel_w * 0.46f);
    FNT_Tag      regular = app_state->fonts.regular;
    Temp         scratch = ScratchBegin(0, 0);
 
@@ -485,9 +546,15 @@ Open_Build(const App_State* app_state, Vec2F32 window_dim) {
                                              "###open panel");
 
       UI_Parent(panel) {
-         //- bgz: the title
-         UI_Font(app_state->fonts.bold) UI_FontSize(FR_UIFontSize((F32)(S32)(20.0f * ui))) {
-            _Open_BuildBar(layout.title, pad, Str8Lit(""), Str8Lit("Open a deck"), "title");
+         //- bgz: the title, and beside it the keys - or a notice
+         {
+            String8 notice = FR_CurrentNotice(app_state);
+            if (notice.size != 0) {
+               _Open_BuildTitle(app_state, layout.title, pad, ui, Str8Lit("Open a deck"), Str8Lit("notice"), notice);
+            } else {
+               _Open_BuildTitle(app_state, layout.title, pad, ui, Str8Lit("Open a deck"), Str8Lit("dim"),
+                                Str8Lit("Backspace: up      Esc: close"));
+            }
          }
 
          //- bgz: the rows
@@ -509,30 +576,34 @@ Open_Build(const App_State* app_state, Vec2F32 window_dim) {
                UI_BoxFlags flags = is_label ? 0 : (UI_BoxFlag_Clickable | UI_BoxFlag_DrawBackground);
                UI_Box*     row_box = UI_ListRow(layout.row_h, 0, flags, "###open row %lld", row_idx);
 
-               // What a row is, by its colour. Little is said beside one:
-               // where a deck opened lately is, and the name a new deck gets.
+               // What a row is, by its colour. A section's heading is on
+               // a band of its own, across the panel.
+               //
+               // Two columns: the second starts at the same place on every
+               // row that has one.
                String8 color_tag = Str8Lit("");
                String8 label = row->label;
-               String8 what = {0};
-               F32     label_room = panel_w - (pad + indent) - pad;
+               String8 second = {0};
+               F32     left = is_label ? pad : pad + indent;
                switch (row->kind) {
                   case Open_RowKind_Label: {
-                     color_tag = Str8Lit("dim");
-                     // The folder the rows are of, with as much of its end as fits.
-                     label = _Open_FitPath(scratch.arena, app_state->fonts.bold, layout.ui_px, label, panel_w - pad * 2.0f);
+                     second = row->path;
+                     if (label.size != 0) {
+                        row_box->flags |= UI_BoxFlag_DrawBackground;
+                        row_box->background_color = UI_ThemeColor(Str8Lit("header"), UI_ColorSlot_Background);
+                     }
                   } break;
                   case Open_RowKind_Recent: {
                      color_tag = Str8Lit("deck");
                      // The deck's name with the folder it is in, which is
-                     // what tells decks apart - most are slides.md - and the
-                     // rest of where it is beside it.
+                     // what tells decks apart - most are slides.md - and
+                     // where that folder is in the second column.
                      String8 folder = Str8ChopLastSlash(row->path);
                      String8 above = Str8ChopLastSlash(folder);
                      if (above.size != 0 && above.size < folder.size) {
                         label = Str8Skip(row->path, above.size + 1);
-                        what = above;
+                        second = above;
                      }
-                     label = _Open_FitPath(scratch.arena, regular, layout.ui_px, label, label_room);
                   } break;
                   case Open_RowKind_Deck: {
                      color_tag = Str8Lit("deck");
@@ -541,30 +612,29 @@ Open_Build(const App_State* app_state, Vec2F32 window_dim) {
                   case Open_RowKind_Folder: {
                      color_tag = Str8Lit("folder");
                   } break;
-                  case Open_RowKind_New: {
-                     color_tag = Str8Lit("action");
-                     what = Str8SkipLastSlash(row->path);
+                  default: {
                   } break;
-                  case Open_RowKind_Browse:
-                  case Open_RowKind_Present: {
-                     color_tag = Str8Lit("action");
-                  } break;
-               }
-               if (what.size != 0) {
-                  F32 what_room = label_room - Text_Width(regular, layout.ui_px, label) - 18.0f * ui;
-                  what = _Open_FitPath(scratch.arena, regular, layout.ui_px, what, what_room);
                }
 
-               UI_Parent(row_box) UI_PrefHeight(UI_Pct(1, 1)) UI_Font(is_label ? app_state->fonts.bold : UI_TopFont()) {
-                  UI_Spacer(UI_Px(is_label ? pad : pad + indent, 1));
-                  UI_SetNextPrefWidth(UI_TextDim(1, 1));
+               FNT_Tag label_font = is_label ? app_state->fonts.bold : regular;
+               F32     gap = 18.0f * ui;
+               F32     label_w = panel_w - left - pad;
+               if (second.size != 0) {
+                  label_w = second_x - left;
+                  second = _Open_FitPath(scratch.arena, regular, layout.ui_px, second, panel_w - second_x - pad);
+               }
+               label = _Open_FitPath(scratch.arena, label_font, layout.ui_px, label, label_w - gap);
+
+               UI_Parent(row_box) UI_PrefHeight(UI_Pct(1, 1)) {
+                  UI_Spacer(UI_Px(left, 1));
+                  UI_SetNextPrefWidth(UI_Px(label_w, 1));
                   UI_SetNextColorTag(color_tag);
+                  UI_SetNextFont(label_font);
                   UI_Label(label);
-                  if (what.size != 0) {
-                     UI_Spacer(UI_Px(18.0f * ui, 1));
+                  if (second.size != 0) {
                      UI_SetNextPrefWidth(UI_TextDim(1, 0));
                      UI_SetNextColorTag(Str8Lit("dim"));
-                     UI_Label(what);
+                     UI_Label(second);
                   }
                }
 
@@ -580,13 +650,33 @@ Open_Build(const App_State* app_state, Vec2F32 window_dim) {
             }
          }
 
-         //- bgz: the foot: a notice if one is up, else what can be done
-         String8 notice = FR_CurrentNotice(app_state);
-         if (notice.size != 0) {
-            _Open_BuildBar(layout.foot, pad, Str8Lit("notice"), notice, "foot");
-         } else {
-            _Open_BuildBar(layout.foot, pad, Str8Lit("dim"),
-                           Str8Lit("Backspace: folder above      Esc: close"), "foot");
+         //- bgz: the foot: what else can be done in the folder, as buttons
+         {
+            F32 foot_h = Dim2F32(layout.foot).y;
+            F32 button_h = (F32)(S32)(foot_h * 0.62f);
+            UI_SetNextPrefWidth(UI_Px(panel_w, 1));
+            UI_SetNextPrefHeight(UI_Px(foot_h, 1));
+            UI_SetNextChildLayoutAxis(Axis2_X);
+            UI_SetNextColorTag(Str8Lit("panel_bar"));
+            UI_Box* foot = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###open foot");
+            UI_Parent(foot) {
+               UI_Spacer(UI_Px(pad, 1));
+               for (U64 i = 0; i < _open_view.action_count; i += 1) {
+                  // A column, to put the button in the strip's middle.
+                  UI_SetNextPrefWidth(UI_ChildrenSum(1));
+                  UI_SetNextPrefHeight(UI_Px(foot_h, 1));
+                  UI_SetNextChildLayoutAxis(Axis2_Y);
+                  UI_Box* cell = UI_BuildBoxFromStringf(0, "open button cell %llu", (unsigned long long)i);
+                  UI_Parent(cell) {
+                     UI_SetNextPrefWidth(UI_Px(0, 1));
+                     UI_Spacer(UI_Px((foot_h - button_h) * 0.5f, 1));
+                     if (_Open_BuildButton(_open_view.actions[i].label, button_h, ui, i)) {
+                        picked = &_open_view.actions[i];
+                     }
+                  }
+                  UI_Spacer(UI_Px(10.0f * ui, 1));
+               }
+            }
          }
       }
 
