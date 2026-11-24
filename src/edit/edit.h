@@ -102,6 +102,7 @@ struct Edit_View {
    // click.
    B32     is_drawing;
    B32     draw_is_box;
+   B32     draw_is_double; // the press was the second of a double click: let go of with no drag, a text box is made there
    B32     draw_picks; // the box picks the pieces it touches, and makes none: Ctrl was not down at the press
    Vec2F32 draw_from;
    Vec2F32 draw_to;

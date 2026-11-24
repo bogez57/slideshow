@@ -76,9 +76,9 @@
 //                     corner of it to resize it (place\place.c)
 //    the menu         right-click a piece, or the slide where nothing is:
 //                     what can be done there, each with its key beside it
-//    add a text box   Ctrl and a drag on the slide where nothing is: a box as
-//                     large as the mouse makes it, its words selected to be
-//                     typed over. Left as it is, it goes again when something
+//    add a text box   double-click the slide where nothing is: a box there.
+//                     Or Ctrl and a drag, for one as large as the mouse
+//                     makes it. Its words are selected, to be typed over. Left as it is, it goes again when something
 //                     else is clicked
 //    take a piece out click a picture, or the title or a block away from its
 //                     words - where it is taken hold of - and press Delete
@@ -593,6 +593,11 @@ Edit_TakeOutLine(Editor_Editor* editor, Rng1U64 line) {
 // barely moved still gives a box a word fits in.
 #define _EDIT_NEW_BOX_MIN_W 0.08f
 #define _EDIT_NEW_BOX_MIN_H 0.06f
+
+// How large the text box a double click makes is, in parts of the page:
+// from the click across and down, its first line where the click was.
+#define _EDIT_CLICK_BOX_W 0.30f
+#define _EDIT_CLICK_BOX_H 0.20f
 
 // How far the mouse goes with the button down on open space before it is
 // drawing a box and not a click. In UI units.
@@ -3275,6 +3280,7 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
          // The box drawn picks what it touches, and makes nothing. With
          // Ctrl it is a text box.
          g_edit_view.draw_picks = !(signal.event_flags & WM_Modifier_Ctrl);
+         g_edit_view.draw_is_double = !!(signal.f & UI_SignalFlag_LeftDoubleClicked);
       }
       if (g_edit_view.is_drawing) {
          F32 gone_x = mouse.x - g_edit_view.draw_from.x;
@@ -3288,7 +3294,12 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       if (g_edit_view.is_drawing && (signal.f & UI_SignalFlag_LeftReleased)) {
          g_edit_view.is_drawing = 0;
          Vec2F32 page_dim = Dim2F32(page);
-         if (!g_edit_view.draw_is_box) {
+         if (!g_edit_view.draw_is_box && g_edit_view.draw_is_double && page_dim.x > 0 && page_dim.y > 0) {
+            // A double click: a text box there, its first line at the click.
+            F32 x = (g_edit_view.draw_from.x - page.min.x) / page_dim.x;
+            F32 y = (g_edit_view.draw_from.y - page.min.y) / page_dim.y - 0.02f;
+            StateOp_Edit_AddTextBox(ops)->rect = R2F32P(x, y, x + _EDIT_CLICK_BOX_W, y + _EDIT_CLICK_BOX_H);
+         } else if (!g_edit_view.draw_is_box) {
             // A click: nothing selected. Not with Ctrl, which adds to what
             // is picked and so takes nothing away.
             if (g_edit_view.draw_picks) {
@@ -3462,9 +3473,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       } else if (can_move && has_picked && hover.has_piece && Edit_PieceIsPicked(app_state, hover.kind, hover.idx)) {
          caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out      Right-click for more");
       } else if (open_space_hot && layout->is_board) {
-         caption = Str8Lit("A board      Drag selects, Ctrl+drag draws a text box      Wheel moves it, Ctrl+wheel zooms, the middle button drags it");
+         caption = Str8Lit("A board      Double-click for a text box      Drag selects      Wheel moves it, Ctrl+wheel zooms, the middle button drags it");
       } else if (open_space_hot) {
-         caption = Str8Lit("Drag selects what the box touches      Ctrl+drag draws a text box");
+         caption = Str8Lit("Double-click for a text box      Drag selects what the box touches      Ctrl+drag draws a text box");
       } else if (can_move) {
          caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click for more");
       } else if (layout->is_board && !open_space_hot && !can_move) {
