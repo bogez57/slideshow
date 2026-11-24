@@ -15,8 +15,8 @@
 // Text as the editor keeps it, from text as it comes from a file or the
 // clipboard: no \r, four spaces for a tab (the font cache has no width for
 // one), and no other control characters. On arena.
-PRIVATE String8
-_Editor_CleanText(Arena* arena, String8 string) {
+String8
+Editor_CleanText(Arena* arena, String8 string) {
    String8 result = {0};
    result.str = PushArrayNoZero(arena, U8, string.size * 4 + 1);
 
@@ -166,14 +166,24 @@ _Editor_StepHistory(Editor_Editor* editor, Editor_Snapshot* from, U64* from_coun
 ////////////////////////////////
 //~ bgz: positions
 
-PRIVATE U64
-_Editor_SelectionMin(Editor_Editor* editor) {
-   return Min(editor->cursor, editor->mark);
+// What is selected. With selects_lines, the whole of every line from the
+// mark's to the cursor's, and the \n that ends the last.
+U64
+Editor_SelectionMin(Editor_Editor* editor) {
+   U64 result = Min(editor->cursor, editor->mark);
+   if (editor->selects_lines) {
+      result = Editor_LineStart(editor, result);
+   }
+   return result;
 }
 
-PRIVATE U64
-_Editor_SelectionMax(Editor_Editor* editor) {
-   return Max(editor->cursor, editor->mark);
+U64
+Editor_SelectionMax(Editor_Editor* editor) {
+   U64 result = Max(editor->cursor, editor->mark);
+   if (editor->selects_lines) {
+      result = Min(Editor_LineEnd(editor, result) + 1, editor->size);
+   }
+   return result;
 }
 
 // A byte in the middle of a UTF-8 character, which the cursor never rests on.
@@ -182,8 +192,8 @@ _Editor_IsContinuation(U8 c) {
    return (c & 0xC0) == 0x80;
 }
 
-PRIVATE U64
-_Editor_PrevChar(Editor_Editor* editor, U64 pos) {
+U64
+Editor_PrevChar(Editor_Editor* editor, U64 pos) {
    if (pos > 0) {
       pos -= 1;
       while (pos > 0 && _Editor_IsContinuation(editor->text[pos])) pos -= 1;
@@ -191,8 +201,8 @@ _Editor_PrevChar(Editor_Editor* editor, U64 pos) {
    return pos;
 }
 
-PRIVATE U64
-_Editor_NextChar(Editor_Editor* editor, U64 pos) {
+U64
+Editor_NextChar(Editor_Editor* editor, U64 pos) {
    if (pos < editor->size) {
       pos += 1;
       while (pos < editor->size && _Editor_IsContinuation(editor->text[pos])) pos += 1;
@@ -202,14 +212,14 @@ _Editor_NextChar(Editor_Editor* editor, U64 pos) {
 
 // The start and end of the line pos is on, as the file has lines. The end is
 // where its \n is, or the end of the text.
-PRIVATE U64
-_Editor_LineStart(Editor_Editor* editor, U64 pos) {
+U64
+Editor_LineStart(Editor_Editor* editor, U64 pos) {
    while (pos > 0 && editor->text[pos - 1] != '\n') pos -= 1;
    return pos;
 }
 
-PRIVATE U64
-_Editor_LineEnd(Editor_Editor* editor, U64 pos) {
+U64
+Editor_LineEnd(Editor_Editor* editor, U64 pos) {
    while (pos < editor->size && editor->text[pos] != '\n') pos += 1;
    return pos;
 }
@@ -259,7 +269,7 @@ _Editor_FillRows(Editor_Editor* editor, U64 max_columns, Editor_Row* rows) {
    U64 line_start = 0;
 
    for (;;) {
-      U64 line_end = _Editor_LineEnd(editor, line_start);
+      U64 line_end = Editor_LineEnd(editor, line_start);
 
       U64 pos = line_start;
       do {
@@ -271,7 +281,7 @@ _Editor_FillRows(Editor_Editor* editor, U64 max_columns, Editor_Row* rows) {
             if (editor->text[end] == ' ') {
                after_space = end + 1;
             }
-            end = _Editor_NextChar(editor, end);
+            end = Editor_NextChar(editor, end);
             columns += 1;
          }
          end = Min(end, line_end);
@@ -332,12 +342,12 @@ PRIVATE U64
 _Editor_PosFromRowColumn(Editor_Editor* editor, Editor_Row row, U64 column) {
    U64 last = row.end;
    if (!row.line_end && last > row.start) {
-      last = _Editor_PrevChar(editor, last);
+      last = Editor_PrevChar(editor, last);
    }
 
    U64 pos = row.start;
    for (U64 i = 0; i < column && pos < last; i += 1) {
-      pos = _Editor_NextChar(editor, pos);
+      pos = Editor_NextChar(editor, pos);
    }
    return Min(pos, last);
 }
@@ -421,8 +431,8 @@ _Editor_Splice(Editor_Editor* editor, U64 start, U64 end, String8 string) {
 
 void
 Editor_Insert(Editor_Editor* editor, String8 string, Editor_EditKind kind) {
-   U64 start = _Editor_SelectionMin(editor);
-   U64 end = _Editor_SelectionMax(editor);
+   U64 start = Editor_SelectionMin(editor);
+   U64 end = Editor_SelectionMax(editor);
 
    // Typing over a selection is its own step to undo.
    _Editor_BeforeEdit(editor, (start != end) ? Editor_EditKind_Other : kind);
@@ -433,8 +443,8 @@ Editor_Insert(Editor_Editor* editor, String8 string, Editor_EditKind kind) {
 
 void
 Editor_InsertLine(Editor_Editor* editor, String8 string, U64 select_start, U64 select_end) {
-   U64 line_start = _Editor_LineStart(editor, editor->cursor);
-   U64 line_end = _Editor_LineEnd(editor, editor->cursor);
+   U64 line_start = Editor_LineStart(editor, editor->cursor);
+   U64 line_end = Editor_LineEnd(editor, editor->cursor);
 
    B32 line_is_blank = 1;
    for (U64 i = line_start; i < line_end; i += 1) {
@@ -525,8 +535,8 @@ Editor_SetCursor(Editor_Editor* editor, U64 pos) {
 // Removes the selection, or with none, from the cursor to pos.
 PRIVATE void
 _Editor_Delete(Editor_Editor* editor, U64 pos) {
-   U64 start = _Editor_SelectionMin(editor);
-   U64 end = _Editor_SelectionMax(editor);
+   U64 start = Editor_SelectionMin(editor);
+   U64 end = Editor_SelectionMax(editor);
    if (start == end) {
       start = Min(editor->cursor, pos);
       end = Max(editor->cursor, pos);
@@ -564,8 +574,8 @@ _Editor_Newline(Editor_Editor* editor) {
    B32 handled = 0;
 
    if (editor->cursor == editor->mark) {
-      U64 line_start = _Editor_LineStart(editor, editor->cursor);
-      U64 line_end = _Editor_LineEnd(editor, editor->cursor);
+      U64 line_start = Editor_LineStart(editor, editor->cursor);
+      U64 line_end = Editor_LineEnd(editor, editor->cursor);
       U64 prefix_size = _Editor_BulletPrefixSize(editor, line_start, line_end);
 
       if (prefix_size != 0 && editor->cursor >= line_start + prefix_size) {
@@ -611,8 +621,8 @@ _Editor_Newline(Editor_Editor* editor) {
 // the line the cursor is. Elsewhere Tab types two spaces.
 PRIVATE void
 _Editor_Tab(Editor_Editor* editor, B32 is_shift) {
-   U64 line_start = _Editor_LineStart(editor, editor->cursor);
-   U64 line_end = _Editor_LineEnd(editor, editor->cursor);
+   U64 line_start = Editor_LineStart(editor, editor->cursor);
+   U64 line_end = Editor_LineEnd(editor, editor->cursor);
    B32 is_bullet = (_Editor_BulletPrefixSize(editor, line_start, line_end) != 0);
 
    if (is_shift) {
@@ -647,7 +657,7 @@ _Editor_Read(Editor_Editor* editor) {
 
    editor->file_crlf = (Str8FindNeedle(data, 0, Str8Lit("\r\n"), 0) < data.size);
 
-   String8 text = _Editor_CleanText(scratch.arena, data);
+   String8 text = Editor_CleanText(scratch.arena, data);
    editor->size = 0; // nothing of the old text to take along to new room
    _Editor_Reserve(editor, text.size + 1);
    MemoryCopy(editor->text, text.str, text.size);
@@ -855,18 +865,18 @@ Editor_Input(Editor_Editor* editor, Arena* arena, WM_EventList* events, Editor_B
          switch (event->key) {
          case WM_Key_Left: {
             if (!is_shift && !is_ctrl && editor->cursor != editor->mark) {
-               _Editor_MoveTo(editor, _Editor_SelectionMin(editor), 0);
+               _Editor_MoveTo(editor, Editor_SelectionMin(editor), 0);
             } else {
-               _Editor_MoveTo(editor, is_ctrl ? _Editor_WordLeft(editor, editor->cursor) : _Editor_PrevChar(editor, editor->cursor), is_shift);
+               _Editor_MoveTo(editor, is_ctrl ? _Editor_WordLeft(editor, editor->cursor) : Editor_PrevChar(editor, editor->cursor), is_shift);
             }
             editor->want_column = -1;
          } break;
 
          case WM_Key_Right: {
             if (!is_shift && !is_ctrl && editor->cursor != editor->mark) {
-               _Editor_MoveTo(editor, _Editor_SelectionMax(editor), 0);
+               _Editor_MoveTo(editor, Editor_SelectionMax(editor), 0);
             } else {
-               _Editor_MoveTo(editor, is_ctrl ? _Editor_WordRight(editor, editor->cursor) : _Editor_NextChar(editor, editor->cursor), is_shift);
+               _Editor_MoveTo(editor, is_ctrl ? _Editor_WordRight(editor, editor->cursor) : Editor_NextChar(editor, editor->cursor), is_shift);
             }
             editor->want_column = -1;
          } break;
@@ -907,11 +917,11 @@ Editor_Input(Editor_Editor* editor, Arena* arena, WM_EventList* events, Editor_B
          } break;
 
          case WM_Key_Backspace: {
-            _Editor_Delete(editor, is_ctrl ? _Editor_WordLeft(editor, editor->cursor) : _Editor_PrevChar(editor, editor->cursor));
+            _Editor_Delete(editor, is_ctrl ? _Editor_WordLeft(editor, editor->cursor) : Editor_PrevChar(editor, editor->cursor));
          } break;
 
          case WM_Key_Delete: {
-            _Editor_Delete(editor, is_ctrl ? _Editor_WordRight(editor, editor->cursor) : _Editor_NextChar(editor, editor->cursor));
+            _Editor_Delete(editor, is_ctrl ? _Editor_WordRight(editor, editor->cursor) : Editor_NextChar(editor, editor->cursor));
          } break;
 
          case WM_Key_Return: {
@@ -934,8 +944,8 @@ Editor_Input(Editor_Editor* editor, Arena* arena, WM_EventList* events, Editor_B
 
                case WM_Key_C:
                case WM_Key_X: {
-                  U64 start = _Editor_SelectionMin(editor);
-                  U64 end = _Editor_SelectionMax(editor);
+                  U64 start = Editor_SelectionMin(editor);
+                  U64 end = Editor_SelectionMax(editor);
                   if (start != end) {
                      Core_WM_SetClipboardText(Str8(editor->text + start, end - start));
                      if (event->key == WM_Key_X) {
@@ -945,7 +955,7 @@ Editor_Input(Editor_Editor* editor, Arena* arena, WM_EventList* events, Editor_B
                } break;
 
                case WM_Key_V: {
-                  String8 text = _Editor_CleanText(arena, Core_WM_GetClipboardText(arena));
+                  String8 text = Editor_CleanText(arena, Core_WM_GetClipboardText(arena));
                   if (text.size != 0) {
                      Editor_Insert(editor, text, Editor_EditKind_Other);
                   }
@@ -1017,8 +1027,8 @@ Editor_Draw(Editor_Editor* editor, Arena* arena, Editor_Box box) {
    U64 first_row = (U64)(editor->scroll_y / metrics.row_h);
    U64 row_opl = Min(rows.count, first_row + metrics.rows_visible + 2);
 
-   U64 selection_min = _Editor_SelectionMin(editor);
-   U64 selection_max = _Editor_SelectionMax(editor);
+   U64 selection_min = Editor_SelectionMin(editor);
+   U64 selection_max = Editor_SelectionMax(editor);
 
    for (U64 row_idx = first_row; row_idx < row_opl; row_idx += 1) {
       Editor_Row row = rows.v[row_idx];
@@ -1048,8 +1058,8 @@ Editor_Draw(Editor_Editor* editor, Arena* arena, Editor_Box box) {
 
       //- bgz: the text, colored by what its line starts with
       if (row.end > row.start) {
-         U64 line_start = _Editor_LineStart(editor, row.start);
-         U64 line_end = _Editor_LineEnd(editor, row.start);
+         U64 line_start = Editor_LineStart(editor, row.start);
+         U64 line_end = Editor_LineEnd(editor, row.start);
          U64 first = line_start;
          while (first < line_end && editor->text[first] == ' ') first += 1;
          String8 line = Str8(editor->text + first, line_end - first);
@@ -1076,9 +1086,15 @@ Editor_Draw(Editor_Editor* editor, Arena* arena, Editor_Box box) {
          B32 is_on = (since_input_us < 500000) || ((since_input_us / 500000) % 2 == 0);
          if (is_on) {
             F32 cursor_x = x + (F32)_Editor_ColumnCount(editor, row.start, editor->cursor) * metrics.char_w;
-            F32 cursor_w = Max(box.px * 0.11f, 1.5f);
-            Core_D_Rect(R2F32P(cursor_x, y, cursor_x + cursor_w, y + metrics.row_h), R2F32P(0, 0, 1, 1),
-                        V4F32(1, 1, 1, 0.95f));
+            if (editor->block_cursor) {
+               // Over the character it is on, which shows through.
+               Core_D_Rect(R2F32P(cursor_x, y, cursor_x + metrics.char_w, y + metrics.row_h), R2F32P(0, 0, 1, 1),
+                           V4F32(1, 1, 1, 0.45f));
+            } else {
+               F32 cursor_w = Max(box.px * 0.11f, 1.5f);
+               Core_D_Rect(R2F32P(cursor_x, y, cursor_x + cursor_w, y + metrics.row_h), R2F32P(0, 0, 1, 1),
+                           V4F32(1, 1, 1, 0.95f));
+            }
          }
       }
    }

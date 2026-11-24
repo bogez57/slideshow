@@ -54,6 +54,8 @@
 //    save             Ctrl+S
 //    format panel     F1 opens and closes it
 //    fullscreen       F11 or Alt+Return. Esc leaves it
+//    the text's keys  as vim has them, in three modes (vim\vim.c). Esc is
+//                     back to command mode
 //    deselect         Esc: nothing selected, and no box in the preview
 //    pictures         click the picture line under Format. Esc closes the list,
 //                     the wheel or the scroll bar moves through it
@@ -95,7 +97,8 @@
 //                     is changed for it
 //    add a slide      click the + at the end of the row of small slides
 //    move a slide     Alt+Left earlier, Alt+Right later
-//    bold, code       Ctrl+B and Ctrl+E: ** or ` around what is selected
+//    bold, code       Ctrl+B and Ctrl+E: ** or ` around what is selected.
+//                     Ctrl+B in insert mode only: else it is vim's
 //    size, colour     Ctrl+] and Ctrl+[ make the words the cursor is in
 //                     larger and smaller, and the Format panel's @size and
 //                     @color lines have the rest to click (look\look.c)
@@ -584,6 +587,8 @@ _Edit_AddTextBox(App_State* app_state, StateOp_List* ops, U64 slide_idx, Rng2F32
    editor->cursor = words_end;
    editor->last_input_us = NowTimeUS();
    g_caret_view.focus_hidden = 0;
+   // To be typed over.
+   Vim_StartTyping(app_state);
    ScratchEnd(scratch);
 
    g_edit_view.has_new_box = 1;
@@ -1002,6 +1007,7 @@ _Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_C
    editor->mark = added_end;
    editor->last_input_us = NowTimeUS();
    g_caret_view.focus_hidden = 0;
+   Vim_StartTyping(app_state);
    ScratchEnd(scratch);
 
    //- bgz: what was pasted, picked: the slide's pieces in what went in.
@@ -1345,21 +1351,6 @@ _Edit_ChangeSlides(App_State* app_state, B32 add, B32 to_later) {
 // on. An op that needs the deck of the text as an op before it left it makes
 // it again itself (FR_SyncDeck).
 
-// The keys and typing: what is left of this frame's events, after the
-// screen's own keys, is the editor's.
-typedef struct Edit_KeyInputOpParams Edit_KeyInputOpParams;
-struct Edit_KeyInputOpParams {
-   Editor_Box box;
-};
-void
-Edit_KeyInput(App_State* app_state, StateOp_List* ops, Edit_KeyInputOpParams* params) {
-   UnusedVariable(ops);
-   if (app_state->editor != 0) {
-      Editor_Input(app_state->editor, app_state->frame_arena, app_state->events, params->box);
-   }
-}
-STATE_OP(Edit_KeyInput)
-
 // The mouse in the text: a press at pos, the button held and the mouse now
 // at pos, and the wheel.
 typedef struct Edit_TextPressOpParams Edit_TextPressOpParams;
@@ -1373,6 +1364,7 @@ Edit_TextPress(App_State* app_state, StateOp_List* ops, Edit_TextPressOpParams* 
    UnusedVariable(ops);
    if (app_state->editor != 0) {
       Editor_Press(app_state->editor, app_state->frame_arena, params->box, params->pos, params->keeps_mark);
+      Vim_AfterTextMouse(app_state);
    }
 }
 STATE_OP(Edit_TextPress)
@@ -1387,6 +1379,7 @@ Edit_TextDrag(App_State* app_state, StateOp_List* ops, Edit_TextDragOpParams* pa
    UnusedVariable(ops);
    if (app_state->editor != 0) {
       Editor_Drag(app_state->editor, app_state->frame_arena, params->box, params->pos);
+      Vim_AfterTextMouse(app_state);
    }
 }
 STATE_OP(Edit_TextDrag)
@@ -1456,6 +1449,7 @@ Edit_Wrap(App_State* app_state, StateOp_List* ops, Edit_WrapOpParams* params) {
    Editor_Editor* editor = app_state->editor;
    if (editor != 0 && _Edit_CanWrap(app_state)) {
       Editor_WrapSelection(editor, params->is_code ? Str8Lit("`") : Str8Lit("**"), params->is_code ? Str8Lit("code") : Str8Lit("bold"));
+      Vim_StartTyping(app_state);
       editor->last_input_us = NowTimeUS();
    }
 }
@@ -1625,9 +1619,12 @@ Edit_FormatRow(App_State* app_state, StateOp_List* ops, Edit_FormatRowOpParams* 
    } else if (row->action == _Edit_FormatAction_Wrap) {
       B32 is_bold = Str8Match(row->insert, Str8Lit("**"), 0);
       Editor_WrapSelection(editor, row->insert, is_bold ? Str8Lit("bold") : Str8Lit("code"));
+      Vim_StartTyping(app_state);
       editor->last_input_us = NowTimeUS();
    } else {
       Editor_InsertLine(editor, row->insert, row->select_start, row->select_end);
+      // What is selected in it is to be typed over.
+      Vim_StartTyping(app_state);
       editor->last_input_us = NowTimeUS();
    }
 }
@@ -1709,6 +1706,8 @@ Edit_PreviewClick(App_State* app_state, StateOp_List* ops, Edit_PreviewClickOpPa
          Editor_SetCursor(editor, hit->text_range.max);
          editor->mark = hit->text_range.min;
          g_caret_view.focus_hidden = 0;
+         // The picture's name, to be typed over.
+         Vim_StartTyping(app_state);
          editor->last_input_us = NowTimeUS();
       }
    }
@@ -2014,12 +2013,15 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       StateOp_App_ToggleFullscreen(ops);
    }
    // Esc closes what is open, one thing a press: the list of pictures, then
+   // vim's insert or visual mode, back to command mode (vim\vim.c), then
    // what is selected - the words, and the box in the preview around the
    // piece the cursor is in - then fullscreen.
    if (Core_WM_KeyPress(events, window, 0, WM_Key_Esc)) {
       B32 has_selection = (editor->mark != editor->cursor);
       if (app_state->show_pictures) {
          StateOp_Edit_ClosePictures(ops);
+      } else if (Vim_WantsEsc(app_state)) {
+         StateOp_Vim_Escape(ops);
       } else if (has_selection || !g_caret_view.focus_hidden) {
          StateOp_Edit_Deselect(ops);
       } else if (is_fullscreen) {
@@ -2034,7 +2036,8 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
 
    // Bold and code, around what is selected (the Format panel's two lines
    // for them do the same).
-   if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_B)) {
+   // Ctrl+B while typing only: in vim's other modes it is words back.
+   if (app_state->vim.mode == Vim_Mode_Insert && Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_B)) {
       StateOp_Edit_Wrap(ops)->is_code = 0;
    }
    if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_E)) {
@@ -2154,9 +2157,10 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       ScratchEnd(scratch);
    }
 
-   //- bgz: everything else is the editor's
+   //- bgz: everything else is the text's: vim's keys by the mode it is in,
+   // then the editor's (vim\vim.c)
    if (events->first != 0) {
-      StateOp_Edit_KeyInput(ops)->box = layout.editor_box;
+      StateOp_Vim_KeyInput(ops)->box = layout.editor_box;
    }
 
    if (present_pressed) {
@@ -3306,6 +3310,14 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
             } else {
                String8 name = Str8SkipLastSlash(Str8(editor->file.str, editor->file.size));
                String8 left = PushStr8F(scratch.arena, "%S%s", name, Editor_HasUnsavedChanges(editor) ? "  (not saved)" : "");
+               // The mode the text's keys are in (vim\vim.c), before the name.
+               UI_PrefHeight(UI_Pct(1, 1)) {
+                  UI_Spacer(UI_Px(pad, 1));
+                  UI_SetNextPrefWidth(UI_TextDim(1, 1));
+                  UI_SetNextColorTag(Vim_ModeTag(app_state));
+                  UI_SetNextFont(fonts->bold);
+                  UI_Label(Vim_ModeName(app_state));
+               }
                _Edit_BuildBarText(pad, Str8Lit(""), left, UI_TopFont(), Str8Lit("Ctrl+O open    Ctrl+S save    F5 present"));
             }
          }

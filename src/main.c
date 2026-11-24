@@ -53,6 +53,7 @@
 #include "place/place.h"
 #include "presenter/presenter.h"
 #include "slide_video/slide_video.h"
+#include "vim/vim.h"
 #include "app_state.h" // after the layers' headers: it holds their types
 #include "frame.h"
 
@@ -96,6 +97,7 @@
 
 #include "video/video.c"
 #include "view/view.c"
+#include "vim/vim.c"
 
 // The top: both screens' frame, which uses all of the above.
 #include "frame.c"

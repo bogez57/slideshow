@@ -329,6 +329,7 @@ FR_OpenPath(App_State* app_state, String8 path) {
    if (is_text) {
       app_state->editor = Editor_Open(deck->file);
       app_state->parsed_edit_count = 0;
+      Vim_EditorOpened(app_state);
 
       // Its folder is watched, to know at once when something else writes
       // the file.
@@ -1117,6 +1118,9 @@ FR_BeginUIBuild(const App_State* app_state, UI_State* ui_state, WM_Window window
        {"row hot", UI_ColorSlot_Background, {{1.00f, 1.00f, 1.00f, 0.07f}}},   // under the mouse
        {"dim", UI_ColorSlot_Text, {{0.84f, 0.86f, 0.90f, 0.55f}}},             // what a row is, hints, keys
        {"notice", UI_ColorSlot_Text, {{1.00f, 0.85f, 0.50f, 1.00f}}},          // App_Notice's
+       {"vim command", UI_ColorSlot_Text, {{1.00f, 0.72f, 0.35f, 1.00f}}},     // the mode, in the edit screen's status line
+       {"vim insert", UI_ColorSlot_Text, {{0.55f, 0.85f, 0.60f, 1.00f}}},
+       {"vim visual", UI_ColorSlot_Text, {{0.60f, 0.65f, 1.00f, 1.00f}}},
        {"deck", UI_ColorSlot_Text, {{1.00f, 0.80f, 0.40f, 1.00f}}},            // a deck to open
        {"folder", UI_ColorSlot_Text, {{0.55f, 0.75f, 1.00f, 1.00f}}},
        {"action", UI_ColorSlot_Text, {{0.60f, 0.85f, 0.60f, 1.00f}}},          // Browse, New deck, Present

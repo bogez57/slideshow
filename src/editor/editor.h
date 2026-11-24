@@ -69,6 +69,14 @@ struct Editor_Editor {
    Editor_EditKind last_edit_kind;
    U64         last_edit_us;
 
+   // How the cursor and the selection are shown and taken, for keys that
+   // work as vim's do (vim\vim.c sets them). block_cursor: the cursor is
+   // drawn over the character it is on, not as a line before it.
+   // selects_lines: what is selected is the whole of every line from the
+   // mark's to the cursor's, the mark and the cursor in one line included.
+   B32 block_cursor;
+   B32 selects_lines;
+
    F32 scroll_y;         // pixels the text is scrolled up by
    B32 scroll_to_cursor; // the cursor moved: bring it into view when next drawn
    U64 last_input_us;    // the cursor does not blink just after input
@@ -134,6 +142,25 @@ void Editor_ReplaceRange(Editor_Editor* editor, U64 start, U64 end, String8 stri
 void Editor_WrapSelection(Editor_Editor* editor, String8 mark, String8 placeholder);
 
 void Editor_SetCursor(Editor_Editor* editor, U64 pos);
+
+// The start and end of the line pos is on, as the file has lines. The end is
+// where its \n is, or the end of the text.
+U64 Editor_LineStart(Editor_Editor* editor, U64 pos);
+U64 Editor_LineEnd(Editor_Editor* editor, U64 pos);
+
+// The character before pos and the one after: a whole one, however many
+// bytes it is.
+U64 Editor_PrevChar(Editor_Editor* editor, U64 pos);
+U64 Editor_NextChar(Editor_Editor* editor, U64 pos);
+
+// What is selected, start and end. Both the cursor when nothing is.
+U64 Editor_SelectionMin(Editor_Editor* editor);
+U64 Editor_SelectionMax(Editor_Editor* editor);
+
+// Text as the editor keeps it, from text as it comes from a file or the
+// clipboard: no \r, four spaces for a tab, no other control characters. On
+// arena.
+String8 Editor_CleanText(Arena* arena, String8 string);
 
 // The changes made since the undo history had undo_count_before steps are
 // undone as one: for an op that changes the text in several places at once.

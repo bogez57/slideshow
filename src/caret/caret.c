@@ -237,6 +237,8 @@ _Caret_ClickIn(App_State* app_state, View_Box* box, Vec2F32 pos, B32 keeps_mark,
          }
          editor->last_input_us = NowTimeUS();
          g_caret_view.focus_hidden = 0;
+         // In the slide's words, to type: not vim's command mode.
+         Vim_StartTyping(app_state);
          result = 1;
       }
    }
