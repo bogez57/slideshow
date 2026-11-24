@@ -18,6 +18,10 @@
 //    @theme        the themes. @layout: the layouts. @video: how it plays
 //    @color text   the colours with names
 //
+// Where no list has what comes next, a hint is drawn after the cursor, dim,
+// as if typed: the four numbers of @place, fewer as each is written; the
+// number of @size; the words of @note; the rest of a #rrggbb.
+//
 // Whether the list is showing is worked out, never kept. It shows when all
 // of these hold:
 //

@@ -58,11 +58,24 @@ PRIVATE Complete_Item _complete_themes[] = {
 #define _COMPLETE_ROWS_SHOWN 10
 
 // The most words an @ line has before the one the list is for.
-#define _COMPLETE_MAX_WORDS 4
+#define _COMPLETE_MAX_WORDS 8
 
-Complete_List
-Complete_ListFromState(const App_State* app_state, Arena* arena) {
-   Complete_List  result = {0};
+// The cursor's line up to the cursor, if it is an @ line being typed: its
+// whole words, and the one the cursor is after - nothing, after a space.
+typedef struct _Complete_Line _Complete_Line;
+struct _Complete_Line {
+   B32     is_good;    // typing, nothing selected, and the line starts with an @
+   U64     first;      // the line's @
+   U64     cursor;
+   String8 words[_COMPLETE_MAX_WORDS];
+   U64     word_count;
+   U64     word_start; // of the word being typed: the cursor, after a space
+   String8 prefix;     // what is typed of it
+};
+
+PRIVATE _Complete_Line
+_Complete_LineFromState(const App_State* app_state) {
+   _Complete_Line result = {0};
    Editor_Editor* editor = app_state->editor;
 
    B32 can_show = (editor != 0 && app_state->is_editing && !app_state->hide_text && !app_state->show_open &&
@@ -71,7 +84,6 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
       return result;
    }
 
-   //- bgz: the line up to the cursor: its words, and the one being typed
    U64 cursor = editor->cursor;
    U64 first = Editor_LineStart(editor, cursor);
    while (first < cursor && editor->text[first] == ' ') first += 1;
@@ -79,22 +91,43 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
       return result;
    }
 
-   String8 words[_COMPLETE_MAX_WORDS];
-   U64     word_count = 0;
-   U64     word_start = first;
+   U64 word_start = first;
    for (U64 at = first; at < cursor; at += 1) {
       if (editor->text[at] == ' ') {
          if (at > word_start) {
-            if (word_count == _COMPLETE_MAX_WORDS) {
+            if (result.word_count == _COMPLETE_MAX_WORDS) {
                return result;
             }
-            words[word_count] = Str8(editor->text + word_start, at - word_start);
-            word_count += 1;
+            result.words[result.word_count] = Str8(editor->text + word_start, at - word_start);
+            result.word_count += 1;
          }
          word_start = at + 1;
       }
    }
-   String8 prefix = Str8(editor->text + word_start, cursor - word_start);
+   result.is_good = 1;
+   result.first = first;
+   result.cursor = cursor;
+   result.word_start = word_start;
+   result.prefix = Str8(editor->text + word_start, cursor - word_start);
+   return result;
+}
+
+Complete_List
+Complete_ListFromState(const App_State* app_state, Arena* arena) {
+   Complete_List  result = {0};
+   Editor_Editor* editor = app_state->editor;
+
+   //- bgz: the line up to the cursor: its words, and the one being typed
+   _Complete_Line line = _Complete_LineFromState(app_state);
+   if (!line.is_good) {
+      return result;
+   }
+   String8* words = line.words;
+   U64      word_count = line.word_count;
+   U64      word_start = line.word_start;
+   U64      cursor = line.cursor;
+   U64      first = line.first;
+   String8  prefix = line.prefix;
 
    //- bgz: what can come there
    Complete_Item* from = 0;
@@ -171,6 +204,49 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
        state->selected_idx < result.count) {
       result.selected_idx = state->selected_idx;
    }
+   return result;
+}
+
+// What an @ line still wants where no list has it: a few dim words after
+// the cursor, as if typed - the numbers of @place, one by one as they are
+// written; the number of @size; the words of @note. Empty: nothing to say.
+// Only at the end of a line, where there is room for it.
+PRIVATE String8
+_Complete_HintFromState(const App_State* app_state, Arena* arena) {
+   String8        result = {0};
+   _Complete_Line line = _Complete_LineFromState(app_state);
+   Editor_Editor* editor = app_state->editor;
+   if (!line.is_good || line.word_count == 0 || line.cursor != Editor_LineEnd(editor, line.cursor)) {
+      return result;
+   }
+#define _Complete_WordIs(idx_, name_) Str8Match(line.words[idx_], Str8Lit(name_), StringMatchFlag_CaseInsensitive)
+   B32 at_space = (line.prefix.size == 0);
+
+   if (_Complete_WordIs(0, "@place") && line.word_count >= 2) {
+      // The numbers there are still to write: all four after the kind, and
+      // one fewer for each written. With one being typed, those after it.
+      char* names[4] = {"left", "top", "width", "height"};
+      U64   written = line.word_count - 2 + (at_space ? 0 : 1);
+      if (written < 4 || (written == 4 && !at_space)) {
+         String8List parts = {0};
+         for (U64 i = written; i < 4; i += 1) {
+            Str8ListPushF(arena, &parts, "%s%s", (i == written && at_space) ? "" : " ", names[i]);
+         }
+         Str8ListPush(arena, &parts, Str8Lit("    each a part of the slide, 0 to 1"));
+         result = Str8ListJoin(arena, &parts, 0);
+      }
+   } else if (_Complete_WordIs(0, "@size") && line.word_count == 2 && at_space) {
+      result = Str8Lit("1.5    times the usual size: 0.5 is half");
+   } else if (_Complete_WordIs(0, "@color") && line.word_count == 2 && !at_space && line.prefix.str[0] == '#') {
+      // The names are the list's. A # is the other way to say a colour.
+      String8 pattern = Str8Lit("#rrggbb");
+      if (line.prefix.size < pattern.size) {
+         result = PushStr8F(arena, "%S    red, green and blue, 00 to ff", Str8Skip(pattern, line.prefix.size));
+      }
+   } else if (_Complete_WordIs(0, "@note") && line.word_count == 1 && at_space) {
+      result = Str8Lit("what to say here: shown beside the slide, not on it");
+   }
+#undef _Complete_WordIs
    return result;
 }
 
@@ -309,6 +385,8 @@ Complete_Input(const App_State* app_state, StateOp_List* ops) {
 ////////////////////////////////
 //~ bgz: the list, in the UI layer
 //
+// With no list, a hint of what the line still wants (_Complete_HintFromState).
+//
 // Under the word, or over it when there is no room under: a panel with a
 // row for each item, the name and then what it does, dimmer. The one
 // selected is on a wash. It takes no clicks: the keys are Complete_Input's.
@@ -317,6 +395,17 @@ void
 Complete_Build(const App_State* app_state, Editor_Box box, Vec2F32 window_dim, F32 ui, F32 px) {
    Complete_List list = Complete_ListFromState(app_state, app_state->frame_arena);
    if (list.count == 0) {
+      //- bgz: no list: the hint, if the line has one, after the cursor in
+      // the text's own font, dim
+      String8 hint = _Complete_HintFromState(app_state, app_state->frame_arena);
+      if (hint.size != 0) {
+         Rng2F32 at = Editor_RectFromPos(app_state->editor, app_state->frame_arena, box, app_state->editor->cursor);
+         if (at.max.y > at.min.y) {
+            Vec4F32 color = UI_ThemeColor(Str8Lit("dim"), UI_ColorSlot_Text);
+            color.w *= 0.75f;
+            FR_BuildWords(box.font, box.px, at.min, color, hint, "###complete hint");
+         }
+      }
       return;
    }
    Rng2F32 word = Editor_RectFromPos(app_state->editor, app_state->frame_arena, box, list.word_start);
