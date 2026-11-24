@@ -53,6 +53,9 @@
 //    present          F5 (and F5 or Esc comes back)
 //    save             Ctrl+S
 //    format panel     F1 opens and closes it
+//    the left side    Alt+[ puts the text, the Format panel and the status
+//                     line away, and the preview has the window. Again, or
+//                     F1, brings them back
 //    fullscreen       F11 or Alt+Return. Esc leaves it
 //    the text's keys  as vim has them, in three modes (vim\vim.c). Esc is
 //                     back to command mode
@@ -189,6 +192,10 @@ _Edit_LayoutFromWindowDim(const App_State* app_state, Vec2F32 window_dim) {
    F32 left_w = window_dim.x * 0.44f;
    left_w = Clamp(Min(380.0f * ui, window_dim.x), left_w, 900.0f * ui);
    left_w = (F32)(S32)left_w;
+   // Alt+[ puts the whole left side away, and the preview has the window.
+   if (app_state->hide_text) {
+      left_w = 0;
+   }
 
    F32 status_h = (F32)(S32)(30.0f * ui);
    F32 header_h = (F32)(S32)(30.0f * ui);
@@ -1403,13 +1410,29 @@ STATE_OP(Edit_TextWheel)
 void
 Edit_ToggleFormat(App_State* app_state, StateOp_List* ops) {
    UnusedVariable(ops);
-   if (app_state->show_pictures) {
+   if (app_state->hide_text) {
+      // The panel is on the left side, which is away: both come back.
+      app_state->hide_text = 0;
+      app_state->show_format = 1;
+   } else if (app_state->show_pictures) {
       app_state->show_pictures = 0;
    } else {
       app_state->show_format = !app_state->show_format;
    }
 }
 STATE_OP_NO_PARAMS(Edit_ToggleFormat)
+
+// Alt+[: the left side - the text, the Format panel and the status line -
+// put away, so the preview has the whole window, and brought back.
+void
+Edit_ToggleText(App_State* app_state, StateOp_List* ops) {
+   UnusedVariable(ops);
+   app_state->hide_text = !app_state->hide_text;
+   if (app_state->editor != 0) {
+      app_state->editor->scroll_to_cursor = 1;
+   }
+}
+STATE_OP_NO_PARAMS(Edit_ToggleText)
 
 void
 Edit_ClosePictures(App_State* app_state, StateOp_List* ops) {
@@ -2032,6 +2055,11 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
    // As a click on the Format panel's header does (Edit_Build).
    if (Core_WM_KeyPress(events, window, 0, WM_Key_F1)) {
       StateOp_Edit_ToggleFormat(ops);
+   }
+
+   // The left side put away, and brought back.
+   if (Core_WM_KeyPress(events, window, WM_Modifier_Alt, WM_Key_LeftBracket)) {
+      StateOp_Edit_ToggleText(ops);
    }
 
    // Bold and code, around what is selected (the Format panel's two lines
@@ -3076,7 +3104,8 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
 
    //- bgz: the text: a box the editor draws in, whose mouse is the editor's
    // - a press, a drag, the wheel. Its keys are Edit_Input's.
-   {
+   B32 shows_text = !app_state->hide_text;
+   if (shows_text) {
       _Edit_Pane* pane = PushArray(UI_BuildArena(), _Edit_Pane, 1);
       pane->editor = editor;
       pane->arena = app_state->frame_arena;
@@ -3107,12 +3136,26 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
       }
    }
 
-   UI_SetNextRect(R2F32P(0, layout.format_header.min.y, left_w, layout.status.max.y));
-   UI_SetNextChildLayoutAxis(Axis2_Y);
-   UI_SetNextColorTag(Str8Lit("panel"));
-   UI_Box* column = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###edit format column");
+   UI_Box* column = 0;
+   if (shows_text) {
+      UI_SetNextRect(R2F32P(0, layout.format_header.min.y, left_w, layout.status.max.y));
+      UI_SetNextChildLayoutAxis(Axis2_Y);
+      UI_SetNextColorTag(Str8Lit("panel"));
+      column = UI_BuildBoxFromStringf(UI_BoxFlag_DrawBackground | UI_BoxFlag_Clip, "###edit format column");
+   }
 
-   UI_Parent(column) UI_FontSize(FR_UIFontSize(layout.ui_px)) {
+   //- bgz: with the left side away, a notice is over the top of the
+   // preview, where there is room above the slide
+   if (!shows_text) {
+      String8 notice = FR_CurrentNotice(app_state);
+      if (notice.size != 0) {
+         F32 notice_w = Text_Width(fonts->regular, layout.ui_px, notice);
+         FR_BuildWords(fonts->regular, layout.ui_px, V2F32((window_dim.x - notice_w) * 0.5f, 6.0f * ui),
+                       UI_ThemeColor(Str8Lit("notice"), UI_ColorSlot_Text), notice, "###edit notice");
+      }
+   }
+
+   if (shows_text) UI_Parent(column) UI_FontSize(FR_UIFontSize(layout.ui_px)) {
       //- bgz: the header
       {
          String8 left = Str8Lit("Format: what can be written (click or F1 to open)");

@@ -96,6 +96,7 @@ struct App_State {
    // text beside a preview, or the presentation (frame.c). Only a deck with
    // an editor has the edit screen.
    B32 is_editing;
+   B32 hide_text;   // edit screen: the left side is put away (Alt+[), and the preview has the window
    B32 show_format; // edit screen: the list of what can be written is open
    // Edit screen: the list of pictures to pick from, open in place of the
    // format panel's lines.
