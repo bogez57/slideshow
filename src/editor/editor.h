@@ -104,6 +104,11 @@ struct Editor_Box {
    Rng2F32 rect;
    FNT_Tag font;
    F32     px;
+
+   // A part of the text whose lines are drawn with a line around them, all
+   // as one: what it is, is the caller's to say (the edit screen's: the
+   // block of a slide the cursor is in). Only Editor_Draw looks. Zero: none.
+   Rng1U64 frame;
 };
 
 // Never 0. A file that does not exist gives an empty editor, and Editor_Save

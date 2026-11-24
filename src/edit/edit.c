@@ -60,6 +60,9 @@
 //                     line away, and the preview has the window. Again, or
 //                     F1, brings them back
 //    fullscreen       F11 or Alt+Return. Esc leaves it
+//    the block        a line around the lines of the text that are the
+//                     block of words the cursor is in: an @box begins the
+//                     next
 //    @ lines          type @ in the text: a list of what can be written,
 //                     Tab or Return to take one (complete\complete.c)
 //    the text's keys  as vim has them, in three modes (vim\vim.c). Esc is
@@ -3097,6 +3100,59 @@ struct _Edit_Pane {
    Editor_Box     box;
 };
 
+// The part of the text that is the block of words the cursor is in - a
+// slide's body, or what an @box line begins, to the next - for the editor
+// to draw a line around: what is typed there is in that block, and an @size
+// or @color line there is that block's. Its lines with something in them,
+// and the cursor's. Zero when the cursor is in no block: on a title, or in
+// a deck with no slide.
+PRIVATE Rng1U64
+_Edit_BlockRange(const App_State* app_state) {
+   Rng1U64        result = {0};
+   Editor_Editor* editor = app_state->editor;
+   Deck_Deck*     deck = app_state->deck;
+   if (editor == 0 || deck == 0 || deck->slide_count == 0 || app_state->parsed_edit_count != editor->edit_count) {
+      return result;
+   }
+   String8     text = Editor_Text(editor);
+   U64         cursor = editor->cursor;
+   U64         slide_idx = Deck_SlideFromTextPos(deck, cursor);
+   Deck_Slide* slide = &deck->slides[slide_idx];
+   U64         slide_end = (slide_idx + 1 < deck->slide_count) ? Min(deck->slides[slide_idx + 1].text_pos, text.size) : text.size;
+
+   for (U64 i = 0; i < slide->box_count; i += 1) {
+      U64 start = Min(slide->boxes[i].text_pos, text.size);
+      U64 end = (i + 1 < slide->box_count) ? Min(slide->boxes[i + 1].text_pos, text.size) : slide_end;
+      if (i == 0) {
+         // The slide's first line - its title, or --- - is not the body's.
+         while (start < end && text.str[start] != '\n') start += 1;
+         if (start < end) start += 1;
+      }
+      if (cursor < start || cursor >= end + (end == text.size ? 1 : 0)) {
+         continue;
+      }
+
+      // Without the empty lines at its ends - but with the cursor's line,
+      // empty or not: a line begun under an @box is in the block already.
+      U64 min = start;
+      U64 max = end;
+      while (min < max && (text.str[min] == '\n' || text.str[min] == ' ')) min += 1;
+      while (max > min && (text.str[max - 1] == '\n' || text.str[max - 1] == ' ')) max -= 1;
+      U64 line_start = Editor_LineStart(editor, cursor);
+      U64 line_end = Editor_LineEnd(editor, cursor);
+      if (min >= max) {
+         min = line_start;
+         max = line_end;
+      }
+      min = Editor_LineStart(editor, Min(min, line_start));
+      max = Max(max, line_end);
+      // Something to be a row, for a line with nothing in it yet.
+      result = R1U64(min, Max(max, min + 1));
+      break;
+   }
+   return result;
+}
+
 // The text, as the editor draws it.
 PRIVATE void
 _Edit_DrawPane(UI_Box* box, void* user_data) {
@@ -3188,6 +3244,7 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
       pane->editor = editor;
       pane->arena = app_state->frame_arena;
       pane->box = layout.editor_box;
+      pane->box.frame = _Edit_BlockRange(app_state);
       UI_Box* box = FR_BuildRectBox(interactive ? (UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll) : 0, layout.editor_box.rect, "###edit text");
       UI_BoxEquipCustomDraw(box, _Edit_DrawPane, pane);
       box->hover_cursor = WM_Cursor_IBar; // the bar that text is typed at

@@ -1046,6 +1046,24 @@ Editor_Draw(Editor_Editor* editor, Arena* arena, Editor_Box box) {
    U64 selection_min = Editor_SelectionMin(editor);
    U64 selection_max = Editor_SelectionMax(editor);
 
+   //- bgz: the box's frame: a line around its rows, thicker down the left,
+   // and a little light in it. Under the text.
+   if (box.frame.max > box.frame.min && box.frame.min < editor->size) {
+      U64 frame_first = _Editor_RowFromPos(rows, box.frame.min);
+      U64 frame_last = _Editor_RowFromPos(rows, Min(box.frame.max, editor->size) - 1);
+      F32 edge = Max((F32)(S32)(box.px * 0.07f), 1.0f);
+      F32 x0 = box.rect.min.x + edge * 2.0f;
+      F32 x1 = box.rect.max.x - Max(box.px * 0.25f, 3.0f) - 4.0f - edge * 2.0f; // short of the scroll bar
+      F32 y0 = metrics.text_rect.min.y + (F32)frame_first * metrics.row_h - editor->scroll_y - edge;
+      F32 y1 = metrics.text_rect.min.y + (F32)(frame_last + 1) * metrics.row_h - editor->scroll_y + edge;
+      Vec4F32 line_color = V4F32(0.35f, 0.60f, 1.00f, 0.55f);
+      Core_D_Rect(R2F32P(x0, y0, x1, y1), R2F32P(0, 0, 1, 1), V4F32(0.35f, 0.60f, 1.00f, 0.045f));
+      Core_D_Rect(R2F32P(x0, y0, x0 + edge * 2.0f, y1), R2F32P(0, 0, 1, 1), V4F32(0.35f, 0.60f, 1.00f, 0.95f));
+      Core_D_Rect(R2F32P(x0, y0, x1, y0 + edge), R2F32P(0, 0, 1, 1), line_color);
+      Core_D_Rect(R2F32P(x0, y1 - edge, x1, y1), R2F32P(0, 0, 1, 1), line_color);
+      Core_D_Rect(R2F32P(x1 - edge, y0, x1, y1), R2F32P(0, 0, 1, 1), line_color);
+   }
+
    for (U64 row_idx = first_row; row_idx < row_opl; row_idx += 1) {
       Editor_Row row = rows.v[row_idx];
       F32    x = metrics.text_rect.min.x;
