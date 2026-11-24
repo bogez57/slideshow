@@ -352,24 +352,26 @@ _Presenter_Build(const App_State* app_state, Vec2F32 window_dim) {
             next_w = next_h * VIEW_PAGE_W / VIEW_PAGE_H;
          }
          Rng2F32 next_rect = R2F32P(right.min.x, y, right.min.x + next_w, y + next_h);
-         B32     has_next = (slide_idx + 1 < deck->slide_count);
+         // The next that is shown: not a board.
+         U64     next_idx = Deck_SlideToShow(deck, slide_idx + 1, 1);
+         B32     has_next = (next_idx < deck->slide_count);
          B32     has_prev = (slide_idx > 0);
          if (has_next) {
             // Its picture is loaded here: the main window only loads the one
             // showing. Being next to that one, it is not released again
             // until the deck moves on from both.
-            Deck_LoadSlideOnly(deck, slide_idx + 1);
+            Deck_LoadSlideOnly(deck, next_idx);
             // A click on it goes on to it. Under the mouse it has a frame,
             // to say so.
             UI_Box*      next_box = 0;
-            _Presenter_Slide* next = _Presenter_BuildSlide(app_state, slide_idx + 1, next_rect, 1, &next_box, "###presenter next");
+            _Presenter_Slide* next = _Presenter_BuildSlide(app_state, next_idx, next_rect, 1, &next_box, "###presenter next");
             UI_Signal    signal = UI_SignalFromBox(next_box);
             if (UI_Hovering(signal)) {
                next->frame = (F32)(S32)Max(2.0f * ui, 1.0f);
                next_box->border_color = UI_ThemeColor(Str8Lit("hot"), UI_ColorSlot_Border);
             }
             if (signal.f & UI_SignalFlag_LeftPressed) {
-               StateOp_App_GoToSlide(ops)->slide_idx = slide_idx + 1;
+               StateOp_App_GoToSlide(ops)->slide_idx = next_idx;
             }
          } else {
             UI_SetNextBackgroundColor(UI_ThemeColor(Str8Lit("end"), UI_ColorSlot_Background));

@@ -296,11 +296,13 @@ _Place_RectFromMouse(Place_Drag* drag, Rng2F32 page, Vec2F32 mouse) {
    Rng2F32 result = start;
 
    if (drag->corner == 0) {
-      // All of it, kept on the page - if it was all on the page.
-      if (start.min.x >= 0 && start.max.x <= 1.0f) {
+      // All of it, kept on the page - if it was all on the page. Not on a
+      // board, which has no edge.
+      B32 is_board = g_edit_view.is_board;
+      if (start.min.x >= 0 && start.max.x <= 1.0f && !is_board) {
          dx = Clamp(-start.min.x, dx, 1.0f - start.max.x);
       }
-      if (start.min.y >= 0 && start.max.y <= 1.0f) {
+      if (start.min.y >= 0 && start.max.y <= 1.0f && !is_board) {
          dy = Clamp(-start.min.y, dy, 1.0f - start.max.y);
       }
       result = R2F32P(start.min.x + dx, start.min.y + dy, start.max.x + dx, start.max.y + dy);
@@ -321,6 +323,11 @@ _Place_RectFromMouse(Place_Drag* drag, Rng2F32 page, Vec2F32 mouse) {
       // The most there is room for on the page, from that corner.
       F32 max_w = Max(is_left ? anchor_x : 1.0f - anchor_x, min_w);
       F32 max_h = Max(is_top ? anchor_y : 1.0f - anchor_y, min_h);
+      if (g_edit_view.is_board) {
+         // A board has room for as much as an @place line can say.
+         max_w = 2.0f;
+         max_h = 2.0f;
+      }
       F32 w = (side_x != 0) ? Clamp(min_w, w0 + (is_left ? -dx : dx), max_w) : w0;
       F32 h = (side_y != 0) ? Clamp(min_h, h0 + (is_top ? -dy : dy), max_h) : h0;
 
@@ -333,13 +340,13 @@ _Place_RectFromMouse(Place_Drag* drag, Rng2F32 page, Vec2F32 mouse) {
          if (side_x != 0) {
             F32 middle = (start.min.y + start.max.y) * 0.5f;
             F32 room = 2.0f * Min(middle, 1.0f - middle);
-            if (room >= h0) {
+            if (room >= h0 && !g_edit_view.is_board) {
                grow = Min(grow, room / h0);
             }
          } else {
             F32 middle = (start.min.x + start.max.x) * 0.5f;
             F32 room = 2.0f * Min(middle, 1.0f - middle);
-            if (room >= w0) {
+            if (room >= w0 && !g_edit_view.is_board) {
                grow = Min(grow, room / w0);
             }
          }
@@ -531,11 +538,11 @@ _Place_LinedUp(Place_Drag* drag, Rng2F32 rect, F32 ui) {
       // Kept on the page, as the mouse keeps it - if it was all on the page.
       // One a hand-written line put partly off can go anywhere.
       F32 lo_x = -1.0f, hi_x = 1.0f, lo_y = -1.0f, hi_y = 1.0f;
-      if (drag->start.min.x >= 0 && drag->start.max.x <= 1.0f) {
+      if (drag->start.min.x >= 0 && drag->start.max.x <= 1.0f && !g_edit_view.is_board) {
          lo_x = -rect.min.x;
          hi_x = 1.0f - rect.max.x;
       }
-      if (drag->start.min.y >= 0 && drag->start.max.y <= 1.0f) {
+      if (drag->start.min.y >= 0 && drag->start.max.y <= 1.0f && !g_edit_view.is_board) {
          lo_y = -rect.min.y;
          hi_y = 1.0f - rect.max.y;
       }
@@ -603,6 +610,10 @@ _Place_LinedUp(Place_Drag* drag, Rng2F32 rect, F32 ui) {
       F32 lo_h = min_size.y;
       F32 hi_w = Max(is_left ? anchor_x : 1.0f - anchor_x, lo_w);
       F32 hi_h = Max(is_top ? anchor_y : 1.0f - anchor_y, lo_h);
+      if (g_edit_view.is_board) {
+         hi_w = 2.0f;
+         hi_h = 2.0f;
+      }
       if (keeps_shape) {
          F32 lo_w2 = Max(lo_w, lo_h * w / h);
          F32 hi_w2 = Min(hi_w, hi_h * w / h);
@@ -743,8 +754,12 @@ _Place_GroupRect(Place_Drag* drag, U64 i) {
    Rng2F32 start = drag->group_start[i];
    F32     w = start.max.x - start.min.x;
    F32     h = start.max.y - start.min.y;
-   F32     x = Clamp(0.0f, start.min.x + (drag->now.min.x - drag->start.min.x), Max(1.0f - w, 0.0f));
-   F32     y = Clamp(0.0f, start.min.y + (drag->now.min.y - drag->start.min.y), Max(1.0f - h, 0.0f));
+   F32     x = start.min.x + (drag->now.min.x - drag->start.min.x);
+   F32     y = start.min.y + (drag->now.min.y - drag->start.min.y);
+   if (!g_edit_view.is_board) {
+      x = Clamp(0.0f, x, Max(1.0f - w, 0.0f));
+      y = Clamp(0.0f, y, Max(1.0f - h, 0.0f));
+   }
    return R2F32P(x, y, x + w, y + h);
 }
 
@@ -917,6 +932,11 @@ _Place_WriteRects(App_State* app_state, Deck_PlaceKind* kinds, U64* idxs, Rng2F3
          break;
       }
       Deck_Slide* slide = &app_state->deck->slides[slide_idx];
+      if (slide->is_canvas) {
+         // Anywhere, on a board.
+         x = rects[i].min.x;
+         y = rects[i].min.y;
+      }
       _Place_WriteLine(editor, slide, kinds[i], idxs[i], _Place_PlaceOf(slide, kinds[i], idxs[i]), R2F32P(x, y, x + w, y + h));
    }
    Editor_JoinUndoSince(editor, undo_before);
@@ -1063,7 +1083,9 @@ Place_Keys(const App_State* app_state) {
 // the window. Pushes ops.
 void
 Place_CtrlWheel(const App_State* app_state) {
-   if (!Place_BoxesAreGood(app_state)) {
+   // On a board Ctrl and the wheel zoom (edit\edit.c): the words are sized
+   // by Ctrl+] and Ctrl+[.
+   if (!Place_BoxesAreGood(app_state) || g_edit_view.is_board) {
       return;
    }
    for (WM_Event* event = app_state->events->first; event != 0; event = event->next) {
@@ -1519,13 +1541,16 @@ Place_BuildLook(const App_State* app_state, F32 ui, Place_Hover* hover) {
       UI_ColorTag(Str8Lit("guide")) {
          if (drag->has_guide_x) {
             F32 x = (F32)(S32)(page.min.x + drag->guide_x * page_dim.x - guide_thick * 0.5f);
-            x = Clamp(page.min.x, x, page.max.x - guide_thick);
-            FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(x, page.min.y, x + guide_thick, page.max.y), "###place guide x");
+            // Across all of a board that shows, where its page is not all there is.
+            Rng2F32 span = g_edit_view.is_board ? g_edit_view.board : page;
+            x = g_edit_view.is_board ? x : Clamp(page.min.x, x, page.max.x - guide_thick);
+            FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(x, span.min.y, x + guide_thick, span.max.y), "###place guide x");
          }
          if (drag->has_guide_y) {
             F32 y = (F32)(S32)(page.min.y + drag->guide_y * page_dim.y - guide_thick * 0.5f);
-            y = Clamp(page.min.y, y, page.max.y - guide_thick);
-            FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(page.min.x, y, page.max.x, y + guide_thick), "###place guide y");
+            Rng2F32 span = g_edit_view.is_board ? g_edit_view.board : page;
+            y = g_edit_view.is_board ? y : Clamp(page.min.y, y, page.max.y - guide_thick);
+            FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(span.min.x, y, span.max.x, y + guide_thick), "###place guide y");
          }
          Vec4F32 box_color = UI_ColorFromSlot(UI_ColorSlot_Border);
          for (U32 axis = 0; axis < 2; axis += 1) {

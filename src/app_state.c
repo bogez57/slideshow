@@ -109,6 +109,13 @@ App_GoToSlide(App_State* app_state, StateOp_List* ops, App_GoToSlideOpParams* pa
    U64 slide_count = app_state->deck->slide_count;
    U64 slide_idx = (slide_count != 0) ? Min(params->slide_idx, slide_count - 1) : app_state->slide_idx;
 
+   // A board is not shown when presenting: the next slide the way the deck
+   // is going, or no change with none that way.
+   if (!app_state->is_editing && slide_count != 0 && app_state->deck->slides[slide_idx].is_canvas) {
+      U64 shown_idx = Deck_SlideToShow(app_state->deck, slide_idx, (slide_idx >= app_state->slide_idx) ? 1 : -1);
+      slide_idx = (shown_idx < slide_count) ? shown_idx : app_state->slide_idx;
+   }
+
    // The fade is from the slide that was on screen to this one.
    //
    // A change that comes before the last one's fade is over is a cut, with no

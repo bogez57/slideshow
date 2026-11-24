@@ -577,11 +577,15 @@ _FR_PresentInput(const App_State* app_state, FR_State* frame, StateOp_List* ops)
       }
 
 
+      // The first and the last that are shown: not a board (App_GoToSlide
+      // passes over those on the way).
       if (Core_WM_KeyPress(events, window, 0, WM_Key_Home)) {
-         slide_idx = 0;
+         U64 first_shown = Deck_SlideToShow(app_state->deck, 0, 1);
+         slide_idx = (first_shown < slide_count) ? first_shown : slide_idx;
       }
       if (Core_WM_KeyPress(events, window, 0, WM_Key_End)) {
-         slide_idx = last_idx;
+         U64 last_shown = Deck_SlideToShow(app_state->deck, last_idx, -1);
+         slide_idx = (last_shown < slide_count) ? last_shown : slide_idx;
       }
 
       //- bgz: playing
@@ -599,7 +603,12 @@ _FR_PresentInput(const App_State* app_state, FR_State* frame, StateOp_List* ops)
       if (playing && slide_count > 1 && slide_idx == app_state->slide_idx) {
          U64 play_us = (U64)(FR_PLAY_SECONDS * 1000000.0f);
          if (now_us - play_from_us >= play_us) {
-            slide_idx = (slide_idx + 1) % slide_count;
+            // The next that is shown, and from the last of them the first.
+            U64 next_shown = Deck_SlideToShow(app_state->deck, slide_idx + 1, 1);
+            if (next_shown >= slide_count) {
+               next_shown = Deck_SlideToShow(app_state->deck, 0, 1);
+            }
+            slide_idx = (next_shown < slide_count) ? next_shown : slide_idx;
          }
       }
    }
@@ -830,8 +839,9 @@ _FR_BuildPresentation(const App_State* app_state, Vec2F32 window_dim) {
       // What comes next: the next slide's title, or that this is the last.
       // On the build arena: its box shows it once the build is done.
       String8 next = Str8Lit("Next: the end");
-      if (app_state->slide_idx + 1 < deck->slide_count) {
-         Deck_Slide* next_slide = &deck->slides[app_state->slide_idx + 1];
+      U64 next_idx = Deck_SlideToShow(deck, app_state->slide_idx + 1, 1);
+      if (next_idx < deck->slide_count) {
+         Deck_Slide* next_slide = &deck->slides[next_idx];
          String8     next_name = next_slide->title;
          if (next_name.size == 0) {
             next_name = (next_slide->picture_count != 0) ? Str8SkipLastSlash(next_slide->pictures[0].path)
@@ -1016,8 +1026,31 @@ _FR_UIEventsFromEvents(const App_State* app_state, UI_State* ui_state, WM_Window
    return ui_events;
 }
 
+// What boxes built with FR_BuildRectBox and FR_BuildEdge are kept inside,
+// while there is one (FR_BeginBuildClip).
+global B32     _fr_has_build_clip;
+global Rng2F32 _fr_build_clip;
+
+void
+FR_BeginBuildClip(Rng2F32 rect) {
+   _fr_has_build_clip = 1;
+   _fr_build_clip = rect;
+}
+
+void
+FR_EndBuildClip(void) {
+   _fr_has_build_clip = 0;
+}
+
 PRIVATE UI_Box*
 _FR_BuildRectBoxV(UI_BoxFlags flags, Rng2F32 rect, char* fmt, va_list args) {
+   if (_fr_has_build_clip) {
+      // What of it is inside: nothing, for one that is all outside.
+      rect = Intersect2F32(rect, _fr_build_clip);
+      if (rect.max.x <= rect.min.x || rect.max.y <= rect.min.y) {
+         rect = R2F32P(0, 0, 0, 0);
+      }
+   }
    Temp    scratch = ScratchBegin(0, 0);
    String8 key = PushStr8FV(scratch.arena, fmt, args);
    // A box's fixed place is from its parent's top left: the parent's rect is
@@ -1046,6 +1079,8 @@ typedef struct _FR_Edge _FR_Edge;
 struct _FR_Edge {
    Rng2F32 rect;
    F32     thick;
+   B32     has_clip; // the build's clip when it was built: nothing is drawn outside it
+   Rng2F32 clip;
 };
 
 // Drawn at the rect it was given, not the box's: the layout puts a box on
@@ -1057,10 +1092,16 @@ _FR_DrawEdge(UI_Box* box, void* user_data) {
    Rng2F32   r = edge->rect;
    F32       t = edge->thick;
    Vec4F32   c = box->border_color;
+   if (edge->has_clip) {
+      Core_D_PushClip(edge->clip);
+   }
    Core_D_Rect(R2F32P(r.min.x, r.min.y, r.max.x, r.min.y + t), R2F32P(0, 0, 1, 1), c);
    Core_D_Rect(R2F32P(r.min.x, r.max.y - t, r.max.x, r.max.y), R2F32P(0, 0, 1, 1), c);
    Core_D_Rect(R2F32P(r.min.x, r.min.y, r.min.x + t, r.max.y), R2F32P(0, 0, 1, 1), c);
    Core_D_Rect(R2F32P(r.max.x - t, r.min.y, r.max.x, r.max.y), R2F32P(0, 0, 1, 1), c);
+   if (edge->has_clip) {
+      Core_D_PopClip();
+   }
 }
 
 UI_Box*
@@ -1073,6 +1114,8 @@ FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...) {
    _FR_Edge* edge = PushArray(UI_BuildArena(), _FR_Edge, 1);
    edge->rect = rect;
    edge->thick = thick;
+   edge->has_clip = _fr_has_build_clip;
+   edge->clip = _fr_build_clip;
    box->border_color = color;
    UI_BoxEquipCustomDraw(box, _FR_DrawEdge, edge);
    return box;

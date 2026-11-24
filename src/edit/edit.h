@@ -46,6 +46,24 @@ struct Edit_View {
    U64      box_count;
    Rng2F32  page;
 
+   // A board showing (an @canvas slide, deck.h): the slide in the preview
+   // has no edge, and the window is moved about over it. is_board and
+   // board are this frame's, as page is: board is the part of the window
+   // the slide is drawn in - for a slide that is no board, its page - and
+   // board_base the page as it is with nothing moved. board_at is the
+   // point of the page in the middle of where a slide's page would be, in
+   // parts of the page, and board_zoom how many times its usual size the
+   // page is: 0 for not moved yet, the page where a slide's is. The wheel
+   // moves it, Ctrl and the wheel zoom, the middle button drags it
+   // (edit.c, "the board").
+   B32     is_board;
+   Rng2F32 board;
+   Rng2F32 board_base;
+   Vec2F32 board_at;
+   F32     board_zoom;
+   B32     board_panning;
+   Vec2F32 board_pan_mouse;
+
    // Where the two dividers were dragged to: the one between the left side
    // and the preview, as the part of the window's width the left side has,
    // and the one over the Format panel, as the part of the window's height

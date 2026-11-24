@@ -40,6 +40,13 @@
 //                          @slide
 //                          @color red
 //                          # Title
+//    @canvas            starts a board: a slide with no edge, to put ideas
+//                       down on before there are slides. Its blocks and
+//                       pictures can be placed anywhere, off the page too,
+//                       and a block is as tall as its words. Nothing in it
+//                       starts a slide but ---, @slide or another @canvas:
+//                       a # line is a heading there. Not shown when
+//                       presenting
 //    @theme light       the whole deck's colours: dark (as with no such line),
 //                       light, blue or paper. Anywhere in the file
 //    @layout center     how the slide it is in is laid out: picture-right (as
@@ -106,11 +113,11 @@
 #define DECK_MAX_BULLET_LEVEL 3
 
 // How many pictures a slide can have: lines past these are passed over.
-#define DECK_MAX_PICTURES 8
+#define DECK_MAX_PICTURES 24
 
 // How many blocks of words a slide's body can be in: an @box line past
 // these starts nothing, and its lines go on in the last.
-#define DECK_MAX_BOXES 8
+#define DECK_MAX_BOXES 48
 
 // The colours of a whole deck. The names, as written after @theme, are in
 // deck.c (Deck_ThemeName), in this order.
@@ -152,6 +159,9 @@ struct Deck_Place {
    B32     has_line;
    Rng1U64 line;
 };
+
+// How far from the page, in pages, a board's pieces can be placed.
+#define DECK_CANVAS_REACH 40.0f
 
 // The smallest a placed thing can be, as a part of the page.
 #define DECK_PLACE_MIN 0.04f
@@ -271,6 +281,10 @@ struct Deck_Slide {
    // 0 in a folder of images.
    U64 text_pos;
 
+   // Begun by an @canvas line: a board, not a slide to show (the format,
+   // above).
+   B32 is_canvas;
+
    // Where in the deck's text the title's words are: as Deck_Item's
    // text_range. Zero for a slide without one, and in a folder of images.
    Rng1U64 title_range;
@@ -376,6 +390,10 @@ Deck_Deck* Deck_OpenFile(String8 file);
 // what is in the file. The deck keeps its own copy. Line endings must be \n
 // alone. file is where the text is from: pictures are found from its folder.
 Deck_Deck* Deck_OpenText(String8 text, String8 file);
+
+// The nearest slide to show from slide_idx on, itself too, going forward
+// (dir over 0) or back: not a board. slide_count if there is none that way.
+U64 Deck_SlideToShow(Deck_Deck* deck, U64 slide_idx, S32 dir);
 
 // The slide a position in the deck's text is on: the last that begins at or
 // before it. 0 if there are no slides.

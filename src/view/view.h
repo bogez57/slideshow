@@ -158,3 +158,10 @@ struct View_HitList {
 // somewhere else.
 void View_DrawSlide(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Slide* slide, Rng2F32 rect, F32 alpha,
                              View_HitList* hits);
+
+// The same with the page anywhere: not fitted to rect, which is only what
+// is drawn in - the page can be larger than it, or partly off it. For a
+// board (Deck_Slide's is_canvas), which is moved about under the window
+// and has pieces off its page: the edit screen's.
+void View_DrawSlideOn(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Slide* slide, Rng2F32 page, Rng2F32 rect, F32 alpha,
+                      View_HitList* hits);

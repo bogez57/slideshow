@@ -76,6 +76,11 @@ F32 FR_UIFontSize(F32 px);
 // around rect exactly, in color.
 UI_Box* FR_BuildRectBox(UI_BoxFlags flags, Rng2F32 rect, char* fmt, ...);
 UI_Box* FR_BuildEdge(Rng2F32 rect, F32 thick, Vec4F32 color, char* fmt, ...);
+// Between the two, the boxes those build are kept inside rect: only what of
+// each is in it is built, and nothing of one that is all outside. For the
+// pieces of a board (edit\edit.c), which can be anywhere, past the preview.
+void FR_BeginBuildClip(Rng2F32 rect);
+void FR_EndBuildClip(void);
 
 //- bgz: a window's UI build (frame.c)
 //

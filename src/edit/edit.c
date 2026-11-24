@@ -103,6 +103,15 @@
 //    size by wheel    Ctrl and the wheel over the title or a block: its
 //                     words larger or smaller - those of all picked, over
 //                     one of them (look\look.c)
+//    a board          an @canvas slide: no edge, pieces anywhere, a block as
+//                     tall as its words, not presented. The wheel moves the
+//                     preview over it, sideways with Shift; Ctrl and the
+//                     wheel zoom, about the mouse; the middle button held
+//                     drags it. The right-click menu on open space puts it
+//                     back over its page ("the board", below)
+//    make a slide     Ctrl+Shift+N with pieces picked: they are taken off
+//                     the slide - a board's ideas, most often - and written
+//                     as a slide of their own at the deck's end
 //    add a picture    drop an image or a video on the window: one more on the
 //                     slide. With a picture selected - click it - that one
 //                     is changed for it
@@ -144,6 +153,7 @@ enum {
 PRIVATE _Edit_FormatRow _edit_format_rows[] = {
     {Str8LitComp("# Title"), Str8LitComp("starts a new slide, with a title"), Str8LitComp("# Title"), 2, 7},
     {Str8LitComp("---"), Str8LitComp("starts a new slide with no title. @slide is the same"), Str8LitComp("---\n"), 4, 4},
+    {Str8LitComp("@canvas"), Str8LitComp("starts a board: no edge, anything anywhere, not presented"), Str8LitComp("@canvas\n"), 8, 8},
     {Str8LitComp("## Heading"), Str8LitComp("a heading inside the slide"), Str8LitComp("## Heading"), 3, 10},
     {Str8LitComp("- point"), Str8LitComp("a bullet. Tab moves it in"), Str8LitComp("- point"), 2, 7},
     {Str8LitComp("  - point"), Str8LitComp("an inner bullet. Shift+Tab moves it out"), Str8LitComp("  - point"), 4, 9},
@@ -182,6 +192,9 @@ struct _Edit_Layout {
    Rng2F32 status;
    Rng2F32 preview;       // the right side, all of it
    Rng2F32 page;          // the slide, in the preview
+   B32     is_board;      // the slide is a board: its page is wherever it was moved to, any size
+   Rng2F32 board;         // what the slide is drawn in: its page - or, for a board, the preview down to the caption
+   Rng2F32 board_base;    // a board's page with nothing moved: where a slide's is
    Rng2F32 caption;       // under the slide
    Rng2F32 thumbs;        // the row of small slides, along the bottom
    Rng2F32 add_slide;     // the + at the row's right end
@@ -269,7 +282,26 @@ _Edit_LayoutFromWindowDim(const App_State* app_state, Vec2F32 window_dim) {
    Rng2F32 page_room = R2F32P(left_w + pad, pad, window_dim.x - pad, thumbs_y - caption_h);
    if (page_room.max.x > page_room.min.x && page_room.max.y > page_room.min.y) {
       result.page = View_PageRectFromRect(page_room);
+      result.board = result.page;
+      result.board_base = result.page;
       result.caption = R2F32P(result.page.min.x, result.page.max.y, result.page.max.x, result.page.max.y + caption_h);
+
+      // A board has all of the preview over the caption, and its page is
+      // where the window was moved to over it (_Edit_BoardInput).
+      Deck_Deck* deck = app_state->deck;
+      if (deck != 0 && app_state->slide_idx < deck->slide_count && deck->slides[app_state->slide_idx].is_canvas) {
+         B32     is_moved = (g_edit_view.board_zoom > 0);
+         F32     zoom = is_moved ? g_edit_view.board_zoom : 1.0f;
+         Vec2F32 at = is_moved ? g_edit_view.board_at : V2F32(0.5f, 0.5f);
+         Vec2F32 dim = Dim2F32(result.board_base);
+         Vec2F32 middle = V2F32(result.board_base.min.x + dim.x * 0.5f, result.board_base.min.y + dim.y * 0.5f);
+         F32     x = (F32)(S32)(middle.x - at.x * dim.x * zoom);
+         F32     y = (F32)(S32)(middle.y - at.y * dim.y * zoom);
+         result.is_board = 1;
+         result.page = R2F32P(x, y, x + dim.x * zoom, y + dim.y * zoom);
+         result.board = R2F32P(left_w + 1.0f, 0, window_dim.x, thumbs_y - caption_h);
+         result.caption = R2F32P(result.board.min.x, result.board.max.y, result.board.max.x, result.board.max.y + caption_h);
+      }
    }
 
    return result;
@@ -377,7 +409,8 @@ _Edit_MoveSlide(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx, B32 to_la
          if (first.str[i] != ' ' && first.str[i] != '\t' && first.str[i] != '\n') {
             first_starts_itself = (first.str[i] == '#' || first.str[i] == '-');
             if (first.str[i] == '@') {
-               first_starts_itself = Str8Match(Str8Prefix(Str8Skip(first, i), 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive);
+               first_starts_itself = (Str8Match(Str8Prefix(Str8Skip(first, i), 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive) ||
+                                      Str8Match(Str8Prefix(Str8Skip(first, i), 7), Str8Lit("@canvas"), StringMatchFlag_CaseInsensitive));
             }
             if (first.str[i] == '-') {
                // A --- line, and not a bullet.
@@ -594,7 +627,7 @@ _Edit_AddTextBox(App_State* app_state, StateOp_List* ops, U64 slide_idx, Rng2F32
    }
    Deck_Slide* slide = &deck->slides[slide_idx];
    if (slide->box_count >= DECK_MAX_BOXES && slide->boxes[slide->box_count - 1].item_count != 0) {
-      StateOp_App_Notice(ops)->notice = Str8Lit("A slide can have 8 text boxes at most");
+      StateOp_App_Notice(ops)->notice = PushStr8F(ops->arena, "A slide can have %d text boxes at most", DECK_MAX_BOXES);
       return;
    }
 
@@ -612,6 +645,11 @@ _Edit_AddTextBox(App_State* app_state, StateOp_List* ops, U64 slide_idx, Rng2F32
    F32 h = Clamp(_EDIT_NEW_BOX_MIN_H, rect.max.y - rect.min.y, 1.0f);
    F32 x = Clamp(0.0f, rect.min.x, 1.0f - w);
    F32 y = Clamp(0.0f, rect.min.y, 1.0f - h);
+   if (slide->is_canvas) {
+      // Anywhere, on a board.
+      x = rect.min.x;
+      y = rect.min.y;
+   }
 
    Temp    scratch = ScratchBegin(0, 0);
    String8 added = PushStr8F(scratch.arena, "\n\n@box\n@place text %.3f %.3f %.3f %.3f\n%s", x, y, w, h,
@@ -1012,6 +1050,10 @@ _Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_C
       F32 h = piece->rect.max.y - piece->rect.min.y;
       F32 x = Clamp(0.0f, piece->rect.min.x + offset, Max(1.0f - w, 0.0f));
       F32 y = Clamp(0.0f, piece->rect.min.y + offset, Max(1.0f - h, 0.0f));
+      if (slide->is_canvas) {
+         x = piece->rect.min.x + offset;
+         y = piece->rect.min.y + offset;
+      }
       if (i != 0) {
          Str8ListPush(scratch.arena, &added, at_back ? Str8Lit("\n") : Str8Lit("\n\n"));
       }
@@ -1044,7 +1086,7 @@ _Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_C
       while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
       String8 first_line = Str8Substr(text, R1U64(line_start, line_end));
       B32     starts_slide = (slide->title_range.max != 0 || (first_line.size >= 3 && MemoryMatch(first_line.str, "---", 3)) ||
-                              Str8Match(Str8Prefix(first_line, 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive));
+                              Str8Match(Str8Prefix(first_line, 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive) || slide->is_canvas);
       String8 after = has_block ? Str8Lit("\n@box") : Str8Lit("");
       // Under the title's line, when the title is not the first: a slide
       // begun by a --- or an @slide, with its title under that.
@@ -1096,7 +1138,7 @@ _Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_C
    _Edit_PickedSnapshot(app_state);
    g_edit_view.picked_slide_idx = slide_idx;
    if (g_edit_view.picked_count < count) {
-      StateOp_App_Notice(ops)->notice = Str8Lit("Not all of it fits: a slide has at most 8 pictures and 8 text boxes");
+      StateOp_App_Notice(ops)->notice = PushStr8F(ops->arena, "Not all of it fits: a slide has at most %d pictures and %d text boxes", DECK_MAX_PICTURES, DECK_MAX_BOXES);
    }
    return 1;
 }
@@ -1145,7 +1187,8 @@ _Edit_NextLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx) {
 
       B32 starts_slide = (first < line_end && (text.str[first] == '#' || text.str[first] == '-' ||
                                                Str8Match(Str8Prefix(Str8Substr(text, R1U64(first, line_end)), 6), Str8Lit("@slide"),
-                                                         StringMatchFlag_CaseInsensitive)));
+                                                         StringMatchFlag_CaseInsensitive) ||
+                                               slide->is_canvas));
       if (starts_slide) {
          _Edit_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
       } else {
@@ -1566,7 +1609,14 @@ Edit_Present(App_State* app_state, StateOp_List* ops) {
    }
    FR_SyncDeck(app_state);
    app_state->slide_idx = Deck_SlideFromTextPos(app_state->deck, editor->cursor);
-   if (app_state->deck->slide_count != 0) {
+   // A board is not shown: from one, the slide after it - or, with none,
+   // the one before.
+   U64 shown_idx = Deck_SlideToShow(app_state->deck, app_state->slide_idx, 1);
+   if (shown_idx >= app_state->deck->slide_count) {
+      shown_idx = Deck_SlideToShow(app_state->deck, app_state->slide_idx, -1);
+   }
+   if (shown_idx < app_state->deck->slide_count) {
+      app_state->slide_idx = shown_idx;
       app_state->is_editing = 0;
       // Presenting shows every block from its top (caret\caret.c).
       Caret_ScrollToTop();
@@ -1576,7 +1626,7 @@ Edit_Present(App_State* app_state, StateOp_List* ops) {
       app_state->fade_active = 0;
       app_state->slide_changed_us = 0;
    } else {
-      StateOp_App_Notice(ops)->notice = Str8Lit("Nothing to present yet: start a slide with  # Title");
+      StateOp_App_Notice(ops)->notice = Str8Lit("Nothing to present yet: start a slide with  # Title  or  @slide");
    }
 }
 STATE_OP_NO_PARAMS(Edit_Present)
@@ -2001,6 +2051,93 @@ Edit_OrderPieces(App_State* app_state, StateOp_List* ops, Edit_OrderPiecesOpPara
 }
 STATE_OP(Edit_OrderPieces)
 
+// Ctrl+Shift+N with pieces picked whole: they are taken off the slide - a
+// board, most often - and written as a slide of their own at the deck's
+// end, so slides made this way are in the order they were made. The first
+// block's first line is the new slide's title, if it is a heading or plain
+// words; its other lines are the slide's body, and each other block is an
+// @box of it. They keep their sizes and colours, and not their places:
+// the new slide's layout puts them. One step to undo.
+void
+Edit_LiftPieces(App_State* app_state, StateOp_List* ops) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0 || !Edit_PickedIsGood(app_state) || !Place_BoxesAreGood(app_state)) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   Temp            scratch = ScratchBegin(0, 0);
+   Edit_ClipPiece* pieces = PushArray(scratch.arena, Edit_ClipPiece, VIEW_MAX_BOXES);
+   U64             count = _Edit_ClipFromPicked(scratch.arena, app_state, pieces);
+
+   // The new slide's lines: the blocks, then the pictures.
+   String8List added = {0};
+   Str8ListPush(scratch.arena, &added, Str8Lit("@slide\n"));
+   B32 has_block = 0;
+   for (U64 i = 0; i < count; i += 1) {
+      Edit_ClipPiece* piece = &pieces[i];
+      if (piece->is_picture) {
+         continue;
+      }
+      String8 lines = piece->lines;
+      if (has_block) {
+         Str8ListPush(scratch.arena, &added, Str8Lit("@box\n"));
+      } else {
+         // Its first line as the title: a heading without its #s, or plain
+         // words. Not a bullet, nor a line that is about something.
+         U64 first_end = 0;
+         while (first_end < lines.size && lines.str[first_end] != '\n') first_end += 1;
+         String8 first = Str8Prefix(lines, first_end);
+         U64     at = 0;
+         while (at < first.size && (first.str[at] == ' ' || first.str[at] == '\t')) at += 1;
+         U64 hash_count = 0;
+         while (at + hash_count < first.size && first.str[at + hash_count] == '#') hash_count += 1;
+         U8  c0 = (at < first.size) ? first.str[at] : 0;
+         B32 is_plain = (c0 != 0 && c0 != '-' && c0 != '*' && c0 != '!' && c0 != '@' && c0 != '#');
+         if (hash_count != 0 || is_plain) {
+            String8 words = Str8Skip(first, at + hash_count);
+            while (words.size != 0 && (words.str[0] == ' ' || words.str[0] == '\t')) words = Str8Skip(words, 1);
+            Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "# %S\n", words));
+            lines = Str8Skip(lines, Min(first_end + 1, lines.size));
+         }
+      }
+      has_block = 1;
+      Str8ListPush(scratch.arena, &added, piece->looks);
+      Str8ListPush(scratch.arena, &added, lines);
+   }
+   for (U64 i = 0; i < count; i += 1) {
+      if (pieces[i].is_picture) {
+         Str8ListPush(scratch.arena, &added, pieces[i].lines);
+      }
+   }
+   String8 body = Str8ListJoin(scratch.arena, &added, 0);
+
+   Deck_PlaceKind kinds[VIEW_MAX_BOXES];
+   U64            idxs[VIEW_MAX_BOXES];
+   MemoryCopy(kinds, g_edit_view.picked_kinds, sizeof(kinds));
+   MemoryCopy(idxs, g_edit_view.picked_idxs, sizeof(idxs));
+   U64 picked = g_edit_view.picked_count;
+   U64 undo_before = editor->undo_count;
+   g_edit_view.picked_count = 0;
+   if (count != 0 && count == picked && _Edit_DeletePieces(app_state, app_state->slide_idx, kinds, idxs, picked)) {
+      // Under the text's last line with anything on it, an empty line
+      // between. The cursor stays where taking the pieces out left it: on
+      // the board, for the next.
+      String8 text = Editor_Text(editor);
+      U64     end = text.size;
+      while (end > 0 && (text.str[end - 1] == '\n' || text.str[end - 1] == ' ' || text.str[end - 1] == '\t')) {
+         end -= 1;
+      }
+      String8 joined = PushStr8F(scratch.arena, "%s%S", (end != 0) ? "\n\n" : "", body);
+      _Edit_ReplaceKeepingCursor(editor, end, text.size, joined);
+      Editor_JoinUndoSince(editor, undo_before);
+      FR_SyncDeck(app_state);
+      StateOp_App_Notice(ops)->notice = PushStr8F(ops->arena, "Moved to a new slide, the deck's last: slide %llu",
+                                                  (unsigned long long)app_state->deck->slide_count);
+   }
+   ScratchEnd(scratch);
+}
+STATE_OP_NO_PARAMS(Edit_LiftPieces)
+
 // Ctrl and a drag on the slide's open space: every piece the box drawn
 // touches is picked whole, with those picked already. rect: in pixels, of
 // the slide as it was last laid out - nothing if the text has changed since.
@@ -2036,6 +2173,76 @@ Edit_PickRect(App_State* app_state, StateOp_List* ops, Edit_PickRectOpParams* pa
    _Edit_PickedSnapshot(app_state);
 }
 STATE_OP(Edit_PickRect)
+
+////////////////////////////////
+//~ bgz: the board
+//
+// An @canvas slide has no edge: its page is only where things are measured
+// from, and the preview is a window over it that is moved about. The wheel
+// moves it up and down, and sideways with Shift; Ctrl and the wheel make
+// it larger and smaller, about where the mouse is; the middle button held
+// drags it. Where it is is the screen's own (g_edit_view.board_at,
+// board_zoom), not in the text and not app state: written here, with no op.
+
+#define _EDIT_BOARD_ZOOM_MIN  0.15f
+#define _EDIT_BOARD_ZOOM_MAX  4.0f
+#define _EDIT_BOARD_ZOOM_STEP 1.15f  // a notch of the wheel
+#define _EDIT_BOARD_WHEEL     0.12f  // how far a notch moves it, in parts of the page as shown
+
+PRIVATE void
+_Edit_BoardInput(const App_State* app_state) {
+   Vec2F32 base_dim = Dim2F32(g_edit_view.board_base);
+   if (!g_edit_view.is_board || base_dim.x <= 0 || base_dim.y <= 0) {
+      g_edit_view.board_panning = 0;
+      return;
+   }
+   if (g_edit_view.board_zoom <= 0) {
+      g_edit_view.board_zoom = 1.0f;
+      g_edit_view.board_at = V2F32(0.5f, 0.5f);
+   }
+   Vec2F32 mouse = Core_WM_MouseFromWindow(app_state->window);
+   Vec2F32 middle = V2F32(g_edit_view.board_base.min.x + base_dim.x * 0.5f, g_edit_view.board_base.min.y + base_dim.y * 0.5f);
+   B32     is_over = Contains2F32(g_edit_view.board, mouse) && !g_edit_view.menu_open;
+   F32     zoom = g_edit_view.board_zoom;
+   Vec2F32 at = g_edit_view.board_at;
+
+   for (WM_Event* event = app_state->events->first; event != 0; event = event->next) {
+      if (event->kind == WM_EventKind_Press && event->key == WM_Key_MiddleMouseButton && is_over) {
+         g_edit_view.board_panning = 1;
+         g_edit_view.board_pan_mouse = mouse;
+      }
+      if (event->kind != WM_EventKind_Scroll || event->delta.y == 0 || !is_over) {
+         continue;
+      }
+      // A notch is 120, down is over 0.
+      F32 notches = Clamp(-4.0f, event->delta.y / 120.0f, 4.0f);
+      if (event->modifiers == WM_Modifier_Ctrl) {
+         // The point of the page under the mouse stays under it.
+         F32 zoom_new = Clamp(_EDIT_BOARD_ZOOM_MIN, zoom * PowF32(_EDIT_BOARD_ZOOM_STEP, -notches), _EDIT_BOARD_ZOOM_MAX);
+         Vec2F32 under = V2F32(at.x + (mouse.x - middle.x) / (base_dim.x * zoom), at.y + (mouse.y - middle.y) / (base_dim.y * zoom));
+         at = V2F32(under.x - (mouse.x - middle.x) / (base_dim.x * zoom_new), under.y - (mouse.y - middle.y) / (base_dim.y * zoom_new));
+         zoom = zoom_new;
+      } else if (event->modifiers == WM_Modifier_Shift) {
+         at.x += notches * _EDIT_BOARD_WHEEL / zoom;
+      } else if (event->modifiers == 0) {
+         at.y += notches * _EDIT_BOARD_WHEEL / zoom;
+      }
+   }
+
+   if (g_edit_view.board_panning) {
+      if (!Core_WM_KeyIsDown(WM_Key_MiddleMouseButton)) {
+         g_edit_view.board_panning = 0;
+      } else {
+         // The board goes with the mouse.
+         at.x -= (mouse.x - g_edit_view.board_pan_mouse.x) / (base_dim.x * zoom);
+         at.y -= (mouse.y - g_edit_view.board_pan_mouse.y) / (base_dim.y * zoom);
+         g_edit_view.board_pan_mouse = mouse;
+      }
+   }
+
+   g_edit_view.board_zoom = zoom;
+   g_edit_view.board_at = V2F32(Clamp(-DECK_CANVAS_REACH, at.x, DECK_CANVAS_REACH), Clamp(-DECK_CANVAS_REACH, at.y, DECK_CANVAS_REACH));
+}
 
 ////////////////////////////////
 //~ bgz: input
@@ -2132,6 +2339,7 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
    // with Ctrl and the wheel, those the mouse is over, or those picked.
    Look_Input(app_state, ops);
    Place_CtrlWheel(app_state);
+   _Edit_BoardInput(app_state);
 
    if (Core_WM_KeyPress(events, window, WM_Modifier_Ctrl, WM_Key_S)) {
       StateOp_Edit_Save(ops);
@@ -2185,6 +2393,10 @@ Edit_Input(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim) {
       }
       if (Core_WM_KeyPress(events, window, ctrl_shift, WM_Key_LeftBracket)) {
          StateOp_Edit_OrderPieces(ops)->to_back = 1;
+      }
+      // To a slide of their own, at the deck's end.
+      if (Core_WM_KeyPress(events, window, ctrl_shift, WM_Key_N)) {
+         StateOp_Edit_LiftPieces(ops);
       }
       // Lined up, and spaced evenly (place\place.c).
       struct {
@@ -2411,6 +2623,9 @@ typedef struct _Edit_Slide _Edit_Slide;
 struct _Edit_Slide {
    const App_State* app_state;
    Rng2F32          page;
+   Rng2F32          board;    // what it is drawn in: the page, or more for a board
+   B32              is_board;
+   F32              edge;     // how thick the line around a board's page is
 };
 
 // The preview's slide, as it was laid out in the build: the same scroll,
@@ -2421,13 +2636,34 @@ _Edit_DrawSlide(UI_Box* box, void* user_data) {
    _Edit_Slide*     slide = (_Edit_Slide*)user_data;
    const App_State* app_state = slide->app_state;
    Deck_Deck*       deck = app_state->deck;
-   Core_D_Rect(slide->page, R2F32P(0, 0, 1, 1), View_ColorsFromTheme(deck->theme).background);
+   View_Colors colors = View_ColorsFromTheme(deck->theme);
+   Core_D_Rect(slide->board, R2F32P(0, 0, 1, 1), colors.background);
+   if (slide->is_board) {
+      // Where a slide's page would be, as a faint line: how much of the
+      // board one slide holds.
+      Vec4F32 line = colors.body;
+      line.w = 0.16f;
+      Rng2F32 page = slide->page;
+      F32     edge = slide->edge;
+      Rng2F32 sides[4] = {
+          R2F32P(page.min.x, page.min.y, page.max.x, page.min.y + edge),
+          R2F32P(page.min.x, page.max.y - edge, page.max.x, page.max.y),
+          R2F32P(page.min.x, page.min.y, page.min.x + edge, page.max.y),
+          R2F32P(page.max.x - edge, page.min.y, page.max.x, page.max.y),
+      };
+      for (U64 i = 0; i < ArrayCount(sides); i += 1) {
+         Rng2F32 side = Intersect2F32(sides[i], slide->board);
+         if (side.max.x > side.min.x && side.max.y > side.min.y) {
+            Core_D_Rect(side, R2F32P(0, 0, 1, 1), line);
+         }
+      }
+   }
    if (app_state->slide_idx < deck->slide_count) {
       View_HitList hits = {0};
       hits.bars_by_caller = 1;
       Caret_BeforeDraw(app_state);
       Place_PutDrag(app_state, app_state->slide_idx);
-      View_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], slide->page, 1.0f, &hits);
+      View_DrawSlideOn(app_state->frame_arena, &app_state->fonts, deck->theme, &deck->slides[app_state->slide_idx], slide->page, slide->board, 1.0f, &hits);
       Place_TakeDrag(app_state, app_state->slide_idx);
       Caret_AfterDrawOf(app_state, app_state->slide_idx);
    }
@@ -2511,7 +2747,7 @@ _Edit_LayoutPreview(const App_State* app_state, Rng2F32 page, F32 ui) {
    Place_PutDrag(app_state, app_state->slide_idx);
    Core_D_BucketScope(bucket) {
       Caret_BeforeDraw(app_state);
-      View_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, slide, page, 1.0f, &hits);
+      View_DrawSlideOn(app_state->frame_arena, &app_state->fonts, deck->theme, slide, page, g_edit_view.board, 1.0f, &hits);
       if (Caret_Follow(app_state, &hits)) {
          // A block's words moved to follow the caret, or back to where they
          // end: the slide again, as it now is - or for a frame the caret's
@@ -2520,7 +2756,7 @@ _Edit_LayoutPreview(const App_State* app_state, Rng2F32 page, F32 ui) {
          MemoryZeroStruct(&hits);
          hits.bars_by_caller = 1;
          Caret_BeforeDraw(app_state);
-         View_DrawSlide(app_state->frame_arena, &app_state->fonts, deck->theme, slide, page, 1.0f, &hits);
+         View_DrawSlideOn(app_state->frame_arena, &app_state->fonts, deck->theme, slide, page, g_edit_view.board, 1.0f, &hits);
       }
    }
    Place_TakeDrag(app_state, app_state->slide_idx);
@@ -2543,7 +2779,7 @@ _Edit_LayoutPreview(const App_State* app_state, Rng2F32 page, F32 ui) {
       // larger than the slide.
       Rng2F32 rect = Intersect2F32(R2F32P(hit->rect.min.x - grow, hit->rect.min.y - grow * 0.5f, hit->rect.max.x + grow,
                                           hit->rect.max.y + grow * 0.5f),
-                                   page);
+                                   g_edit_view.board);
       if (rect.max.x <= rect.min.x || rect.max.y <= rect.min.y) {
          continue;
       }
@@ -2587,6 +2823,8 @@ typedef enum _Edit_MenuItemKind {
    _Edit_MenuItem_Arrange, // with arrange: lined up, or spaced
    _Edit_MenuItem_PutBack,
    _Edit_MenuItem_PickAll,
+   _Edit_MenuItem_Lift,      // the pieces picked, to a slide of their own
+   _Edit_MenuItem_BoardHome, // a board moved back to its page
 } _Edit_MenuItemKind;
 
 typedef struct _Edit_MenuItem _Edit_MenuItem;
@@ -2651,9 +2889,16 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       _Edit_MenuAdd(_Edit_MenuItem_Duplicate, "Duplicate", "Ctrl+D");
       _Edit_MenuAdd(_Edit_MenuItem_Delete, "Delete", "Del");
       _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+      _Edit_MenuAdd(_Edit_MenuItem_Lift, "Move to a new slide", "Ctrl+Shift+N");
+      _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
       _Edit_MenuAdd(_Edit_MenuItem_Front, "Bring to front", "Ctrl+Shift+]");
       _Edit_MenuAdd(_Edit_MenuItem_Back, "Send to back", "Ctrl+Shift+[");
-      if (has_words) {
+      if (has_words && g_edit_view.is_board) {
+         // On a board Ctrl and the wheel zoom.
+         _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+         _Edit_MenuAdd(_Edit_MenuItem_Larger, "Larger words", "Ctrl+]");
+         _Edit_MenuAdd(_Edit_MenuItem_Smaller, "Smaller words", "Ctrl+[");
+      } else if (has_words) {
          _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
          _Edit_MenuAdd(_Edit_MenuItem_Larger, "Larger words", "Ctrl+Wheel up");
          _Edit_MenuAdd(_Edit_MenuItem_Smaller, "Smaller words", "Ctrl+Wheel down");
@@ -2677,7 +2922,12 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       if (g_edit_view.clip_count != 0) {
          _Edit_MenuAdd(_Edit_MenuItem_Paste, "Paste", "Ctrl+V");
       }
-      _Edit_MenuAdd(_Edit_MenuItem_PickAll, "Select everything on the slide", "");
+      if (g_edit_view.is_board) {
+         _Edit_MenuAdd(_Edit_MenuItem_PickAll, "Select everything on the board", "");
+         _Edit_MenuAdd(_Edit_MenuItem_BoardHome, "Back to the page, at its size", "");
+      } else {
+         _Edit_MenuAdd(_Edit_MenuItem_PickAll, "Select everything on the slide", "");
+      }
    }
 #undef _Edit_MenuAdd
 #undef _Edit_MenuAddArrange
@@ -2765,7 +3015,15 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
             remove->kind = g_edit_view.menu_kind;
             remove->idx = g_edit_view.menu_idx;
          } break;
-         case _Edit_MenuItem_PickAll: StateOp_Edit_PickRect(ops)->rect = g_edit_view.page; break;
+         case _Edit_MenuItem_PickAll: {
+            // A board's are past the page too, and past the window.
+            StateOp_Edit_PickRect(ops)->rect = g_edit_view.is_board ? R2F32P(-1.0e9f, -1.0e9f, 1.0e9f, 1.0e9f) : g_edit_view.page;
+         } break;
+         case _Edit_MenuItem_Lift: StateOp_Edit_LiftPieces(ops); break;
+         case _Edit_MenuItem_BoardHome: {
+            // The screen's own, with no op: back over the page, at its size.
+            g_edit_view.board_zoom = 0;
+         } break;
          default: break;
          }
       }
@@ -2802,6 +3060,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
    //- bgz: 1, 2: what the mouse holds, then the slide laid out. The deck is
    // of the text as it is, and the slide is the one the cursor is on:
    // _FR_UpdateAppState saw to both.
+   g_edit_view.is_board = layout->is_board;
+   g_edit_view.board = layout->board;
+   g_edit_view.board_base = layout->board_base;
    Place_BeforeLayout(app_state, ui);
    Caret_BeforeLayout(app_state);
    _Edit_LayoutPreview(app_state, layout->page, ui);
@@ -2809,6 +3070,11 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
    //- bgz: 3: the boxes that are clicked. What a click does to the text or
    // the cursor is an op, run at the start of the next frame; changed is for
    // what is the preview's own - a block's scroll.
+   // A board's pieces can be anywhere: their boxes are kept to what of
+   // the board shows, off the text and the small slides.
+   if (layout->is_board) {
+      FR_BeginBuildClip(layout->board);
+   }
    B32         changed = 0;
    Place_Hover hover = {0};
    hover.hit_idx = -1;
@@ -2837,7 +3103,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
    if (interactive && ((Place_BoxesAreGood(app_state) && g_place_view.drag.state == Place_DragState_None) ||
                        g_edit_view.is_drawing)) {
       Rng2F32   page = g_edit_view.page;
-      UI_Box*   space = FR_BuildRectBox(UI_BoxFlag_MouseClickable, page, "###edit open space");
+      // A board's is all that shows of it: past the page too.
+      Rng2F32   open_rect = g_edit_view.board;
+      UI_Box*   space = FR_BuildRectBox(UI_BoxFlag_MouseClickable, open_rect, "###edit open space");
       space->hover_cursor = WM_Cursor_Pointer;
       UI_Signal signal = UI_SignalFromBox(space);
       open_space_hot = UI_Hovering(signal) && !hover.is_over;
@@ -2859,7 +3127,7 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
          if (gone_x > reach || gone_x < -reach || gone_y > reach || gone_y < -reach) {
             g_edit_view.draw_is_box = 1;
          }
-         g_edit_view.draw_to = V2F32(Clamp(page.min.x, mouse.x, page.max.x), Clamp(page.min.y, mouse.y, page.max.y));
+         g_edit_view.draw_to = V2F32(Clamp(open_rect.min.x, mouse.x, open_rect.max.x), Clamp(open_rect.min.y, mouse.y, open_rect.max.y));
       }
       if (g_edit_view.is_drawing && (signal.f & UI_SignalFlag_LeftReleased)) {
          g_edit_view.is_drawing = 0;
@@ -2882,6 +3150,7 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
    } else {
       g_edit_view.is_drawing = 0;
    }
+   FR_EndBuildClip();
 
    //- bgz: the row of small slides - a press goes to the slide - and the +
    // that adds one after the slide showing
@@ -2923,6 +3192,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
 
    //- bgz: 5: the boxes that are drawn
    String8 caption = {0};
+   if (layout->is_board) {
+      FR_BeginBuildClip(layout->board);
+   }
    if (app_state->slide_idx < deck->slide_count && Dim2F32(layout->page).x > 0) {
       // The box the mouse is over - a picture's, the title's, a block's -
       // with its corners, and what can be done with it said under the slide.
@@ -3025,13 +3297,18 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       } else if (is_at_words) {
          caption = Str8Lit("Drag across the words to select them      Double-click a word, triple-click a line");
       } else if (has_picked && !can_move) {
-         caption = Str8Lit("Delete takes it out      Click its words to type in them      Esc lets go of it");
+         caption = layout->is_board ? Str8Lit("Ctrl+Shift+N moves it to a slide of its own      Delete takes it out      Esc lets go of it")
+                                    : Str8Lit("Delete takes it out      Click its words to type in them      Esc lets go of it");
       } else if (can_move && has_picked && hover.has_piece && Edit_PieceIsPicked(app_state, hover.kind, hover.idx)) {
          caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out      Right-click for more");
+      } else if (open_space_hot && layout->is_board) {
+         caption = Str8Lit("A board      Drag to draw a text box      Wheel moves it, Ctrl+wheel zooms, the middle button drags it");
       } else if (open_space_hot) {
          caption = Str8Lit("Drag to draw a text box      Ctrl+drag selects what the box touches");
       } else if (can_move) {
          caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click for more");
+      } else if (layout->is_board && !open_space_hot && !can_move) {
+         caption = Str8Lit("A board: not shown when presenting      Select pieces, then Ctrl+Shift+N makes a slide of them");
       } else if (deck->slides[app_state->slide_idx].pictures_passed_over != 0) {
          // A picture line typed past the most a slide can have: not on the
          // slide, which should not go unsaid.
@@ -3042,6 +3319,8 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
                              (unsigned long long)(app_state->slide_idx + 1), (unsigned long long)deck->slide_count);
       }
    }
+
+   FR_EndBuildClip();
 
    //- bgz: the caption, under the slide
    if (caption.size != 0) {
@@ -3109,7 +3388,10 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       _Edit_Slide* slide = PushArray(UI_BuildArena(), _Edit_Slide, 1);
       slide->app_state = app_state;
       slide->page = layout->page;
-      UI_Box* box = FR_BuildRectBox(0, layout->page, "###edit slide");
+      slide->board = layout->board;
+      slide->is_board = layout->is_board;
+      slide->edge = Max(1.0f, (F32)(S32)(1.0f * ui));
+      UI_Box* box = FR_BuildRectBox(0, layout->board, "###edit slide");
       UI_BoxEquipCustomDraw(box, _Edit_DrawSlide, slide);
    }
 

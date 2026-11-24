@@ -808,15 +808,23 @@ _View_Title(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Sli
 void
 View_DrawSlide(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Slide* slide, Rng2F32 rect, F32 alpha,
                View_HitList* hits) {
+   View_DrawSlideOn(arena, fonts, theme, slide, View_PageRectFromRect(rect), rect, alpha, hits);
+}
+
+void
+View_DrawSlideOn(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Slide* slide, Rng2F32 page, Rng2F32 rect, F32 alpha,
+                 View_HitList* hits) {
    Vec2F32 rect_dim = Dim2F32(rect);
-   if (rect_dim.x <= 0 || rect_dim.y <= 0) {
+   Vec2F32 page_dim = Dim2F32(page);
+   if (rect_dim.x <= 0 || rect_dim.y <= 0 || page_dim.x <= 0 || page_dim.y <= 0) {
       return;
    }
 
    Core_D_PushClip(rect);
 
-   F32     scale = View_ScaleFromDim(rect_dim);
-   Rng2F32 page = View_PageRectFromRect(rect);
+   F32 scale = View_ScaleFromDim(page_dim);
+   // A board: no bottom to a block's room, which is as tall as its words.
+   B32 is_board = slide->is_canvas;
    if (hits != 0) {
       hits->page = page;
    }
@@ -899,7 +907,7 @@ View_DrawSlide(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Sli
    Rng2F32 body_rect = R2F32P(content.min.x, y, content.max.x, content.max.y);
    Rng2F32 picture_rect = body_rect;
    if (!has_text) {
-      picture_rect = (beside_count == 1) ? rect : R2F32P(page.min.x + gutter, page.min.y + gutter, page.max.x - gutter,
+      picture_rect = (beside_count == 1 && !is_board) ? rect : R2F32P(page.min.x + gutter, page.min.y + gutter, page.max.x - gutter,
                                                          page.max.y - gutter);
    } else if (beside_count != 0 && slide->item_count != 0) {
       F32 middle = (content.min.x + content.max.x) * 0.5f;
@@ -995,6 +1003,10 @@ View_DrawSlide(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Sli
          }
       }
 
+      if (is_board) {
+         // No bottom: the words go on down, off the page.
+         body_rect.max.y = Max(body_rect.max.y, rect.max.y) + 100000.0f * scale;
+      }
       F32 y_at = body_rect.min.y - slide->body_scroll * scale;
       for (U64 i = 0; i < slide->box_count; i += 1) {
          Deck_Box* block = &slide->boxes[i];
@@ -1004,9 +1016,15 @@ View_DrawSlide(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Sli
          F32 text_size = block->look.has_size ? block->look.size : 1.0f;
          if (block->place.is_set) {
             Rng2F32 room = _View_PlacedRect(page, &block->place);
+            if (is_board) {
+               // As far down as its words go: measured first, drawn with
+               // nothing of them showing and no hits.
+               F32 words_y = _View_Body(arena, fonts, &colors, slide, block, i, room, R2F32P(0, 0, 0, 0), scale, 0, 0);
+               room.max.y = Max(room.max.y, words_y + 8.0f * scale);
+            }
             Rng2F32 shown = Intersect2F32(room, rect);
             Rng2F32 block_rect = room;
-            block_rect.min.y -= block->scroll * scale;
+            block_rect.min.y -= is_board ? 0 : block->scroll * scale;
             Core_D_PushClip(shown);
             F32 end_y = _View_Body(arena, fonts, &colors, slide, block, i, block_rect, shown, scale, alpha, hits);
             Core_D_PopClip();
@@ -1030,11 +1048,11 @@ View_DrawSlide(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_Sli
             box.min.y = Clamp(body_rect.min.y, block_rect.min.y, body_rect.max.y);
             box.max.y = Clamp(box.min.y + 1.0f, end_y + 8.0f * scale, Max(body_rect.max.y, box.min.y + 1.0f));
             Rng2F32 room = box;
-            if (i == last_shared) {
+            if (i == last_shared && !is_board) {
                room.max.y = Max(body_rect.max.y, box.max.y);
             }
             _View_PushBox(hits, Deck_PlaceKind_Text, i, box, text_size, room, end_y);
-            if (i == last_shared) {
+            if (i == last_shared && !is_board) {
                // The one bar of the blocks that share the body's room.
                F32 scroll = slide->body_scroll * scale;
                _View_ScrollBar(hits, &colors, body_rect, page, end_y - (body_rect.min.y - scroll), scroll, scale, alpha);

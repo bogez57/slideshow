@@ -437,6 +437,34 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          String8 trimmed = _Deck_Trim(line);
          is_rule = Str8Match(trimmed, Str8Lit("@slide"), StringMatchFlag_CaseInsensitive);
       }
+      B32 is_canvas_line = (!is_rule && Str8Match(_Deck_Trim(line), Str8Lit("@canvas"), StringMatchFlag_CaseInsensitive));
+      if (is_canvas_line) {
+         // A board is there from its line on, with nothing on it yet: there
+         // is no first line of it to wait for, and what waited for a slide
+         // is dropped.
+         _Deck_SlideNode* node = PushArray(scratch.arena, _Deck_SlideNode, 1);
+         SLLQueuePush(first_node, last_node, node);
+         node_count += 1;
+         slide = &node->slide;
+         slide->is_canvas = 1;
+         slide->text_pos = line_start;
+         slide->box_count = 1;
+         slide->boxes[0].text_pos = line_start;
+         gap_before = 0;
+         last_picture_passed_over = 0;
+         has_rule_pos = 0;
+         has_waiting_layout = 0;
+         waiting_video_loop = 0;
+         waiting_video_mute = 0;
+         waiting_video_manual = 0;
+         MemoryZeroArray(waiting_places);
+         MemoryZeroStruct(&waiting_picture_place);
+         MemoryZeroStruct(&waiting_title_look);
+         MemoryZeroStruct(&waiting_text_look);
+         MemoryZeroStruct(&waiting_bare_look);
+         MemoryZeroStruct(&waiting_bare_place);
+         continue;
+      }
       if (is_rule) {
          slide = 0;
          gap_before = 0;
@@ -546,10 +574,12 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                 _Deck_TakeNumber(&numbers, &w) && _Deck_TakeNumber(&numbers, &h)) {
                // Kept to sizes that can be seen, and near enough to the page
                // to be found again.
+               // A board's can be a long way off: as far as it goes.
+               F32 reach = (slide != 0 && slide->is_canvas) ? DECK_CANVAS_REACH : 1.0f;
                w = Clamp(DECK_PLACE_MIN, w, 2.0f);
                h = Clamp(DECK_PLACE_MIN, h, 2.0f);
-               x = Clamp(-1.0f, x, 1.0f);
-               y = Clamp(-1.0f, y, 1.0f);
+               x = Clamp(-reach, x, reach);
+               y = Clamp(-reach, y, reach);
 
                // The first such line of a slide - or of a picture - is the
                // one that counts. A picture's is for the picture last
@@ -657,7 +687,8 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
       // a # with nothing after it yet is a title being written: the slide
       // starts as soon as the # is typed.
       B32 is_heading = (hash_count > 0);
-      B32 is_title = (is_heading && hash_count == 1);
+      // On a board a # line is a heading: nothing there starts a slide.
+      B32 is_title = (is_heading && hash_count == 1 && !(slide != 0 && slide->is_canvas));
 
       // A - with nothing after it yet is a bullet being written: it shows as
       // its dot, not as a paragraph that reads "-".
@@ -812,6 +843,18 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
 
    ScratchEnd(scratch);
    return deck;
+}
+
+U64
+Deck_SlideToShow(Deck_Deck* deck, U64 slide_idx, S32 dir) {
+   U64 result = deck->slide_count;
+   for (U64 i = slide_idx; i < deck->slide_count; i += (dir > 0) ? 1 : (U64)-1) {
+      if (!deck->slides[i].is_canvas) {
+         result = i;
+         break;
+      }
+   }
+   return result;
 }
 
 U64

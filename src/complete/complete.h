@@ -14,6 +14,7 @@
 //    @picture      not a line of the format: taking it opens Windows'
 //                  open-file window, and the picture picked is put on the
 //                  slide. @video file is the same, for a video
+//    @canvas       a board: nothing comes next
 //    @place        what can come next: picture, text, title
 //    @theme        the themes. @layout: the layouts. @video: how it plays
 //    @color        the colours with names, for the block's words - and

@@ -250,7 +250,7 @@ _Caret_ClickIn(App_State* app_state, View_Box* box, Vec2F32 pos, B32 keeps_mark,
 
 B32
 Caret_Click(App_State* app_state, Vec2F32 pos, B32 keeps_mark) {
-   if (!_Caret_RunsAreGood(app_state) || !Contains2F32(g_edit_view.page, pos)) {
+   if (!_Caret_RunsAreGood(app_state) || !Contains2F32(g_edit_view.board, pos)) {
       return 0;
    }
    return _Caret_ClickIn(app_state, _Caret_WordsBoxAt(app_state, pos), pos, keeps_mark, 0);
@@ -595,7 +595,7 @@ Caret_BuildRooms(const App_State* app_state, F32 ui, B32 interactive) {
       if (box->kind == Deck_PlaceKind_Text) {
          room_rect.max.y = Min(box->room.max.y, Max(box->rect.max.y, room_rect.min.y));
       }
-      UI_Box*   room = FR_BuildRectBox(UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll, Intersect2F32(room_rect, g_edit_view.page),
+      UI_Box*   room = FR_BuildRectBox(UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll, Intersect2F32(room_rect, g_edit_view.board),
                                        "###caret room %d %llu", (int)box->kind, (unsigned long long)box->idx);
       // A click here goes to the nearest letter, but the mouse is the bar
       // that text is typed at only right at the words (place\place.c) - and
@@ -955,7 +955,7 @@ Caret_BuildLook(const App_State* app_state, F32 ui) {
          if (kind == Deck_PlaceKind_Text) {
             around.max.y = Min(box->room.max.y, Max(box->rect.max.y, caret.is_found ? caret.rect.max.y : 0.0f));
          }
-         Rng2F32 rect = Intersect2F32(Pad2F32(around, thick), g_edit_view.page);
+         Rng2F32 rect = Intersect2F32(Pad2F32(around, thick), g_edit_view.board);
          if (rect.max.x > rect.min.x && rect.max.y > rect.min.y) {
             FR_BuildEdge(rect, thick, UI_ColorFromSlot(UI_ColorSlot_Border), "###caret focus");
          }
