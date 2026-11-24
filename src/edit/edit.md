@@ -16,6 +16,7 @@ In `App_State`, changed by ops only:
 The screen's own, `g_edit_view` (`Edit_View`, edit.h), written with no op:
 
 - `hits`, `hit_count`, `hits_arena`, `hits_edit_count`, `runs`, `run_count`, `boxes`, `box_count`, `page`: where the preview's pieces were laid out this frame, and for which text. caret, place and look read them.
+- `split_x`, `split_format`: where the two dividers were dragged to - the edge between the left side and the preview, and the Format panel's top edge. 0: where the layout puts it itself.
 - `format_scroll`: where the Format panel's lines are scrolled to.
 - `pictures`, `pictures_arena`, `pictures_scanned_us`, `pictures_scroll`: the names in the list of pictures, and where it is scrolled to.
 - `is_drawing`, `draw_is_box`, `draw_picks`, `draw_from`, `draw_to`: a text box being drawn with the mouse on the slide's open space.

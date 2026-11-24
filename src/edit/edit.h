@@ -46,6 +46,13 @@ struct Edit_View {
    U64      box_count;
    Rng2F32  page;
 
+   // Where the two dividers were dragged to: the one between the left side
+   // and the preview, as the part of the window's width the left side has,
+   // and the one over the Format panel, as the part of the window's height
+   // its lines have. 0: not dragged, where the layout puts it itself.
+   F32 split_x;
+   F32 split_format;
+
    // Where the Format panel's lines are scrolled to, in a window too short
    // for all of them.
    UI_ScrollRows format_scroll;

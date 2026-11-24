@@ -53,6 +53,9 @@
 //    present          F5 (and F5 or Esc comes back)
 //    save             Ctrl+S
 //    format panel     F1 opens and closes it
+//    more room        drag the edge between the text and the preview, or
+//                     the top edge of the Format panel. A double click
+//                     puts it back
 //    the left side    Alt+[ puts the text, the Format panel and the status
 //                     line away, and the preview has the window. Again, or
 //                     F1, brings them back
@@ -156,6 +159,11 @@ PRIVATE _Edit_FormatRow _edit_format_rows[] = {
 ////////////////////////////////
 //~ bgz: layout
 
+// The least width, in units, a divider leaves the side it is dragged
+// toward, and how wide the strip is that takes hold of one.
+#define _EDIT_SPLIT_LEAST 240.0f
+#define _EDIT_SPLIT_GRIP  7.0f
+
 // Where everything on the screen is, for a window of a size. Input and
 // drawing both ask, and get the same answer.
 typedef struct _Edit_Layout _Edit_Layout;
@@ -188,9 +196,14 @@ _Edit_LayoutFromWindowDim(const App_State* app_state, Vec2F32 window_dim) {
    result.ui_px = (F32)(S32)(15.0f * ui);
    result.mono_px = (F32)(S32)(17.0f * ui);
 
-   // The text has a little under half the window, within reason at the ends.
+   // The text has a little under half the window, within reason at the ends
+   // - or what the divider was dragged to, with room left on both sides.
    F32 left_w = window_dim.x * 0.44f;
    left_w = Clamp(Min(380.0f * ui, window_dim.x), left_w, 900.0f * ui);
+   if (g_edit_view.split_x > 0) {
+      F32 least = Min(_EDIT_SPLIT_LEAST * ui, window_dim.x * 0.5f);
+      left_w = Clamp(least, window_dim.x * g_edit_view.split_x, window_dim.x - least);
+   }
    left_w = (F32)(S32)left_w;
    // Alt+[ puts the whole left side away, and the preview has the window.
    if (app_state->hide_text) {
@@ -208,6 +221,13 @@ _Edit_LayoutFromWindowDim(const App_State* app_state, Vec2F32 window_dim) {
       F32 all_rows_h = row_h * (F32)ArrayCount(_edit_format_rows) + 8.0f * ui;
       F32 room_h = window_dim.y * 0.5f - header_h - status_h;
       rows_h = Min(all_rows_h, Max(room_h, row_h * 2.0f + 8.0f * ui));
+      // Or what the divider over the panel was dragged to: a line at the
+      // least, all of them at the most, and a few rows left for the text.
+      if (g_edit_view.split_format > 0) {
+         F32 most = Max(window_dim.y - header_h - status_h - result.mono_px * 4.0f, row_h + 8.0f * ui);
+         rows_h = Clamp(row_h + 8.0f * ui, window_dim.y * g_edit_view.split_format, Min(all_rows_h, most));
+         rows_h = (F32)(S32)rows_h;
+      }
    }
 
    F32 status_y = window_dim.y - status_h;
@@ -3102,9 +3122,59 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
 
    UI_BoxFlags click_flags = interactive ? UI_BoxFlag_Clickable : 0;
 
+   B32 shows_text = !app_state->hide_text;
+
+   //- bgz: the dividers: a strip over the edge between the left side and
+   // the preview, and one over the Format panel's top edge, each dragged to
+   // give one side more room and the other less. Built first: over what is
+   // under them, and asked first. A double click puts one back where the
+   // layout has it itself. They are the screen's own, written with no op.
+   if (shows_text && interactive) {
+      F32     grip = _EDIT_SPLIT_GRIP * ui;
+      Vec2F32 mouse = Core_WM_MouseFromWindow(app_state->window);
+
+      {
+         F32     x = layout.preview.min.x;
+         UI_Box* box = FR_BuildRectBox(UI_BoxFlag_MouseClickable, R2F32P(x - grip * 0.5f, 0, x + grip * 0.5f, window_dim.y), "###edit split x");
+         box->hover_cursor = WM_Cursor_LeftRight;
+         UI_Signal signal = UI_SignalFromBox(box);
+         B32       is_held = UI_Dragging(signal);
+         if (UI_DoubleClicked(signal)) {
+            g_edit_view.split_x = 0;
+         } else if (is_held && window_dim.x > 0) {
+            g_edit_view.split_x = Clamp(0.01f, mouse.x / window_dim.x, 0.99f);
+         }
+         if (is_held || UI_Hovering(signal)) {
+            // A line down the edge, to show what is held.
+            UI_Box* line = FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(x - 1.0f, 0, x + 1.0f, window_dim.y), "###edit split x line");
+            line->background_color = V4F32(0.35f, 0.60f, 1.0f, is_held ? 0.9f : 0.5f);
+         }
+      }
+
+      if (app_state->show_format) {
+         F32     y = layout.format_header.min.y;
+         F32     right = layout.preview.min.x - grip * 0.5f;
+         UI_Box* box = FR_BuildRectBox(UI_BoxFlag_MouseClickable, R2F32P(0, y - grip * 0.5f, right, y + grip * 0.5f), "###edit split format");
+         box->hover_cursor = WM_Cursor_UpDown;
+         UI_Signal signal = UI_SignalFromBox(box);
+         B32       is_held = UI_Dragging(signal);
+         if (UI_DoubleClicked(signal)) {
+            g_edit_view.split_format = 0;
+         } else if (is_held && window_dim.y > 0) {
+            // The mouse is at the header's top: the lines have what is
+            // from under the header to the status line.
+            F32 rows_h = layout.status.min.y - Dim2F32(layout.format_header).y - mouse.y;
+            g_edit_view.split_format = Clamp(0.01f, rows_h / window_dim.y, 0.99f);
+         }
+         if (is_held || UI_Hovering(signal)) {
+            UI_Box* line = FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(0, y - 1.0f, right, y + 1.0f), "###edit split format line");
+            line->background_color = V4F32(0.35f, 0.60f, 1.0f, is_held ? 0.9f : 0.5f);
+         }
+      }
+   }
+
    //- bgz: the text: a box the editor draws in, whose mouse is the editor's
    // - a press, a drag, the wheel. Its keys are Edit_Input's.
-   B32 shows_text = !app_state->hide_text;
    if (shows_text) {
       _Edit_Pane* pane = PushArray(UI_BuildArena(), _Edit_Pane, 1);
       pane->editor = editor;
