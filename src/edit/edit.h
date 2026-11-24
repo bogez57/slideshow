@@ -95,13 +95,14 @@ struct Edit_View {
    U64           pictures_scanned_us; // 0: look now
    UI_ScrollRows pictures_scroll;
 
-   // A text box being drawn with the mouse on the slide's open space: from
+   // A box being drawn with the mouse on the slide's open space - to pick
+   // what it touches, or with Ctrl a text box: from
    // where the button went down to where the mouse is, in pixels.
    // draw_is_box: the mouse has gone far enough for it to be a box, not a
    // click.
    B32     is_drawing;
    B32     draw_is_box;
-   B32     draw_picks; // Ctrl was down at the press: the box picks the pieces it touches, and makes none
+   B32     draw_picks; // the box picks the pieces it touches, and makes none: Ctrl was not down at the press
    Vec2F32 draw_from;
    Vec2F32 draw_to;
 

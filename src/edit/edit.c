@@ -76,9 +76,9 @@
 //                     corner of it to resize it (place\place.c)
 //    the menu         right-click a piece, or the slide where nothing is:
 //                     what can be done there, each with its key beside it
-//    add a text box   drag on the slide where nothing is: a box as large as
-//                     the mouse makes it, its words selected to be typed
-//                     over. Left as it is, it goes again when something
+//    add a text box   Ctrl and a drag on the slide where nothing is: a box as
+//                     large as the mouse makes it, its words selected to be
+//                     typed over. Left as it is, it goes again when something
 //                     else is clicked
 //    take a piece out click a picture, or the title or a block away from its
 //                     words - where it is taken hold of - and press Delete
@@ -91,8 +91,9 @@
 //    copy pieces      with pieces picked, Ctrl+C copies them and Ctrl+X cuts
 //                     them; Ctrl+V pastes them on the slide showing, picked.
 //                     Ctrl+D puts a copy a little down and right
-//    pick by a box    Ctrl and a drag on the slide where nothing is: every
-//                     piece the box touches is picked, with those already
+//    pick by a box    a drag on the slide where nothing is: every piece the
+//                     box touches is picked, in place of those that were -
+//                     or with them, with Shift held
 //    front and back   Ctrl+Shift+] brings the pieces picked in front of the
 //                     slide's other pictures, or other blocks, and
 //                     Ctrl+Shift+[ sends them behind
@@ -2145,12 +2146,14 @@ Edit_LiftPieces(App_State* app_state, StateOp_List* ops) {
 }
 STATE_OP_NO_PARAMS(Edit_LiftPieces)
 
-// Ctrl and a drag on the slide's open space: every piece the box drawn
-// touches is picked whole, with those picked already. rect: in pixels, of
-// the slide as it was last laid out - nothing if the text has changed since.
+// A drag on the slide's open space: every piece the box drawn touches is
+// picked whole - in place of those picked already, or with adds (Shift)
+// with them. rect: in pixels, of the slide as it was last laid out -
+// nothing if the text has changed since.
 typedef struct Edit_PickRectOpParams Edit_PickRectOpParams;
 struct Edit_PickRectOpParams {
    Rng2F32 rect;
+   B32     adds;
 };
 void
 Edit_PickRect(App_State* app_state, StateOp_List* ops, Edit_PickRectOpParams* params) {
@@ -2159,7 +2162,7 @@ Edit_PickRect(App_State* app_state, StateOp_List* ops, Edit_PickRectOpParams* pa
    if (editor == 0 || editor->edit_count != g_edit_view.hits_edit_count || app_state->slide_idx >= app_state->deck->slide_count) {
       return;
    }
-   if (!Edit_PickedIsGood(app_state)) {
+   if (!Edit_PickedIsGood(app_state) || !params->adds) {
       g_edit_view.picked_count = 0;
    }
    Deck_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
@@ -3246,8 +3249,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
    changed |= Caret_BuildRooms(app_state, ui, interactive);
 
    //- bgz: the slide's open space, under all of those: a press there and a
-   // drag draw a text box, as large as the mouse makes it (Edit_AddTextBox),
-   // and a click with no drag lets go of what is selected. Built after
+   // drag draw a box that picks every piece it touches (Edit_PickRect) -
+   // or, with Ctrl, a text box as large as the mouse makes it
+   // (Edit_AddTextBox) - and a click with no drag lets go of what is selected. Built after
    // them, so it is asked last: only where nothing else is. Built while a
    // box is drawn whatever else goes on, or the UI lets go of it.
    B32 open_space_hot = 0;
@@ -3268,8 +3272,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
          g_edit_view.is_drawing = 1;
          g_edit_view.draw_from = UI_DragStartMouse();
          g_edit_view.draw_is_box = 0;
-         // With Ctrl the box drawn picks what it touches, and makes nothing.
-         g_edit_view.draw_picks = !!(signal.event_flags & WM_Modifier_Ctrl);
+         // The box drawn picks what it touches, and makes nothing. With
+         // Ctrl it is a text box.
+         g_edit_view.draw_picks = !(signal.event_flags & WM_Modifier_Ctrl);
       }
       if (g_edit_view.is_drawing) {
          F32 gone_x = mouse.x - g_edit_view.draw_from.x;
@@ -3283,14 +3288,18 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       if (g_edit_view.is_drawing && (signal.f & UI_SignalFlag_LeftReleased)) {
          g_edit_view.is_drawing = 0;
          Vec2F32 page_dim = Dim2F32(page);
-         if (g_edit_view.draw_picks) {
-            if (g_edit_view.draw_is_box) {
-               Vec2F32 a = g_edit_view.draw_from;
-               Vec2F32 b = g_edit_view.draw_to;
-               StateOp_Edit_PickRect(ops)->rect = R2F32P(Min(a.x, b.x), Min(a.y, b.y), Max(a.x, b.x), Max(a.y, b.y));
+         if (!g_edit_view.draw_is_box) {
+            // A click: nothing selected. Not with Ctrl, which adds to what
+            // is picked and so takes nothing away.
+            if (g_edit_view.draw_picks) {
+               StateOp_Edit_Deselect(ops);
             }
-         } else if (!g_edit_view.draw_is_box) {
-            StateOp_Edit_Deselect(ops);
+         } else if (g_edit_view.draw_picks) {
+            Vec2F32 a = g_edit_view.draw_from;
+            Vec2F32 b = g_edit_view.draw_to;
+            Edit_PickRectOpParams* pick = StateOp_Edit_PickRect(ops);
+            pick->rect = R2F32P(Min(a.x, b.x), Min(a.y, b.y), Max(a.x, b.x), Max(a.y, b.y));
+            pick->adds = Core_WM_KeyIsDown(WM_Key_Shift);
          } else if (page_dim.x > 0 && page_dim.y > 0) {
             Vec2F32 a = g_edit_view.draw_from;
             Vec2F32 b = g_edit_view.draw_to;
@@ -3453,9 +3462,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       } else if (can_move && has_picked && hover.has_piece && Edit_PieceIsPicked(app_state, hover.kind, hover.idx)) {
          caption = Str8Lit("Drag to move it      A handle resizes it      Delete takes it out      Right-click for more");
       } else if (open_space_hot && layout->is_board) {
-         caption = Str8Lit("A board      Drag to draw a text box      Wheel moves it, Ctrl+wheel zooms, the middle button drags it");
+         caption = Str8Lit("A board      Drag selects, Ctrl+drag draws a text box      Wheel moves it, Ctrl+wheel zooms, the middle button drags it");
       } else if (open_space_hot) {
-         caption = Str8Lit("Drag to draw a text box      Ctrl+drag selects what the box touches");
+         caption = Str8Lit("Drag selects what the box touches      Ctrl+drag draws a text box");
       } else if (can_move) {
          caption = Str8Lit("Drag to move it      Shift lines it up      A handle resizes it      Right-click for more");
       } else if (layout->is_board && !open_space_hot && !can_move) {

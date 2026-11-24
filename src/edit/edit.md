@@ -20,7 +20,7 @@ The screen's own, `g_edit_view` (`Edit_View`, edit.h), written with no op:
 - `split_x`, `split_format`: where the two dividers were dragged to - the edge between the left side and the preview, and the Format panel's top edge. 0: where the layout puts it itself.
 - `format_scroll`: where the Format panel's lines are scrolled to.
 - `pictures`, `pictures_arena`, `pictures_scanned_us`, `pictures_scroll`: the names in the list of pictures, and where it is scrolled to.
-- `is_drawing`, `draw_is_box`, `draw_picks`, `draw_from`, `draw_to`: a text box being drawn with the mouse on the slide's open space.
+- `is_drawing`, `draw_is_box`, `draw_picks`, `draw_from`, `draw_to`: a box being drawn with the mouse on the slide's open space: it picks the pieces it touches, or with Ctrl is a text box.
 - `menu_open`, `menu_pos`, `menu_has_piece`, `menu_kind`, `menu_idx`: the right-click menu on the preview's slide.
 - `clip_arena`, `clip`, `clip_count`, `clip_text`, `clip_slide_idx`, `clip_paste_count`: the pieces copied whole (`Edit_ClipPiece`), and the text put on the system's clipboard for them. Ctrl+V pastes them as pieces while the clipboard still has that text.
 - `has_new_box`, `new_box_edit_count`, `new_box_range`: a text box just drawn on the slide's open space, while nothing has been done to it. Left so, it is taken out again.
