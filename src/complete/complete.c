@@ -6,6 +6,7 @@
 // short: it is read at a glance, while typing.
 
 PRIVATE Complete_Item _complete_lines[] = {
+    {Str8LitComp("@slide"), Str8LitComp("starts a new slide. A # Title under it is its title"), 0},
     {Str8LitComp("@picture"), Str8LitComp("pick a picture file to put on this slide"), 0, 1},
     {Str8LitComp("@note"), Str8LitComp("a note to yourself, not on the slide"), 1},
     {Str8LitComp("@box"), Str8LitComp("another block of words, to place on its own"), 0},

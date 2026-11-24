@@ -1101,7 +1101,8 @@ Editor_Draw(Editor_Editor* editor, Arena* arena, Editor_Box box) {
          Vec4F32 color = V4F32(0.84f, 0.86f, 0.90f, 1.0f);
          if (line.size >= 2 && line.str[0] == '#' && line.str[1] != '#') {
             color = V4F32(1.00f, 0.80f, 0.40f, 1.0f); // a new slide
-         } else if (line.size >= 3 && line.str[0] == '-' && line.str[1] == '-' && line.str[2] == '-') {
+         } else if ((line.size >= 3 && line.str[0] == '-' && line.str[1] == '-' && line.str[2] == '-') ||
+                    Str8Match(line, Str8Lit("@slide"), StringMatchFlag_CaseInsensitive)) {
             color = V4F32(1.00f, 0.80f, 0.40f, 1.0f); // a new slide
          } else if (line.size >= 1 && line.str[0] == '#') {
             color = V4F32(0.45f, 0.72f, 1.00f, 1.0f); // a heading

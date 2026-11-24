@@ -33,6 +33,13 @@
 //                       DECK_MAX_PICTURES: they share the room pictures have
 //    ![](clip.mp4)      the same line with a video file: the picture is the
 //                       video, playing (src\video)
+//    @slide             starts a new slide, as --- does. A # Title under it is
+//                       that slide's title, and not one more slide. An
+//                       @color, @size or @place line between the two that
+//                       does not say whose is the title's:
+//                          @slide
+//                          @color red
+//                          # Title
 //    @theme light       the whole deck's colours: dark (as with no such line),
 //                       light, blue or paper. Anywhere in the file
 //    @layout center     how the slide it is in is laid out: picture-right (as

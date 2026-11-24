@@ -378,6 +378,12 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
    // And for @size and @color lines: the title's, and the first block's.
    Deck_Look waiting_title_look = {0};
    Deck_Look waiting_text_look = {0};
+   // And for those of the three that do not say whose - "@color red" - and
+   // come before the slide has anything on it: they are for what the slide
+   // starts with. Above a # Title, the title's; above anything else, the
+   // first block's.
+   Deck_Look  waiting_bare_look = {0};
+   Deck_Place waiting_bare_place = {0};
    // Whether the last picture line was one past DECK_MAX_PICTURES, passed
    // over: an @place line under it is passed over with it, and not given to
    // the picture before.
@@ -410,6 +416,11 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
       B32 is_rule = (line.size >= 3);
       for (U64 i = 0; i < line.size && is_rule; i += 1) {
          is_rule = (line.str[i] == '-');
+      }
+      // @slide is the same, said in words.
+      if (!is_rule) {
+         String8 trimmed = _Deck_Trim(line);
+         is_rule = Str8Match(trimmed, Str8Lit("@slide"), StringMatchFlag_CaseInsensitive);
       }
       if (is_rule) {
          slide = 0;
@@ -508,9 +519,11 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
             // the numbers start at once.
             F32 first_number = 0;
             String8 as_number = kind_name;
+            B32     is_bare_place = 0;
             if (kind == Deck_PlaceKind_COUNT && _Deck_TakeNumber(&as_number, &first_number)) {
                kind = Deck_PlaceKind_Text;
                numbers = name;
+               is_bare_place = 1;
             }
 
             F32 x = 0, y = 0, w = 0, h = 0;
@@ -533,6 +546,9 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                if (kind == Deck_PlaceKind_Picture) {
                   place = (slide != 0 && slide->picture_count != 0) ? &slide->pictures[slide->picture_count - 1].place
                                                                     : &waiting_picture_place;
+               }
+               if (is_bare_place && slide == 0) {
+                  place = &waiting_bare_place;
                }
                if (!(kind == Deck_PlaceKind_Picture && last_picture_passed_over) && !place->is_set) {
                   place->is_set = 1;
@@ -560,7 +576,8 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                value = _Deck_Trim(Str8Skip(name, kind_end));
             }
 
-            Deck_Look* look = is_title_look ? &waiting_title_look : &waiting_text_look;
+            B32        is_bare_look = (value.str == name.str && value.size == name.size);
+            Deck_Look* look = is_title_look ? &waiting_title_look : is_bare_look ? &waiting_bare_look : &waiting_text_look;
             if (slide != 0) {
                look = is_title_look ? &slide->title_look : &slide->boxes[slide->box_count - 1].look;
             }
@@ -628,7 +645,10 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          SLLQueuePush(first_node, last_node, node);
          node_count += 1;
          slide = &node->slide;
-         slide->text_pos = (has_rule_pos && !is_title) ? rule_pos : line_start;
+         // From the --- or @slide that began it, if one did: the lines
+         // between that and a title are the slide's too (an @color line
+         // for the title), and move with it.
+         slide->text_pos = has_rule_pos ? rule_pos : line_start;
          gap_before = 0;
          if (is_title) {
             // What waited for a picture waited on the slide before.
@@ -650,7 +670,26 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          slide->boxes[0].look = waiting_text_look;
          slide->boxes[0].text_pos = slide->text_pos;
          slide->title_look = waiting_title_look;
+
+         // Those that did not say whose: the title's, above a title.
+         Deck_Look*  bare_look = is_title ? &slide->title_look : &slide->boxes[0].look;
+         Deck_Place* bare_place = is_title ? &slide->places[Deck_PlaceKind_Title] : &slide->boxes[0].place;
+         if (waiting_bare_look.has_size && !bare_look->has_size) {
+            bare_look->has_size = 1;
+            bare_look->size = waiting_bare_look.size;
+            bare_look->size_line = waiting_bare_look.size_line;
+         }
+         if (waiting_bare_look.has_color && !bare_look->has_color) {
+            bare_look->has_color = 1;
+            bare_look->color = waiting_bare_look.color;
+            bare_look->color_line = waiting_bare_look.color_line;
+         }
+         if (waiting_bare_place.is_set && !bare_place->is_set) {
+            *bare_place = waiting_bare_place;
+         }
       }
+      MemoryZeroStruct(&waiting_bare_look);
+      MemoryZeroStruct(&waiting_bare_place);
       MemoryZeroArray(waiting_places);
       MemoryZeroStruct(&waiting_title_look);
       MemoryZeroStruct(&waiting_text_look);

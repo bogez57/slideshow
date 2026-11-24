@@ -143,7 +143,7 @@ enum {
 
 PRIVATE _Edit_FormatRow _edit_format_rows[] = {
     {Str8LitComp("# Title"), Str8LitComp("starts a new slide, with a title"), Str8LitComp("# Title"), 2, 7},
-    {Str8LitComp("---"), Str8LitComp("starts a new slide with no title"), Str8LitComp("---\n"), 4, 4},
+    {Str8LitComp("---"), Str8LitComp("starts a new slide with no title. @slide is the same"), Str8LitComp("---\n"), 4, 4},
     {Str8LitComp("## Heading"), Str8LitComp("a heading inside the slide"), Str8LitComp("## Heading"), 3, 10},
     {Str8LitComp("- point"), Str8LitComp("a bullet. Tab moves it in"), Str8LitComp("- point"), 2, 7},
     {Str8LitComp("  - point"), Str8LitComp("an inner bullet. Shift+Tab moves it out"), Str8LitComp("  - point"), 4, 9},
@@ -376,6 +376,9 @@ _Edit_MoveSlide(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx, B32 to_la
       for (U64 i = 0; i < first.size; i += 1) {
          if (first.str[i] != ' ' && first.str[i] != '\t' && first.str[i] != '\n') {
             first_starts_itself = (first.str[i] == '#' || first.str[i] == '-');
+            if (first.str[i] == '@') {
+               first_starts_itself = Str8Match(Str8Prefix(Str8Skip(first, i), 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive);
+            }
             if (first.str[i] == '-') {
                // A --- line, and not a bullet.
                U64 dash_count = 0;
@@ -1031,8 +1034,15 @@ _Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_C
       U64 line_end = line_start;
       while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
       String8 first_line = Str8Substr(text, R1U64(line_start, line_end));
-      B32     starts_slide = (slide->title_range.max != 0 || (first_line.size >= 3 && MemoryMatch(first_line.str, "---", 3)));
+      B32     starts_slide = (slide->title_range.max != 0 || (first_line.size >= 3 && MemoryMatch(first_line.str, "---", 3)) ||
+                              Str8Match(Str8Prefix(first_line, 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive));
       String8 after = has_block ? Str8Lit("\n@box") : Str8Lit("");
+      // Under the title's line, when the title is not the first: a slide
+      // begun by a --- or an @slide, with its title under that.
+      if (slide->title_range.max != 0 && slide->title_range.max <= text.size) {
+         line_end = slide->title_range.max;
+         while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
+      }
       if (starts_slide) {
          at = line_end;
          joined = PushStr8F(scratch.arena, "\n%S%S", body, after);
@@ -1124,7 +1134,9 @@ _Edit_NextLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx) {
       U64 first = line_start;
       while (first < line_end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
 
-      B32 starts_slide = (first < line_end && (text.str[first] == '#' || text.str[first] == '-'));
+      B32 starts_slide = (first < line_end && (text.str[first] == '#' || text.str[first] == '-' ||
+                                               Str8Match(Str8Prefix(Str8Substr(text, R1U64(first, line_end)), 6), Str8Lit("@slide"),
+                                                         StringMatchFlag_CaseInsensitive)));
       if (starts_slide) {
          _Edit_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
       } else {
@@ -3132,7 +3144,11 @@ _Edit_BlockRange(const App_State* app_state) {
       U64 start = Min(slide->boxes[i].text_pos, text.size);
       U64 end = (i + 1 < slide->box_count) ? Min(slide->boxes[i + 1].text_pos, text.size) : slide_end;
       if (i == 0) {
-         // The slide's first line - its title, or --- - is not the body's.
+         // The slide's first line - its title, or --- or @slide - is not the
+         // body's, nor is anything down to the title's line.
+         if (slide->title_range.max != 0) {
+            start = Clamp(start, slide->title_range.max, end);
+         }
          while (start < end && text.str[start] != '\n') start += 1;
          if (start < end) start += 1;
       }
