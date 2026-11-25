@@ -1872,6 +1872,41 @@ Edit_ToggleVideo(App_State* app_state, StateOp_List* ops, Edit_ToggleVideoOpPara
 }
 STATE_OP(Edit_ToggleVideo)
 
+// The words selected copied, cut, or what is on the clipboard put in their
+// place: the text menu's, as Ctrl+C, Ctrl+X and Ctrl+V in the text are.
+typedef enum Edit_WordsClip {
+   Edit_WordsClip_Copy,
+   Edit_WordsClip_Cut,
+   Edit_WordsClip_Paste,
+} Edit_WordsClip;
+typedef struct Edit_ClipWordsOpParams Edit_ClipWordsOpParams;
+struct Edit_ClipWordsOpParams {
+   Edit_WordsClip clip;
+};
+void
+Edit_ClipWords(App_State* app_state, StateOp_List* ops, Edit_ClipWordsOpParams* params) {
+   UnusedVariable(ops);
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0) {
+      return;
+   }
+   U64 start = Min(editor->cursor, editor->mark);
+   U64 end = Max(editor->cursor, editor->mark);
+   if (params->clip == Edit_WordsClip_Paste) {
+      String8 text = Editor_CleanText(app_state->frame_arena, Core_WM_GetClipboardText(app_state->frame_arena));
+      if (text.size != 0) {
+         Editor_Insert(editor, text, Editor_EditKind_Other);
+      }
+   } else if (end > start && end <= editor->size) {
+      Core_WM_SetClipboardText(Str8(editor->text + start, end - start));
+      if (params->clip == Edit_WordsClip_Cut) {
+         Editor_Insert(editor, Str8Zero(), Editor_EditKind_Other);
+      }
+   }
+   editor->last_input_us = NowTimeUS();
+}
+STATE_OP(Edit_ClipWords)
+
 // The slide the cursor is on given a layout: its @layout line.
 typedef struct Edit_SetLayoutOpParams Edit_SetLayoutOpParams;
 struct Edit_SetLayoutOpParams {
@@ -3421,6 +3456,7 @@ typedef enum _Edit_MenuItemKind {
    _Edit_MenuItem_Bold,   // around the words selected
    _Edit_MenuItem_Code,
    _Edit_MenuItem_LineKind,    // with value: an Edit_LineKind for the lines selected
+   _Edit_MenuItem_WordsClip,   // with value: an Edit_WordsClip of the words selected
    _Edit_MenuItem_AddPicture,  // a file picked, and put where the menu was opened
    _Edit_MenuItem_ReplacePicture, // a file picked, in the place of the picture the menu is on
    _Edit_MenuItem_VideoWord,   // with value: an Edit_VideoWord of the slide's @video line
@@ -3548,6 +3584,10 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       has_words |= (g_edit_view.picked_kinds[i] != Deck_PlaceKind_Picture);
    }
    if (has_text) {
+      _Edit_MenuAddValue(_Edit_MenuItem_WordsClip, Edit_WordsClip_Copy, "Copy", "");
+      _Edit_MenuAddValue(_Edit_MenuItem_WordsClip, Edit_WordsClip_Cut, "Cut", "");
+      _Edit_MenuAddValue(_Edit_MenuItem_WordsClip, Edit_WordsClip_Paste, "Paste over them", "");
+      _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
       _Edit_MenuAdd(_Edit_MenuItem_Bold, "Bold", "Ctrl+B");
       _Edit_MenuAdd(_Edit_MenuItem_Code, "Code", "Ctrl+E");
       _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
@@ -3837,6 +3877,7 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
          case _Edit_MenuItem_Front: StateOp_Edit_OrderPieces(ops)->to_back = 0; break;
          case _Edit_MenuItem_Back: StateOp_Edit_OrderPieces(ops)->to_back = 1; break;
          case _Edit_MenuItem_Arrange: StateOp_Place_Arrange(ops)->kind = item->arrange; break;
+         case _Edit_MenuItem_WordsClip: StateOp_Edit_ClipWords(ops)->clip = (Edit_WordsClip)item->value; break;
          case _Edit_MenuItem_LineKind: StateOp_Edit_SetLineKind(ops)->kind = (Edit_LineKind)item->value; break;
          case _Edit_MenuItem_AddPicture: {
             // bgz's shell: the system's window, which does not return until

@@ -1113,7 +1113,53 @@ Editor_Draw(Editor_Editor* editor, Arena* arena, Editor_Box box) {
             color = V4F32(0.80f, 0.62f, 0.95f, 1.0f); // @theme, @layout
          }
 
-         Text_Draw(box.font, box.px, V2F32(x, y), color, Str8(editor->text + row.start, row.end - row.start));
+         // In a line of words, the marks of words with a look of their own
+         // - "{red 1.5:" and "}" (deck.h) - are dim, and the words between
+         // them in their colour, if they have one: drawn a part at a time,
+         // each where its letters are.
+         B32 is_words = !(line.size >= 1 && (line.str[0] == '#' || line.str[0] == '@' || line.str[0] == '!'));
+         B32 has_brace = 0;
+         for (U64 i = line_start; i < line_end && is_words && !has_brace; i += 1) {
+            has_brace = (editor->text[i] == '{');
+         }
+         if (is_words && has_brace) {
+            String8 whole = Str8(editor->text + line_start, line_end - line_start);
+            Vec4F32 mark_color = V4F32(0.52f, 0.55f, 0.62f, 1.0f);
+            Vec4F32 words_color = color;
+            Vec4F32 part_color = color;
+            U64     part_start = row.start;
+            U64     mark_end = 0; // one past the mark the letters gone through are in
+            B32     in_span = 0;
+            for (U64 i = line_start; i <= row.end && i <= line_end; i += 1) {
+               Vec4F32 at_color = words_color;
+               if (i < line_end && i >= mark_end) {
+                  Deck_Span span = {0};
+                  U64       open = (!in_span && editor->text[i] == '{') ? Deck_SpanOpenAt(whole, i - line_start, &span) : 0;
+                  if (open != 0) {
+                     in_span = 1;
+                     mark_end = i + open;
+                     words_color = span.has_color ? span.color : color;
+                     words_color.w = 1.0f;
+                  } else if (in_span && editor->text[i] == '}') {
+                     in_span = 0;
+                     mark_end = i + 1;
+                     words_color = color;
+                  }
+               }
+               at_color = (i < mark_end) ? mark_color : words_color;
+               B32 changes = !MemoryMatch(&at_color, &part_color, sizeof(at_color));
+               if (i >= row.start && (changes || i == row.end)) {
+                  if (i > part_start) {
+                     F32 part_x = x + (F32)_Editor_ColumnCount(editor, row.start, part_start) * metrics.char_w;
+                     Text_Draw(box.font, box.px, V2F32(part_x, y), part_color, Str8(editor->text + part_start, i - part_start));
+                  }
+                  part_start = i;
+               }
+               part_color = at_color;
+            }
+         } else {
+            Text_Draw(box.font, box.px, V2F32(x, y), color, Str8(editor->text + row.start, row.end - row.start));
+         }
       }
 
       //- bgz: the cursor: solid just after input, then blinking
