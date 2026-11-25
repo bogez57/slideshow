@@ -113,6 +113,10 @@
 //                          @color red
 //                          this one line large and red
 //                          small again
+//                       With "line" it is for the one line under it
+//                       wherever it is, at the block's top too:
+//                       "@color line red" above a block's first line is
+//                       that line's, and not the block's
 //    @align center      which side the lines of the block it is in are
 //                       against: left, center or right. Centered or to the
 //                       right, bullets are lines like any other, without

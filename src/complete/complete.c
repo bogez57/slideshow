@@ -27,9 +27,11 @@ PRIVATE Complete_Item _complete_place[] = {
 };
 
 // @size and @color are the block's words' unless they say title: a number
-// or a colour comes at once, and "title" is the one word there is to offer.
+// or a colour comes at once, and "title" and "line" are the words there are
+// to offer.
 PRIVATE Complete_Item _complete_title[] = {
     {Str8LitComp("title"), Str8LitComp("the slide's title, not this block's words"), 1},
+    {Str8LitComp("line"), Str8LitComp("only the one line under this, not the block"), 1},
 };
 
 PRIVATE Complete_Item _complete_align[] = {
@@ -37,6 +39,7 @@ PRIVATE Complete_Item _complete_align[] = {
     {Str8LitComp("center"), Str8LitComp("every line in the middle"), 0},
     {Str8LitComp("right"), Str8LitComp("every line against the right"), 0},
     {Str8LitComp("title"), Str8LitComp("the slide's title, not this block's words"), 1},
+    {Str8LitComp("line"), Str8LitComp("only the one line under this, not the block"), 1},
 };
 
 PRIVATE Complete_Item _complete_video[] = {
@@ -151,8 +154,8 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
       _Complete_From(_complete_title);
    } else if (word_count == 1 && _Complete_WordIs(0, "@align")) {
       _Complete_From(_complete_align);
-   } else if (word_count == 2 && _Complete_WordIs(0, "@align") && (_Complete_WordIs(1, "title") || _Complete_WordIs(1, "text"))) {
-      // The three sides, without "title" again.
+   } else if (word_count == 2 && _Complete_WordIs(0, "@align") && (_Complete_WordIs(1, "title") || _Complete_WordIs(1, "text") || _Complete_WordIs(1, "line"))) {
+      // The three sides, without "title" and "line" again.
       from = _complete_align;
       from_count = 3;
    } else if (word_count == 1 && _Complete_WordIs(0, "@layout")) {
@@ -162,19 +165,21 @@ Complete_ListFromState(const App_State* app_state, Arena* arena) {
    } else if (word_count >= 1 && word_count <= 2 && _Complete_WordIs(0, "@video")) {
       _Complete_From(_complete_video);
    } else if (_Complete_WordIs(0, "@color") &&
-              (word_count == 1 || (word_count == 2 && (_Complete_WordIs(1, "title") || _Complete_WordIs(1, "text"))))) {
+              (word_count == 1 || (word_count == 2 && (_Complete_WordIs(1, "title") || _Complete_WordIs(1, "text") || _Complete_WordIs(1, "line"))))) {
       // The colours with names, as the deck layer has them - for this
       // block's words, or after "title" for the title's. And "title"
       // itself, last, where it can still be said.
-      colors = PushArray(arena, Complete_Item, DECK_NAMED_COLOR_COUNT + 1);
+      colors = PushArray(arena, Complete_Item, DECK_NAMED_COLOR_COUNT + ArrayCount(_complete_title));
       for (U64 i = 0; i < DECK_NAMED_COLOR_COUNT; i += 1) {
          colors[i].name = Deck_NamedColorFromIdx(i).name;
       }
       from = colors;
       from_count = DECK_NAMED_COLOR_COUNT;
       if (word_count == 1) {
-         colors[from_count] = _complete_title[0];
-         from_count += 1;
+         for (U64 i = 0; i < ArrayCount(_complete_title); i += 1) {
+            colors[from_count] = _complete_title[i];
+            from_count += 1;
+         }
       }
    }
 #undef _Complete_From

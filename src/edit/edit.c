@@ -977,7 +977,7 @@ _Edit_LineAt(Arena* arena, String8 text, U64 pos) {
 // which is what follows "@color" - and the "title" or "text" after that, if
 // the line says whose.
 PRIVATE String8
-_Edit_ColorLineAsText(Arena* arena, String8 text, Rng1U64 line) {
+_Edit_ColorLineAsText(Arena* arena, String8 text, Rng1U64 line, B32 for_line) {
    String8 whole = Str8Substr(text, R1U64(Min(line.min, text.size), Min(line.max, text.size)));
    U64     at = 0;
    for (U32 word = 0; word < 2; word += 1) {
@@ -986,13 +986,15 @@ _Edit_ColorLineAsText(Arena* arena, String8 text, Rng1U64 line) {
       while (at < whole.size && whole.str[at] != ' ' && whole.str[at] != '\t') at += 1;
       String8 name = Str8Substr(whole, R1U64(word_start, at));
       if (word == 1 && !Str8Match(name, Str8Lit("title"), StringMatchFlag_CaseInsensitive) &&
+          !Str8Match(name, Str8Lit("line"), StringMatchFlag_CaseInsensitive) &&
           !Str8Match(name, Str8Lit("text"), StringMatchFlag_CaseInsensitive)) {
          // The colour itself.
          at = word_start;
       }
    }
    while (at < whole.size && (whole.str[at] == ' ' || whole.str[at] == '\t')) at += 1;
-   return PushStr8F(arena, "@color %S\n", Str8Skip(whole, at));
+   // for_line: one line's own, said so - it may be written at a block's top.
+   return PushStr8F(arena, "@color %s%S\n", for_line ? "line " : "", Str8Skip(whole, at));
 }
 
 // The pieces picked, as they are written (Edit_ClipPiece), into pieces, on
@@ -1036,13 +1038,13 @@ _Edit_ClipFromPicked(Arena* arena, const App_State* app_state, Edit_ClipPiece* p
          for (U64 n = 0; n < block->item_count && item != 0; n += 1, item = item->next) {
             // A line's own @size, @color and @align lines, above it.
             if (item->look.has_size) {
-               Str8ListPush(arena, &lines, PushStr8F(arena, "@size %.2f\n", item->look.size));
+               Str8ListPush(arena, &lines, PushStr8F(arena, "@size line %.2f\n", item->look.size));
             }
             if (item->look.has_color) {
-               Str8ListPush(arena, &lines, _Edit_ColorLineAsText(arena, text, item->look.color_line));
+               Str8ListPush(arena, &lines, _Edit_ColorLineAsText(arena, text, item->look.color_line, 1));
             }
             if (item->look.has_align) {
-               Str8ListPush(arena, &lines, PushStr8F(arena, "@align %S\n", Deck_AlignName(item->look.align)));
+               Str8ListPush(arena, &lines, PushStr8F(arena, "@align line %S\n", Deck_AlignName(item->look.align)));
             }
             Str8ListPush(arena, &lines, _Edit_LineAt(arena, text, item->text_range.min));
          }
@@ -1060,7 +1062,7 @@ _Edit_ClipFromPicked(Arena* arena, const App_State* app_state, Edit_ClipPiece* p
          Str8ListPush(arena, &looks, PushStr8F(arena, "@size %.2f\n", look->size));
       }
       if (look != 0 && look->has_color) {
-         Str8ListPush(arena, &looks, _Edit_ColorLineAsText(arena, text, look->color_line));
+         Str8ListPush(arena, &looks, _Edit_ColorLineAsText(arena, text, look->color_line, 0));
       }
       if (look != 0 && look->has_align) {
          Str8ListPush(arena, &looks, PushStr8F(arena, "@align %S\n", Deck_AlignName(look->align)));

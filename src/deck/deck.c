@@ -698,7 +698,10 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
             String8 kind_name = Str8Prefix(name, kind_end);
             String8 value = name;
             B32     is_title_look = Str8Match(kind_name, Str8Lit("title"), StringMatchFlag_CaseInsensitive);
-            if (is_title_look || Str8Match(kind_name, Str8Lit("text"), StringMatchFlag_CaseInsensitive)) {
+            // "line": the one line of words under it, wherever in the
+            // block it is - at its top too, where it would be the block's.
+            B32     is_line_look = Str8Match(kind_name, Str8Lit("line"), StringMatchFlag_CaseInsensitive);
+            if (is_title_look || is_line_look || Str8Match(kind_name, Str8Lit("text"), StringMatchFlag_CaseInsensitive)) {
                value = _Deck_Trim(Str8Skip(name, kind_end));
             }
 
@@ -710,6 +713,9 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                if (!is_title_look && slide->boxes[slide->box_count - 1].item_count != 0) {
                   look = &next_item_look;
                }
+            }
+            if (is_line_look) {
+               look = &next_item_look;
             }
 
             F32     size = 0;
