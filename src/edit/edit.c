@@ -418,7 +418,9 @@ _Edit_MoveSlide(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx, B32 to_la
             first_starts_itself = (first.str[i] == '#' || first.str[i] == '-');
             if (first.str[i] == '@') {
                first_starts_itself = (Str8Match(Str8Prefix(Str8Skip(first, i), 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive) ||
-                                      Str8Match(Str8Prefix(Str8Skip(first, i), 7), Str8Lit("@canvas"), StringMatchFlag_CaseInsensitive));
+                                      Str8Match(Str8Prefix(Str8Skip(first, i), 7), Str8Lit("@canvas"), StringMatchFlag_CaseInsensitive) ||
+                                      // Lines about the slide above its # Title: the deck reads them as its start.
+                                      deck->slides[first_idx].title_range.max != 0);
             }
             if (first.str[i] == '-') {
                // A --- line, and not a bullet.
@@ -503,40 +505,55 @@ _Edit_ReplaceKeepingCursor(Editor_Editor* editor, U64 start, U64 end, String8 st
 
 // Writes a line that is about one piece of a slide - an @place, @size or
 // @color line, for the idx-th picture or block of the body, or the title:
-// over the one there is (old_line, with has_line), or as a new line under
-// the picture's line, under the title's, or above the block's first.
+// over the one there is (old_line, with has_line), or as a new line above
+// what it is about: the picture's line, the title's, or the block's first.
+// One there is that is under its picture's or its title's line, as they
+// were written before, is taken out and written above.
 void
 Edit_PutLineFor(Editor_Editor* editor, Deck_Slide* slide, Deck_PlaceKind kind, U64 idx, B32 has_line, Rng1U64 old_line,
                 String8 line) {
    Temp    scratch = ScratchBegin(0, 0);
    String8 text = Editor_Text(editor);
 
+   // The line of the text the thing is on: the picture's, the title's,
+   // or the first of the block's - which, for any block but the first,
+   // is under its @box line, so the new line goes between the two.
+   U64 on = slide->text_pos;
+   B32 goes_above = 0;
+   if (kind == Deck_PlaceKind_Picture && idx < slide->picture_count) {
+      on = slide->pictures[idx].range.min;
+      goes_above = 1;
+   } else if (kind == Deck_PlaceKind_Title && slide->title_range.max != 0) {
+      on = slide->title_range.min;
+      goes_above = 1;
+   } else if (kind == Deck_PlaceKind_Text && idx < slide->box_count && slide->boxes[idx].first_item != 0) {
+      on = slide->boxes[idx].first_item->text_range.min;
+   }
+   on = Min(on, text.size);
+
+   B32 is_under = (has_line && old_line.max <= text.size && goes_above && old_line.min > on);
+   if (is_under) {
+      // Out from under, which is after where it goes: that stays where it is.
+      Edit_TakeOutLine(editor, old_line);
+      text = Editor_Text(editor);
+      has_line = 0;
+   }
+
    if (has_line && old_line.max <= text.size) {
       _Edit_ReplaceKeepingCursor(editor, old_line.min, old_line.max, line);
    } else {
-      // The line of the text the thing is on: the picture's, the title's,
-      // or the first of the block's - which, for any block but the first,
-      // is under its @box line, so the new line goes between the two.
-      U64 on = slide->text_pos;
-      if (kind == Deck_PlaceKind_Picture && idx < slide->picture_count) {
-         on = slide->pictures[idx].range.min;
-      } else if (kind == Deck_PlaceKind_Title) {
-         on = slide->title_range.min;
-      } else if (kind == Deck_PlaceKind_Text && idx < slide->box_count && slide->boxes[idx].first_item != 0) {
-         on = slide->boxes[idx].first_item->text_range.min;
-      }
-      on = Min(on, text.size);
       U64 line_start = on;
       while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
       U64 line_end = on;
       while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
 
-      // A block's goes above its first line, where it does not come between
-      // two lines of the block - unless that line is what starts the slide:
-      // above it would be the slide before. A picture's goes under the
-      // picture's line: it is for the picture last written above it. The
-      // title's goes under the title's, which is what starts the slide.
-      if (kind == Deck_PlaceKind_Text && line_start > slide->text_pos) {
+      // Above the line it is about: a picture's above the picture's line,
+      // the title's above the title's - the deck reads both as that
+      // picture's and that slide's (deck.h) - and a block's above its
+      // first line, where it does not come between two lines of the block,
+      // unless that line is what starts the slide: above it would be the
+      // slide before.
+      if (goes_above || (kind == Deck_PlaceKind_Text && line_start > slide->text_pos)) {
          _Edit_ReplaceKeepingCursor(editor, line_start, line_start, PushStr8F(scratch.arena, "%S\n", line));
       } else {
          _Edit_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
@@ -1071,7 +1088,7 @@ _Edit_PastePieces(App_State* app_state, StateOp_List* ops, U64 slide_idx, Edit_C
          Str8ListPush(scratch.arena, &added, at_back ? Str8Lit("\n") : Str8Lit("\n\n"));
       }
       if (piece->is_picture) {
-         Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "%S@place picture %.3f %.3f %.3f %.3f", piece->lines, x, y, w, h));
+         Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "@place picture %.3f %.3f %.3f %.3f\n%S", x, y, w, h, Str8Prefix(piece->lines, piece->lines.size - 1)));
       } else {
          has_block = 1;
          Str8ListPush(scratch.arena, &added, PushStr8F(scratch.arena, "@box\n@place text %.3f %.3f %.3f %.3f\n%S%S", x, y, w, h,
@@ -1174,7 +1191,8 @@ _Edit_NextTheme(Editor_Editor* editor, Deck_Deck* deck) {
 }
 
 // Gives slide_idx the layout after the one it has: its @layout line is
-// written again, or a new one is put under the line the slide starts with.
+// written again, or a new one is put above the slide's # Title - or under
+// the --- or @slide line it starts with.
 PRIVATE void
 _Edit_NextLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx) {
    if (slide_idx >= deck->slide_count) {
@@ -1189,16 +1207,18 @@ _Edit_NextLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx) {
    if (slide->has_layout_line && slide->layout_line.max <= text.size) {
       _Edit_ReplaceKeepingCursor(editor, slide->layout_line.min, slide->layout_line.max, line);
    } else {
-      // Under the slide's first line when that is its # Title or its --- :
-      // the line belongs to the slide from there. A first slide that starts
-      // with neither has it above, where it waits for the slide.
+      // Under the slide's first line when that is its --- or @slide: the
+      // line belongs to the slide from there. Else above it - the # Title,
+      // or the lines about the slide that are above that already: what a
+      // line is about is under it, and the deck reads those as the
+      // slide's (deck.h).
       U64 line_start = Min(slide->text_pos, text.size);
       U64 line_end = line_start;
       while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
       U64 first = line_start;
       while (first < line_end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
 
-      B32 starts_slide = (first < line_end && (text.str[first] == '#' || text.str[first] == '-' ||
+      B32 starts_slide = (first < line_end && (text.str[first] == '-' ||
                                                Str8Match(Str8Prefix(Str8Substr(text, R1U64(first, line_end)), 6), Str8Lit("@slide"),
                                                          StringMatchFlag_CaseInsensitive) ||
                                                slide->is_canvas));

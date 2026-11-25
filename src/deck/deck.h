@@ -47,6 +47,13 @@
 //                       starts a slide but ---, @slide or another @canvas:
 //                       a # line is a heading there. Not shown when
 //                       presenting
+//                       Without an @slide: lines about the slide or its
+//                       title - @place, @size, @color, @align, @layout,
+//                       @video - right above a # Title, no empty line
+//                       between, are that slide's too. What a line is about
+//                       is under it:
+//                          @place title 0.05 0.1 0.6 0.2
+//                          # Title
 //    @theme light       the whole deck's colours: dark (as with no such line),
 //                       light, blue or paper. Anywhere in the file
 //    @layout center     how the slide it is in is laid out: picture-right (as
@@ -63,9 +70,10 @@
 //                       top, width and height, each as a part of the page's
 //                       width or height (0.5 is half). The picture is as
 //                       large as fits in that with its shape kept. Which
-//                       picture: the one whose line is the last above this
-//                       one on the slide - or the slide's first, with none
-//                       above
+//                       picture: the one whose line is right under this
+//                       one. With no picture's line right under it, the
+//                       one whose line is the last above it on the slide -
+//                       or the slide's first, with none above
 //    @place text 0.05 0.3 0.5 0.6
 //                       the same for the slide's body: every line under the
 //                       title - or, on a slide with @box lines, the block

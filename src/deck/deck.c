@@ -344,6 +344,19 @@ _Deck_TakeNumber(String8* string, F32* number_out) {
    return result;
 }
 
+// Whether an @ line's first word makes it a line about a piece of a slide,
+// or about the slide: one that can be above a # Title and be its slide's.
+PRIVATE B32
+_Deck_IsAboutWord(String8 word) {
+   String8 words[] = {Str8Lit("@place"), Str8Lit("@size"), Str8Lit("@color"), Str8Lit("@colour"),
+                      Str8Lit("@align"), Str8Lit("@layout"), Str8Lit("@video")};
+   B32 result = 0;
+   for (U64 i = 0; i < ArrayCount(words) && !result; i += 1) {
+      result = Str8Match(word, words[i], StringMatchFlag_CaseInsensitive);
+   }
+   return result;
+}
+
 Deck_Deck*
 Deck_OpenText(String8 text_to_copy, String8 file) {
    Arena*     arena = ArenaAlloc();
@@ -486,6 +499,45 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          String8 name = _Deck_Trim(Str8Skip(line, word_end));
          Rng1U64 line_range = R1U64((U64)(line.str - text.str), (U64)(line.str - text.str) + line.size);
 
+         // Lines about a slide that are right above its # Title, with no
+         // empty line between, are that slide's and not the one before's:
+         // the slide starts at the first of them, as at an @slide line.
+         // What a line is about is under it, the title too.
+         if (slide != 0 && !slide->is_canvas && _Deck_IsAboutWord(word)) {
+            B32 title_is_next = 0;
+            for (U64 at = pos; at < text.size;) {
+               U64 next_start = at;
+               while (at < text.size && text.str[at] != '\n') at += 1;
+               String8 next = Str8Substr(text, R1U64(next_start, at));
+               at += 1;
+               if (next.size > 0 && next.str[next.size - 1] == '\r') {
+                  next.size -= 1;
+               }
+               next = _Deck_Trim(next);
+               if (next.size == 0) {
+                  break;
+               }
+               if (next.str[0] == '@') {
+                  U64 next_word_end = 0;
+                  while (next_word_end < next.size && next.str[next_word_end] != ' ' && next.str[next_word_end] != '\t') next_word_end += 1;
+                  if (_Deck_IsAboutWord(Str8Prefix(next, next_word_end))) {
+                     continue;
+                  }
+                  break;
+               }
+               title_is_next = (next.str[0] == '#' && (next.size == 1 || next.str[1] != '#'));
+               break;
+            }
+            if (title_is_next) {
+               slide = 0;
+               gap_before = 0;
+               MemoryZeroStruct(&waiting_picture_place);
+               last_picture_passed_over = 0;
+               has_rule_pos = 1;
+               rule_pos = line_start;
+            }
+         }
+
          if (Str8Match(word, Str8Lit("@theme"), StringMatchFlag_CaseInsensitive)) {
             if (!deck->has_theme_line) {
                deck->has_theme_line = 1;
@@ -569,6 +621,7 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                is_bare_place = 1;
             }
 
+            B32 is_for_next_picture = 0;
             F32 x = 0, y = 0, w = 0, h = 0;
             if (kind != Deck_PlaceKind_COUNT && _Deck_TakeNumber(&numbers, &x) && _Deck_TakeNumber(&numbers, &y) &&
                 _Deck_TakeNumber(&numbers, &w) && _Deck_TakeNumber(&numbers, &h)) {
@@ -591,11 +644,31 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                if (kind == Deck_PlaceKind_Picture) {
                   place = (slide != 0 && slide->picture_count != 0) ? &slide->pictures[slide->picture_count - 1].place
                                                                     : &waiting_picture_place;
+                  // Right above a picture's line it is that picture's - as
+                  // the edit screen writes it. Unless the line right above
+                  // it is a picture's that has no place yet: then it is
+                  // that one's, as it was written before.
+                  U64 next_at = pos;
+                  while (next_at < text.size && (text.str[next_at] == ' ' || text.str[next_at] == '\t')) next_at += 1;
+                  B32 picture_is_next = (next_at + 1 < text.size && text.str[next_at] == '!' && text.str[next_at + 1] == '[');
+                  U64 above_at = line_start;
+                  if (above_at > 0) {
+                     above_at -= 1;
+                     while (above_at > 0 && text.str[above_at - 1] != '\n') above_at -= 1;
+                  }
+                  while (above_at < line_start && (text.str[above_at] == ' ' || text.str[above_at] == '\t')) above_at += 1;
+                  B32 picture_is_above = (above_at + 1 < line_start && text.str[above_at] == '!' && text.str[above_at + 1] == '[');
+                  B32 above_wants_it = (picture_is_above && slide != 0 && slide->picture_count != 0 &&
+                                        !slide->pictures[slide->picture_count - 1].place.is_set && !last_picture_passed_over);
+                  if (picture_is_next && !above_wants_it) {
+                     place = &waiting_picture_place;
+                     is_for_next_picture = 1;
+                  }
                }
                if (is_bare_place && slide == 0) {
                   place = &waiting_bare_place;
                }
-               if (!(kind == Deck_PlaceKind_Picture && last_picture_passed_over) && !place->is_set) {
+               if (!(kind == Deck_PlaceKind_Picture && last_picture_passed_over && !is_for_next_picture) && !place->is_set) {
                   place->is_set = 1;
                   place->rect = R2F32P(x, y, x + w, y + h);
                   place->has_line = 1;
@@ -787,6 +860,10 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          }
          last_picture_passed_over = (slide->picture_count >= DECK_MAX_PICTURES);
          slide->pictures_passed_over += last_picture_passed_over;
+         if (last_picture_passed_over) {
+            // What waited for it is passed over with it.
+            MemoryZeroStruct(&waiting_picture_place);
+         }
          if (slide->picture_count < DECK_MAX_PICTURES) {
             Deck_Picture* picture = &slide->pictures[slide->picture_count];
             slide->picture_count += 1;
@@ -799,7 +876,9 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
             } else {
                picture->path = PushStr8F(arena, "%S\\%S", deck->folder, image_path);
             }
-            if (slide->picture_count == 1) {
+            // What waited for a picture: an @place line above the
+            // slide's first, or right above this one.
+            if (waiting_picture_place.is_set) {
                picture->place = waiting_picture_place;
                MemoryZeroStruct(&waiting_picture_place);
             }

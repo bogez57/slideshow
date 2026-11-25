@@ -248,8 +248,8 @@ Place_BoxAt(const App_State* app_state, Vec2F32 pos) {
 }
 
 // Writes the slide's @place line for kind - for the idx-th picture, or block
-// of the body: over the one it has (before), or as a new line under the
-// picture's line, under the title's, or above the block's first.
+// of the body: over the one it has (before), or as a new line above the
+// picture's line, the title's, or the block's first (Edit_PutLineFor).
 PRIVATE void
 _Place_WriteLine(Editor_Editor* editor, Deck_Slide* slide, Deck_PlaceKind kind, U64 idx, Deck_Place* before, Rng2F32 rect) {
    Temp    scratch = ScratchBegin(0, 0);
