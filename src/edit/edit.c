@@ -1460,7 +1460,8 @@ _Edit_PreviewVideo(const App_State* app_state, Rng2F32 page, U64 picture_idx, Rn
        picture_idx < deck->slides[app_state->slide_idx].picture_count) {
       Deck_Slide*   slide = &deck->slides[app_state->slide_idx];
       Deck_Picture* picture = &slide->pictures[picture_idx];
-      if (picture->video == 0) {
+      // A gif plays by itself, with no strip.
+      if (picture->video == 0 || Video_NameIsMovingPicture(picture->path)) {
          return 0;
       }
       if (picture_idx == 0 && slide->layout == Deck_Layout_PictureBehind && Deck_SlideHasText(slide)) {

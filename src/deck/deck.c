@@ -1283,13 +1283,18 @@ _Deck_FileFromPath(String8 path) {
 PRIVATE void
 _Deck_LoadPicture(Deck_Picture* picture) {
    if (!Image_IsLoaded(&picture->image) && !picture->load_failed && picture->path.size != 0) {
-      if (Video_NameIsVideo(picture->path)) {
+      // A gif is played, as a video is: decoded as an image it is only
+      // its first frame, which is what it falls back to if it cannot be
+      // opened to play.
+      B32 is_moving = Video_NameIsMovingPicture(picture->path);
+      if (Video_NameIsVideo(picture->path) || is_moving) {
          picture->video = Video_Open(_Deck_FileFromPath(picture->path));
          if (picture->video != 0) {
             picture->image.texture = Video_Texture(picture->video);
             picture->image.size = Video_Size(picture->video);
          }
-      } else {
+      }
+      if (!Video_NameIsVideo(picture->path) && picture->video == 0) {
          picture->image = Image_LoadFromPath(picture->path);
       }
       picture->load_failed = !Image_IsLoaded(&picture->image);
@@ -1321,7 +1326,9 @@ Deck_VideosFromSlide(Deck_Deck* deck, U64 slide_idx, Video_Video** videos) {
    if (slide_idx < deck->slide_count) {
       Deck_Slide* slide = &deck->slides[slide_idx];
       for (U64 k = 0; k < slide->picture_count && count < DECK_MAX_PICTURES; k += 1) {
-         if (slide->pictures[k].video != 0) {
+         // Not a gif: that plays by itself (Deck_UpdateVideos), and is
+         // not one of the slide's videos to start, stop or show controls for.
+         if (slide->pictures[k].video != 0 && !Video_NameIsMovingPicture(slide->pictures[k].path)) {
             videos[count] = slide->pictures[k].video;
             count += 1;
          }
@@ -1368,8 +1375,14 @@ void
 Deck_UpdateVideos(Deck_Deck* deck) {
    for (U64 i = 0; i < deck->slide_count; i += 1) {
       for (U64 k = 0; k < deck->slides[i].picture_count; k += 1) {
-         if (deck->slides[i].pictures[k].video != 0) {
-            Video_Update(deck->slides[i].pictures[k].video);
+         Deck_Picture* picture = &deck->slides[i].pictures[k];
+         if (picture->video != 0) {
+            // A gif plays whenever it is loaded, and from its start again
+            // at its end.
+            if (Video_NameIsMovingPicture(picture->path) && !Video_IsPlaying(picture->video)) {
+               Video_SetPlaying(picture->video, 1);
+            }
+            Video_Update(picture->video);
          }
       }
    }

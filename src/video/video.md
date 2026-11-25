@@ -20,7 +20,7 @@ video_ffmpeg.c             the decoder there is, done with FFmpeg
 
 - **`video.h`** is all the rest of the program sees: `Video_Open`, `Video_Close`,
   `Video_Texture`, `Video_Size`, `Video_Duration`, `Video_Position`, `Video_IsPlaying`,
-  `Video_SetPlaying`, `Video_Seek`, `Video_Update`, `Video_NameIsVideo`. Only bgz types.
+  `Video_SetPlaying`, `Video_Seek`, `Video_Update`, `Video_NameIsVideo`, `Video_NameIsMovingPicture` (a gif: played as a video, by itself, with no controls). Only bgz types.
 - **`video.c`** is the player. It knows nothing of files or codecs. A thread
   decodes a few frames ahead into a queue; `Video_Update`, once a frame on the
   main thread, moves the clock on and copies the frame that is due into the

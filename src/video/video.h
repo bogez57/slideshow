@@ -32,6 +32,12 @@ typedef struct Video_Video Video_Video;
 // Whether a file name ends in an extension that is a video's.
 B32 Video_NameIsVideo(String8 name);
 
+// Whether a file name ends in an extension of a picture that moves: a gif.
+// Not a video by Video_NameIsVideo - it has no sound and no controls, and
+// plays over and over by itself (deck\deck.c) - but it is opened and
+// played as one.
+B32 Video_NameIsMovingPicture(String8 name);
+
 // Opens the file and starts decoding it. The video is paused at its start,
 // and its first frame is in the texture by the first or second Video_Update.
 // 0 if it could not be opened, and why is logged.

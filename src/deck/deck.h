@@ -32,7 +32,8 @@
 //                       folder. A slide can have several, up to
 //                       DECK_MAX_PICTURES: they share the room pictures have
 //    ![](clip.mp4)      the same line with a video file: the picture is the
-//                       video, playing (src\video)
+//                       video, playing (src\video). A .gif is played too,
+//                       over and over, with no sound and no controls
 //    @slide             starts a new slide, as --- does. A # Title under it is
 //                       that slide's title, and not one more slide. An
 //                       @color, @size or @place line between the two that

@@ -152,6 +152,11 @@ Video_NameIsVideo(String8 name) {
    return result;
 }
 
+B32
+Video_NameIsMovingPicture(String8 name) {
+   return Str8Match(Str8SkipLastDot(name), Str8Lit("gif"), StringMatchFlag_CaseInsensitive);
+}
+
 PRIVATE void
 _Video_DecodeThread(void* p) {
    Video_Video* video = (Video_Video*)p;
