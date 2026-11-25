@@ -1224,6 +1224,7 @@ _Edit_NextTheme(Editor_Editor* editor, Deck_Deck* deck) {
 // written again, or a new one is put above the slide's # Title - or under
 // the --- or @slide line it starts with.
 PRIVATE void _Edit_WriteLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx, Deck_Layout layout);
+PRIVATE void _Edit_PutSlideLine(Editor_Editor* editor, Deck_Slide* slide, String8 line);
 
 PRIVATE void
 _Edit_NextLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx) {
@@ -1246,28 +1247,37 @@ _Edit_WriteLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx, Deck_La
    if (slide->has_layout_line && slide->layout_line.max <= text.size) {
       _Edit_ReplaceKeepingCursor(editor, slide->layout_line.min, slide->layout_line.max, line);
    } else {
-      // Under the slide's first line when that is its --- or @slide: the
-      // line belongs to the slide from there. Else above it - the # Title,
-      // or the lines about the slide that are above that already: what a
-      // line is about is under it, and the deck reads those as the
-      // slide's (deck.h).
-      U64 line_start = Min(slide->text_pos, text.size);
-      U64 line_end = line_start;
-      while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
-      U64 first = line_start;
-      while (first < line_end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
-
-      B32 starts_slide = (first < line_end && (text.str[first] == '-' ||
-                                               Str8Match(Str8Prefix(Str8Substr(text, R1U64(first, line_end)), 6), Str8Lit("@slide"),
-                                                         StringMatchFlag_CaseInsensitive) ||
-                                               slide->is_canvas));
-      if (starts_slide) {
-         _Edit_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
-      } else {
-         _Edit_ReplaceKeepingCursor(editor, line_start, line_start, PushStr8F(scratch.arena, "%S\n", line));
-      }
+      _Edit_PutSlideLine(editor, slide, line);
    }
 
+   ScratchEnd(scratch);
+}
+
+// A new line that is about the slide as a whole (@layout, @video).
+PRIVATE void
+_Edit_PutSlideLine(Editor_Editor* editor, Deck_Slide* slide, String8 line) {
+   Temp    scratch = ScratchBegin(0, 0);
+   String8 text = Editor_Text(editor);
+   // Under the slide's first line when that is its --- or @slide: the
+   // line belongs to the slide from there. Else above it - the # Title,
+   // or the lines about the slide that are above that already: what a
+   // line is about is under it, and the deck reads those as the
+   // slide's (deck.h).
+   U64 line_start = Min(slide->text_pos, text.size);
+   U64 line_end = line_start;
+   while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
+   U64 first = line_start;
+   while (first < line_end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
+
+   B32 starts_slide = (first < line_end && (text.str[first] == '-' ||
+                                            Str8Match(Str8Prefix(Str8Substr(text, R1U64(first, line_end)), 6), Str8Lit("@slide"),
+                                                      StringMatchFlag_CaseInsensitive) ||
+                                            slide->is_canvas));
+   if (starts_slide) {
+      _Edit_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
+   } else {
+      _Edit_ReplaceKeepingCursor(editor, line_start, line_start, PushStr8F(scratch.arena, "%S\n", line));
+   }
    ScratchEnd(scratch);
 }
 
@@ -1727,6 +1737,140 @@ Edit_AddSlide(App_State* app_state, StateOp_List* ops) {
    }
 }
 STATE_OP_NO_PARAMS(Edit_AddSlide)
+
+// The idx-th picture of the preview's slide changed for the file at path
+// (on ops->arena): its line's name written over, as a picture clicked and
+// another dropped is, and its @place line kept.
+typedef struct Edit_ReplacePictureOpParams Edit_ReplacePictureOpParams;
+struct Edit_ReplacePictureOpParams {
+   U64     idx;
+   String8 path;
+};
+void
+Edit_ReplacePicture(App_State* app_state, StateOp_List* ops, Edit_ReplacePictureOpParams* params) {
+   UnusedVariable(ops);
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   Deck_Deck* deck = app_state->deck;
+   if (app_state->slide_idx < deck->slide_count && params->idx < deck->slides[app_state->slide_idx].picture_count) {
+      Rng1U64 range = deck->slides[app_state->slide_idx].pictures[params->idx].range;
+      if (range.max <= editor->size && range.max > range.min) {
+         // Selected, which is what says: this one, not one more.
+         Editor_SetCursor(editor, range.max);
+         editor->mark = range.min;
+         _Edit_DropPicture(app_state, params->path);
+      }
+   }
+}
+STATE_OP(Edit_ReplacePicture)
+
+// One of the words of the slide's @video line put on or taken off: how its
+// video plays. The slide's @video lines are written as one, under the line
+// the slide starts with or above its # Title, or taken out when no word is
+// left.
+typedef enum Edit_VideoWord {
+   Edit_VideoWord_Loop,
+   Edit_VideoWord_Mute,
+   Edit_VideoWord_Manual,
+} Edit_VideoWord;
+typedef struct Edit_ToggleVideoOpParams Edit_ToggleVideoOpParams;
+struct Edit_ToggleVideoOpParams {
+   Edit_VideoWord word;
+};
+void
+Edit_ToggleVideo(App_State* app_state, StateOp_List* ops, Edit_ToggleVideoOpParams* params) {
+   UnusedVariable(ops);
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   Deck_Deck* deck = app_state->deck;
+   if (app_state->slide_idx >= deck->slide_count) {
+      return;
+   }
+   Temp        scratch = ScratchBegin(0, 0);
+   U64         slide_idx = app_state->slide_idx;
+   Deck_Slide* slide = &deck->slides[slide_idx];
+   B32         loop = slide->video_loop;
+   B32         mute = slide->video_mute;
+   B32         manual = slide->video_manual;
+   if (params->word == Edit_VideoWord_Loop) {
+      loop = !loop;
+   } else if (params->word == Edit_VideoWord_Mute) {
+      mute = !mute;
+   } else {
+      manual = !manual;
+   }
+   String8 line = Str8Lit("");
+   if (loop || mute || manual) {
+      line = PushStr8F(scratch.arena, "@video%s%s%s", loop ? " loop" : "", mute ? " mute" : "", manual ? " manual" : "");
+   }
+
+   // The slide's @video lines, the last first: the first is written over,
+   // the others go. What is picked stays picked: the menu is on it.
+   B32     was_picked = Edit_PickedIsGood(app_state);
+   U64     undo_before = editor->undo_count;
+   Rng1U64 range = _Edit_TextRangeFromSlide(editor, deck, slide_idx);
+   B32     is_written = 0;
+   U64     first_video_start = 0;
+   B32     has_video_line = 0;
+   {
+      String8 text = Editor_Text(editor);
+      for (U64 pos = range.min; pos < range.max;) {
+         U64 line_start = pos;
+         while (pos < range.max && text.str[pos] != '\n') pos += 1;
+         U64 first = line_start;
+         while (first < pos && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
+         if (!has_video_line && Str8Match(Str8Prefix(Str8Substr(text, R1U64(first, pos)), 6), Str8Lit("@video"), StringMatchFlag_CaseInsensitive)) {
+            has_video_line = 1;
+            first_video_start = line_start;
+         }
+         pos += 1;
+      }
+   }
+   U64 line_end = Min(range.max, editor->size);
+   while (line_end > range.min) {
+      String8 text = Editor_Text(editor);
+      // The line that ends at or before line_end.
+      U64 end = line_end;
+      if (end > range.min && end <= text.size && end > 0 && text.str[end - 1] == '\n') {
+         end -= 1;
+      }
+      U64 line_start = end;
+      while (line_start > range.min && text.str[line_start - 1] != '\n') line_start -= 1;
+      U64 first = line_start;
+      while (first < end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
+      if (Str8Match(Str8Prefix(Str8Substr(text, R1U64(first, end)), 6), Str8Lit("@video"), StringMatchFlag_CaseInsensitive)) {
+         if (line_start == first_video_start && line.size != 0) {
+            _Edit_ReplaceKeepingCursor(editor, line_start, end, line);
+            is_written = 1;
+         } else {
+            // With its line ending.
+            _Edit_ReplaceKeepingCursor(editor, line_start, Min(end + 1, text.size), Str8Lit(""));
+         }
+      }
+      if (line_start <= range.min) {
+         break;
+      }
+      line_end = line_start;
+   }
+   if (!is_written && line.size != 0) {
+      FR_SyncDeck(app_state);
+      if (slide_idx < app_state->deck->slide_count) {
+         _Edit_PutSlideLine(editor, &app_state->deck->slides[slide_idx], line);
+      }
+   }
+   Editor_JoinUndoSince(editor, undo_before);
+   FR_SyncDeck(app_state);
+   Edit_KeepPicked(app_state, was_picked);
+   editor->last_input_us = NowTimeUS();
+   ScratchEnd(scratch);
+}
+STATE_OP(Edit_ToggleVideo)
 
 // The slide the cursor is on given a layout: its @layout line.
 typedef struct Edit_SetLayoutOpParams Edit_SetLayoutOpParams;
@@ -3278,6 +3422,8 @@ typedef enum _Edit_MenuItemKind {
    _Edit_MenuItem_Code,
    _Edit_MenuItem_LineKind,    // with value: an Edit_LineKind for the lines selected
    _Edit_MenuItem_AddPicture,  // a file picked, and put where the menu was opened
+   _Edit_MenuItem_ReplacePicture, // a file picked, in the place of the picture the menu is on
+   _Edit_MenuItem_VideoWord,   // with value: an Edit_VideoWord of the slide's @video line
    _Edit_MenuItem_NewSlide,    // after the one showing
    _Edit_MenuItem_SlideChange, // with value: an Edit_SlideChange
    _Edit_MenuItem_Layout,      // with value: a Deck_Layout for the slide
@@ -3456,6 +3602,32 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       if (picked >= 3) {
          _Edit_MenuAddArrange(Place_ArrangeKind_SpaceX, "Space evenly across", "Ctrl+Shift+H");
          _Edit_MenuAddArrange(Place_ArrangeKind_SpaceY, "Space evenly down", "Ctrl+Shift+V");
+      }
+      // A picture alone: another in its place. A video: how it plays, said
+      // with what it is now beside it.
+      if (picked == 1 && g_edit_view.menu_kind == Deck_PlaceKind_Picture && app_state->slide_idx < app_state->deck->slide_count &&
+          g_edit_view.menu_idx < app_state->deck->slides[app_state->slide_idx].picture_count) {
+         Deck_Slide* menu_slide = &app_state->deck->slides[app_state->slide_idx];
+         String8     path = menu_slide->pictures[g_edit_view.menu_idx].path;
+         _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+         _Edit_MenuAdd(_Edit_MenuItem_ReplacePicture, "Replace with another...", "");
+         if (Video_NameIsVideo(path) && !Video_NameIsMovingPicture(path)) {
+            items[count].keys = menu_slide->video_loop ? Str8Lit("on") : Str8Lit("off");
+            items[count].value = Edit_VideoWord_Loop;
+            items[count].kind = _Edit_MenuItem_VideoWord;
+            items[count].name = Str8Lit("Video: play again at its end");
+            count += 1;
+            items[count].keys = menu_slide->video_mute ? Str8Lit("on") : Str8Lit("off");
+            items[count].value = Edit_VideoWord_Mute;
+            items[count].kind = _Edit_MenuItem_VideoWord;
+            items[count].name = Str8Lit("Video: no sound");
+            count += 1;
+            items[count].keys = menu_slide->video_manual ? Str8Lit("on") : Str8Lit("off");
+            items[count].value = Edit_VideoWord_Manual;
+            items[count].kind = _Edit_MenuItem_VideoWord;
+            items[count].name = Str8Lit("Video: wait to be started");
+            count += 1;
+         }
       }
       _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
       _Edit_MenuAdd(_Edit_MenuItem_PutBack, "Put back where the layout has it", "");
@@ -3694,6 +3866,24 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
                StateOp_App_Notice(ops)->notice = Str8Lit("That file is not a picture or a video the program can show");
             }
             ScratchEnd(pick_scratch);
+         } break;
+         case _Edit_MenuItem_ReplacePicture: {
+            Temp    pick_scratch = ScratchBegin(0, 0);
+            String8 folder = (app_state->deck != 0) ? FR_WholePath(pick_scratch.arena, app_state->deck->folder) : Str8Zero();
+            String8 picked_file = ShPickFile(ops->arena, Str8Lit("Replace with a picture or video"), folder, Str8Zero());
+            if (picked_file.size != 0 && (Image_NameIsImage(picked_file) || Video_NameIsVideo(picked_file))) {
+               Edit_ReplacePictureOpParams* replace = StateOp_Edit_ReplacePicture(ops);
+               replace->idx = g_edit_view.menu_idx;
+               replace->path = picked_file;
+            } else if (picked_file.size != 0) {
+               StateOp_App_Notice(ops)->notice = Str8Lit("That file is not a picture or a video the program can show");
+            }
+            ScratchEnd(pick_scratch);
+         } break;
+         case _Edit_MenuItem_VideoWord: {
+            // Left open: what it is now is beside it.
+            StateOp_Edit_ToggleVideo(ops)->word = (Edit_VideoWord)item->value;
+            closes = 0;
          } break;
          case _Edit_MenuItem_NewSlide: StateOp_Edit_AddSlide(ops); break;
          case _Edit_MenuItem_SlideChange: StateOp_Edit_ChangeSlide(ops)->change = (Edit_SlideChange)item->value; break;
