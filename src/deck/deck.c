@@ -412,6 +412,9 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
    // first block's.
    Deck_Look  waiting_bare_look = {0};
    Deck_Place waiting_bare_place = {0};
+   // @size, @color and @align lines in a block that has words already: for
+   // the next line of its words, and only that one.
+   Deck_Look next_item_look = {0};
    // Whether the last picture line was one past DECK_MAX_PICTURES, passed
    // over: an @place line under it is passed over with it, and not given to
    // the picture before.
@@ -460,6 +463,7 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          node_count += 1;
          slide = &node->slide;
          slide->is_canvas = 1;
+         MemoryZeroStruct(&next_item_look);
          slide->text_pos = line_start;
          slide->box_count = 1;
          slide->boxes[0].text_pos = line_start;
@@ -479,6 +483,7 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
          continue;
       }
       if (is_rule) {
+         MemoryZeroStruct(&next_item_look);
          slide = 0;
          gap_before = 0;
          MemoryZeroStruct(&waiting_picture_place);
@@ -529,6 +534,7 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                break;
             }
             if (title_is_next) {
+               MemoryZeroStruct(&next_item_look);
                slide = 0;
                gap_before = 0;
                MemoryZeroStruct(&waiting_picture_place);
@@ -590,6 +596,7 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
                slide->box_count += 1;
                slide->boxes[slide->box_count - 1].text_pos = line_start;
             }
+            MemoryZeroStruct(&next_item_look);
             gap_before = 0;
             continue;
          }
@@ -699,6 +706,10 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
             Deck_Look* look = is_title_look ? &waiting_title_look : is_bare_look ? &waiting_bare_look : &waiting_text_look;
             if (slide != 0) {
                look = is_title_look ? &slide->title_look : &slide->boxes[slide->box_count - 1].look;
+               // Under the block's first words: the next line's own.
+               if (!is_title_look && slide->boxes[slide->box_count - 1].item_count != 0) {
+                  look = &next_item_look;
+               }
             }
 
             F32     size = 0;
@@ -907,8 +918,11 @@ Deck_OpenText(String8 text_to_copy, String8 file) {
             item->text = line;
          }
          item->text_range = _Deck_RangeOf(item->text);
+         item->look = next_item_look;
       }
 #undef _Deck_RangeOf
+      // For the line right under them: not for one after a picture.
+      MemoryZeroStruct(&next_item_look);
       gap_before = 0;
    }
 

@@ -102,6 +102,16 @@
 //                       of the theme's
 //    @color #ffcc00     the same for the body's words, or the block's. The
 //                       edit screen writes these four too (look\look.c)
+//                       In a block, under its first words, an @size, @color
+//                       or @align line is for the one line under it, and
+//                       not the block: the lines after that one are as the
+//                       block is again
+//                          @size 0.8
+//                          small, as all the block is
+//                          @size 2
+//                          @color red
+//                          this one line large and red
+//                          small again
 //    @align center      which side the lines of the block it is in are
 //                       against: left, center or right. Centered or to the
 //                       right, bullets are lines like any other, without
@@ -231,6 +241,10 @@ struct Deck_Item {
    U32           level;      // bullets: 0 is outermost
    B32           gap_before; // an empty line came before it
    Rng1U64       text_range; // where its words are in the deck's text. Empty, at the line's end, for no words
+   // Its own, from @size, @color and @align lines above it in the block,
+   // under the block's first words: for this line only. What it does not
+   // have is the block's.
+   Deck_Look     look;
 };
 
 // One block of a slide's body: its items are item_count of the slide's,

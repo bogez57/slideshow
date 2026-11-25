@@ -550,10 +550,9 @@ Edit_PutLineFor(Editor_Editor* editor, Deck_Slide* slide, Deck_PlaceKind kind, U
       // Above the line it is about: a picture's above the picture's line,
       // the title's above the title's - the deck reads both as that
       // picture's and that slide's (deck.h) - and a block's above its
-      // first line, where it does not come between two lines of the block,
-      // unless that line is what starts the slide: above it would be the
-      // slide before.
-      if (goes_above || (kind == Deck_PlaceKind_Text && line_start > slide->text_pos)) {
+      // first line: under that it would be the next line's own, and not
+      // the block's.
+      if (goes_above || kind == Deck_PlaceKind_Text) {
          _Edit_ReplaceKeepingCursor(editor, line_start, line_start, PushStr8F(scratch.arena, "%S\n", line));
       } else {
          _Edit_ReplaceKeepingCursor(editor, line_end, line_end, PushStr8F(scratch.arena, "\n%S", line));
@@ -782,6 +781,16 @@ _Edit_DeletePieces(App_State* app_state, U64 slide_idx, Deck_PlaceKind* kinds, U
          Deck_Item* item = block->first_item;
          for (U64 i = 0; i < block->item_count && item != 0; i += 1, item = item->next) {
             _Edit_PieceLinesAdd(lines, text, item->text_range.min, none);
+            // And the lines above it that are its own.
+            if (item->look.has_size) {
+               _Edit_PieceLinesAdd(lines, text, item->look.size_line.min, none);
+            }
+            if (item->look.has_color) {
+               _Edit_PieceLinesAdd(lines, text, item->look.color_line.min, none);
+            }
+            if (item->look.has_align) {
+               _Edit_PieceLinesAdd(lines, text, item->look.align_line.min, none);
+            }
          }
          // Its @box line, which starts it: the slide's first block has none.
          if (block->text_pos != slide->text_pos) {
@@ -1025,6 +1034,16 @@ _Edit_ClipFromPicked(Arena* arena, const App_State* app_state, Edit_ClipPiece* p
          Deck_Box*  block = &slide->boxes[idx];
          Deck_Item* item = block->first_item;
          for (U64 n = 0; n < block->item_count && item != 0; n += 1, item = item->next) {
+            // A line's own @size, @color and @align lines, above it.
+            if (item->look.has_size) {
+               Str8ListPush(arena, &lines, PushStr8F(arena, "@size %.2f\n", item->look.size));
+            }
+            if (item->look.has_color) {
+               Str8ListPush(arena, &lines, _Edit_ColorLineAsText(arena, text, item->look.color_line));
+            }
+            if (item->look.has_align) {
+               Str8ListPush(arena, &lines, PushStr8F(arena, "@align %S\n", Deck_AlignName(item->look.align)));
+            }
             Str8ListPush(arena, &lines, _Edit_LineAt(arena, text, item->text_range.min));
          }
          look = &block->look;

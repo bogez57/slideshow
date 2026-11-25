@@ -464,8 +464,8 @@ PRIVATE F32
 _View_Body(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Slide* slide, Deck_Box* box, U64 box_idx, Rng2F32 rect,
            Rng2F32 shown, F32 scale, F32 alpha, View_HitList* hits) {
    // A Deck_Align: the block's own (@align), or the layout's.
-   B32 centered = (B32)Deck_AlignOf(slide, &box->look);
-   F32 unit = scale * (box->look.has_size ? box->look.size : 1.0f);
+   B32 box_centered = (B32)Deck_AlignOf(slide, &box->look);
+   F32 box_unit = scale * (box->look.has_size ? box->look.size : 1.0f);
    F32 y = rect.min.y;
 
    _View_RunsOf runs_of = {hits, Deck_PlaceKind_Text, box_idx, 0};
@@ -473,20 +473,30 @@ _View_Body(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Slid
    // A colour of the block's own (@color) is the colour of all its words,
    // headings too - and of what is drawn from the words' colour, a code
    // box. The bullets' dots keep the theme's.
-   View_Colors own_colors = *colors;
-   Vec4F32     heading_color = colors->accent;
+   View_Colors box_colors = *colors;
+   Vec4F32     box_heading_color = colors->accent;
    Vec4F32     dot_color = colors->accent;
    if (box->look.has_color) {
-      own_colors.body = box->look.color;
-      heading_color = box->look.color;
+      box_colors.body = box->look.color;
+      box_heading_color = box->look.color;
    }
-   colors = &own_colors;
-
-   F32 body_px = _VIEW_BODY_PX * unit;
-   F32 body_line_height = Text_LineHeight(fonts->regular, body_px);
 
    Deck_Item* item = box->first_item;
    for (U64 item_idx = 0; item_idx < box->item_count && item != 0; item_idx += 1, item = item->next) {
+      // A line's own size, colour and side (Deck_Item's look), where it
+      // has them: else the block's.
+      B32         centered = item->look.has_align ? (B32)item->look.align : box_centered;
+      F32         unit = item->look.has_size ? scale * item->look.size : box_unit;
+      View_Colors own_colors = box_colors;
+      Vec4F32     heading_color = box_heading_color;
+      if (item->look.has_color) {
+         own_colors.body = item->look.color;
+         heading_color = item->look.color;
+      }
+      colors = &own_colors;
+      F32 body_px = _VIEW_BODY_PX * unit;
+      F32 body_line_height = Text_LineHeight(fonts->regular, body_px);
+
       // Room between items: a little always, more where the file had an empty
       // line - and above a heading, which belongs to what is under it.
       if (item != box->first_item) {
