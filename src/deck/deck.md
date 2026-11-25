@@ -27,3 +27,7 @@ A slide's pictures - images or videos - are loaded the first time they are asked
 - slide_video, presenter: a slide's videos, and the presenter's next slide.
 - copy: path aliases while a video is copied.
 - open: which files are text decks, and their order.
+
+## Words with a look of their own
+
+- `{red:words}`, `{1.5:words}`, `{red 1.5:words}` inside a paragraph or a bullet: a colour and a size for those words alone. `Deck_SpanOpenAt` reads the opening mark; view draws it, look writes it.

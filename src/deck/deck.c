@@ -306,6 +306,63 @@ Deck_ColorFromString(String8 string, Vec4F32* color_out) {
 
 // The number at the start of *string - 0.25, .5, 1 - which is then moved past
 // it and the spaces before it. 0 if there is none there.
+PRIVATE B32 _Deck_TakeNumber(String8* string, F32* number_out);
+
+U64
+Deck_SpanOpenAt(String8 text, U64 at, Deck_Span* span_out) {
+   Deck_Span span = {0};
+   U64       result = 0;
+   if (at < text.size && text.str[at] == '{') {
+      // To the : that ends the mark. A { a } or the line's end first: none.
+      U64 colon = at + 1;
+      while (colon < text.size && text.str[colon] != ':' && text.str[colon] != '{' && text.str[colon] != '}' && text.str[colon] != '\n') {
+         colon += 1;
+      }
+      B32 is_good = (colon < text.size && text.str[colon] == ':' && colon > at + 1);
+      // Its words: each a colour or a size, and no more than one of each.
+      for (U64 i = at + 1; i < colon && is_good;) {
+         if (text.str[i] == ' ') {
+            i += 1;
+            continue;
+         }
+         U64 word_end = i;
+         while (word_end < colon && text.str[word_end] != ' ') word_end += 1;
+         String8 word = Str8Substr(text, R1U64(i, word_end));
+         String8 rest = word;
+         F32     size = 0;
+         Vec4F32 color = {0};
+         if (((word.str[0] >= '0' && word.str[0] <= '9') || word.str[0] == '.') && !span.has_size && _Deck_TakeNumber(&rest, &size) &&
+             rest.size == 0 && size >= DECK_SIZE_MIN && size <= DECK_SIZE_MAX) {
+            span.has_size = 1;
+            span.size = size;
+         } else if (!span.has_color && Deck_ColorFromString(word, &color)) {
+            span.has_color = 1;
+            span.color = color;
+            span.color_name = word;
+         } else {
+            is_good = 0;
+         }
+         i = word_end;
+      }
+      is_good = is_good && (span.has_color || span.has_size);
+      // The } that closes it, later on the line.
+      B32 has_close = 0;
+      for (U64 i = colon + 1; i < text.size && is_good && text.str[i] != '\n' && !has_close; i += 1) {
+         has_close = (text.str[i] == '}');
+      }
+      if (is_good && has_close) {
+         result = colon + 1 - at;
+      }
+   }
+   if (span_out != 0) {
+      MemoryZeroStruct(span_out);
+      if (result != 0) {
+         *span_out = span;
+      }
+   }
+   return result;
+}
+
 PRIVATE B32
 _Deck_TakeNumber(String8* string, F32* number_out) {
    U64 i = 0;

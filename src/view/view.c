@@ -228,6 +228,9 @@ _View_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 
 //    **these words**   are drawn bold
 //    `these`           in the font with every letter the same width, on a
 //                      faint box, as code is written. Inside, ** is only **
+//    {red 1.5:these}   in a colour and at a size of their own (deck.h's
+//                      Deck_SpanOpenAt). A line with larger words in it is
+//                      as tall as they need
 //
 // The marks themselves are not drawn. One with no partner later in the line
 // is not a mark: it is drawn as written.
@@ -248,6 +251,9 @@ struct _View_Piece {
    U32          code_span;     // code: which `...` it is in, counted from 1. 0: not code
    F32          pad_before;    // code: room inside its box before the letters, at the start of a span
    F32          width;         // the letters', with the room before and after them
+   B32          has_color;     // a colour of their own ({red:...})
+   Vec4F32      color;
+   F32          scale;         // a size of their own, as a part of the line's. 1: the line's
 };
 
 typedef struct _View_PieceList _View_PieceList;
@@ -299,13 +305,18 @@ _View_PiecesFromText(Arena* arena, const Text_Fonts* fonts, F32 px, String8 text
    B32 in_piece = 0;
    B32 is_first = 1;
    U32 code_span = 0;
+   // The {...:words} the letters are in, if any.
+   B32       in_span = 0;
+   Deck_Span span = {0};
 
    // One past the end is gone through too, as a space: it ends the last
    // piece.
    for (U64 i = 0; i <= text.size;) {
-      U8  c = (i < text.size) ? text.str[i] : ' ';
-      U32 new_style = style;
-      U64 skip = 0; // the length of a mark here. 0: a letter or a space
+      U8        c = (i < text.size) ? text.str[i] : ' ';
+      U32       new_style = style;
+      B32       new_in_span = in_span;
+      Deck_Span new_span = span;
+      U64       skip = 0; // the length of a mark here. 0: a letter or a space
 
       if (i < text.size) {
          if (c == '`') {
@@ -325,6 +336,13 @@ _View_PiecesFromText(Arena* arena, const Text_Fonts* fonts, F32 px, String8 text
                new_style |= _View_Style_Bold;
                skip = 2;
             }
+         } else if (c == '{' && !(style & _View_Style_Code) && !in_span) {
+            skip = Deck_SpanOpenAt(text, i, &new_span);
+            new_in_span = (skip != 0);
+         } else if (c == '}' && !(style & _View_Style_Code) && in_span) {
+            MemoryZeroStruct(&new_span);
+            new_in_span = 0;
+            skip = 1;
          }
       }
 
@@ -335,7 +353,10 @@ _View_PiecesFromText(Arena* arena, const Text_Fonts* fonts, F32 px, String8 text
          piece->style = style;
          piece->spaces_before = is_first ? 0 : spaces;
          piece->code_span = (style & _View_Style_Code) ? code_span : 0;
-         piece->width = Text_Width(_View_FontFromStyle(fonts, style), _View_PxFromStyle(style, px), piece->text);
+         piece->has_color = in_span && span.has_color;
+         piece->color = span.color;
+         piece->scale = (in_span && span.has_size) ? span.size : 1.0f;
+         piece->width = Text_Width(_View_FontFromStyle(fonts, style), _View_PxFromStyle(style, px) * piece->scale, piece->text);
          SLLQueuePush(result.first, result.last, piece);
          in_piece = 0;
          is_first = 0;
@@ -344,6 +365,8 @@ _View_PiecesFromText(Arena* arena, const Text_Fonts* fonts, F32 px, String8 text
 
       if (skip != 0) {
          style = new_style;
+         in_span = new_in_span;
+         span = new_span;
          i += skip;
       } else {
          if (is_space) {
@@ -405,11 +428,19 @@ _View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 
          line_end = word_end;
       }
 
+      // As tall as its largest words need: the line's own size, or more.
+      F32 line_scale = 1.0f;
+      for (_View_Piece* piece = line_first; piece != line_end; piece = piece->next) {
+         line_scale = Max(line_scale, piece->scale);
+      }
+      F32 this_line_height = (line_scale > 1.0f) ? Text_LineHeight(fonts->regular, px * line_scale) : line_height;
+
       if (do_draw) {
-         // Every piece stands on the regular font's baseline, whatever its
-         // font and size. A code box reaches from a little above a capital
-         // to a little under the baseline, around the letters of the line.
-         F32     baseline = Text_Baseline(fonts->regular, px);
+         // Every piece stands on one baseline, whatever its font and size:
+         // the regular font's, at the size of the line's largest words. A
+         // code box reaches from a little above a capital to a little under
+         // the baseline, around the letters of the line.
+         F32     baseline = Text_Baseline(fonts->regular, px * line_scale);
          F32     cap_h = Text_CapHeight(fonts->regular, px);
          F32     box_top = y + baseline - cap_h * 1.32f;
          F32     box_bottom = y + baseline + cap_h * 0.42f;
@@ -429,24 +460,25 @@ _View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 
             }
 
             FNT_Tag font = _View_FontFromStyle(fonts, piece->style);
-            F32     piece_px = _View_PxFromStyle(piece->style, px);
+            F32     piece_px = _View_PxFromStyle(piece->style, px) * piece->scale;
             F32     piece_y = y + baseline - Text_Baseline(font, piece_px);
             if (piece->code_span != 0) {
                Core_D_Rect(R2F32P(box_x, box_top, piece_x + piece->width, box_bottom), R2F32P(0, 0, 1, 1), box_color);
             }
-            Text_Draw(font, piece_px, V2F32(piece_x + piece->pad_before, piece_y), color, piece->text);
+            Text_Draw(font, piece_px, V2F32(piece_x + piece->pad_before, piece_y),
+                      piece->has_color ? _View_Faded(piece->color, alpha) : color, piece->text);
             if (runs_of != 0 && runs_of->hits != 0) {
                F32 letters_w = Text_Width(font, piece_px, piece->text);
                _View_PushRun(arena, runs_of, font, piece_px, text, piece->text, piece_x + piece->pad_before, y, letters_w);
                // As tall as the line, not as its own font.
-               runs_of->hits->last_run->rect.max.y = y + line_height;
+               runs_of->hits->last_run->rect.max.y = y + this_line_height;
             }
             piece_x += piece->width;
          }
          widest = Max(widest, line_w);
       }
 
-      y += line_height;
+      y += this_line_height;
       line_first = line_end;
    }
 

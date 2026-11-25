@@ -1,6 +1,6 @@
 # look
 
-The edit screen: the size, the colour and the side of a slide's words - the title's, or a block of the body's, whichever the cursor is in. Ctrl+] and Ctrl+[ make them larger and smaller, Ctrl+Shift+L, E and R put them against the left, in the middle and against the right; the Format panel's @size, @color and @align lines have the rest to click. What comes of it is an `@size`, `@color` or `@align` line in the deck's text. With words selected in a block that are not of all its lines, it is of the lines the selection is in, each its own: `@size line 1.5` above each. The keys are at the top of look.c.
+The edit screen: the size, the colour and the side of a slide's words - the title's, or a block of the body's, whichever the cursor is in. Ctrl+] and Ctrl+[ make them larger and smaller, Ctrl+Shift+L, E and R put them against the left, in the middle and against the right; the Format panel's @size, @color and @align lines have the rest to click. What comes of it is an `@size`, `@color` or `@align` line in the deck's text. With words selected inside one line of a block, a size and a colour are of those words alone, as marks around them: `{red 1.5:these words}`. Selected across lines, or a whole line, they are of the lines the selection is in, each its own: `@size line 1.5` above each. Which side is always a line's. The keys are at the top of look.c.
 
 ## State
 

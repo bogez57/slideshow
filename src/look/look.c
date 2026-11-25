@@ -22,8 +22,10 @@
 // size, any #rrggbb - and Ctrl+Z takes a change back. Usual and the theme's
 // take the line out again.
 //
-// With words selected in a block, all of these are of the lines the
-// selection is in, each its own ("the lines selected", below). A right-click
+// With words selected in a block, a size and a colour are of those words
+// alone, as marks around them ("the words selected", below) - or, selected
+// across lines or a whole line, of the lines the selection is in, each its
+// own ("the lines selected", below), as which side always is. A right-click
 // on words selected has them in a menu (edit\edit.c).
 //
 // Larger and smaller go from the size the words are drawn at, which the
@@ -302,6 +304,138 @@ _Look_ChangeItems(App_State* app_state, U64 slide_idx, U64 idx, Deck_Item** item
 }
 
 ////////////////////////////////
+//~ bgz: the words selected
+//
+// With words selected that are inside one line of a block, and are not all
+// of it, a size or a colour is of those words alone: marks around them in
+// the line, "{red 1.5:these words}" (deck.h, Deck_SpanOpenAt). Selected
+// again - they are left selected - the marks they have are changed, and
+// taken away when neither a colour nor a size is left. Not in a title or
+// a heading, which are drawn plain, nor on a picture's or an @ line. Which
+// side is always a line's.
+
+typedef struct _Look_Words _Look_Words;
+struct _Look_Words {
+   U64       min; // the words selected, in the text
+   U64       max;
+   B32       has_span;   // they are all that is inside marks already
+   U64       span_start; // where its { is
+   Deck_Span span;       // what it says
+};
+
+// The words selected, if a change of look is theirs alone. 0 if not.
+PRIVATE B32
+_Look_SelectedWords(const App_State* app_state, Deck_PlaceKind kind, _Look_Words* words_out) {
+   Editor_Editor* editor = app_state->editor;
+   _Look_Words    words = {0};
+   B32            result = 0;
+   if (editor != 0 && editor->cursor != editor->mark && kind == Deck_PlaceKind_Text) {
+      String8 text = Editor_Text(editor);
+      words.min = Min(Min(editor->cursor, editor->mark), text.size);
+      words.max = Min(Max(editor->cursor, editor->mark), text.size);
+      U64 line_start = words.min;
+      while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
+      U64 line_end = words.min;
+      while (line_end < text.size && text.str[line_end] != '\n') line_end += 1;
+
+      // The line's own words: after the spaces, and a bullet's "- ".
+      U64 first = line_start;
+      while (first < line_end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
+      B32 is_plain = (first < line_end && (text.str[first] == '@' || text.str[first] == '#' || text.str[first] == '!'));
+      if (first + 1 < line_end && text.str[first] == '-' && text.str[first + 1] == ' ') {
+         first += 2;
+      }
+      U64 last = line_end;
+      while (last > first && (text.str[last - 1] == ' ' || text.str[last - 1] == '\t')) last -= 1;
+
+      if (words.max <= line_end && words.min >= first && !is_plain) {
+         // Inside marks already: a { before them on the line whose mark
+         // ends where they start, and a } right after them.
+         String8 line = Str8Substr(text, R1U64(line_start, line_end));
+         for (U64 at = words.min; at > line_start && !words.has_span; at -= 1) {
+            if (text.str[at - 1] == '{') {
+               Deck_Span span = {0};
+               U64       open = Deck_SpanOpenAt(line, at - 1 - line_start, &span);
+               if (open != 0 && at - 1 + open == words.min && words.max < line_end && text.str[words.max] == '}') {
+                  words.has_span = 1;
+                  words.span_start = at - 1;
+                  words.span = span;
+               }
+               break;
+            }
+         }
+         // All of the line is the line's, unless it has marks to change.
+         B32 is_whole = (words.min <= first && words.max >= last);
+         result = (words.has_span || !is_whole);
+      }
+   }
+   if (words_out != 0) {
+      *words_out = words;
+   }
+   return result;
+}
+
+// The words' marks written: with the colour of name, or none for no colour
+// of their own (sets_color), or a step of size, or 0 for the line's again
+// (sets_size). One step to undo, and the words left selected. 1 if a size
+// could not go further.
+PRIVATE B32
+_Look_ChangeWords(App_State* app_state, _Look_Words* words, B32 sets_color, String8 name, B32 sets_size, S32 direction) {
+   Editor_Editor* editor = app_state->editor;
+   Temp           scratch = ScratchBegin(0, 0);
+   B32            at_end = 0;
+   B32            cursor_is_last = (editor->cursor > editor->mark);
+
+   // What the marks are to say.
+   String8 color_name = words->has_span && words->span.has_color ? PushStr8Copy(scratch.arena, words->span.color_name) : Str8Lit("");
+   B32     has_size = words->has_span && words->span.has_size;
+   F32     size = has_size ? words->span.size : 1.0f;
+   if (sets_color) {
+      color_name = name;
+   }
+   if (sets_size && direction == 0) {
+      has_size = 0;
+   } else if (sets_size) {
+      F32 stepped = _Look_SteppedSize(size, direction);
+      at_end = (stepped == size);
+      size = stepped;
+      has_size = 1;
+   }
+   String8 open = Str8Lit("");
+   if (color_name.size != 0 && has_size) {
+      open = PushStr8F(scratch.arena, "{%S %.2f:", color_name, size);
+   } else if (color_name.size != 0) {
+      open = PushStr8F(scratch.arena, "{%S:", color_name);
+   } else if (has_size) {
+      open = PushStr8F(scratch.arena, "{%.2f:", size);
+   }
+
+   // The later mark first: the earlier one moves what is after it.
+   U64 undo_before = editor->undo_count;
+   U64 min = words->min;
+   U64 max = words->max;
+   if (words->has_span) {
+      if (open.size == 0) {
+         Editor_ReplaceRange(editor, max, max + 1, Str8Lit(""));
+      }
+      Editor_ReplaceRange(editor, words->span_start, min, open);
+      U64 moved = words->span_start + open.size;
+      max = moved + (max - min);
+      min = moved;
+   } else if (open.size != 0) {
+      Editor_ReplaceRange(editor, max, max, Str8Lit("}"));
+      Editor_ReplaceRange(editor, min, min, open);
+      min += open.size;
+      max += open.size;
+   }
+   Editor_JoinUndoSince(editor, undo_before);
+   editor->cursor = Min(cursor_is_last ? max : min, editor->size);
+   editor->mark = Min(cursor_is_last ? min : max, editor->size);
+   ScratchEnd(scratch);
+   return at_end;
+}
+
+////////////////////////////////
 //~ bgz: state ops
 //
 // Each writes a line of the text, or takes one out. The deck is made from
@@ -386,10 +520,14 @@ Look_StepSize(App_State* app_state, StateOp_List* ops, Look_StepSizeOpParams* pa
          StateOp_App_Notice(ops)->notice = Str8Lit("Put the cursor in the words to size: a title, or a line of the body");
          return;
       }
-      // The lines selected, each its own - or the piece.
-      Deck_Item* items[_LOOK_MAX_LINES];
-      U64        item_count = _Look_SelectedItems(app_state, &app_state->deck->slides[slide_idx], kind, idx, items);
-      if (item_count != 0) {
+      // The words selected, or the lines selected, each its own - or the
+      // piece.
+      Deck_Item*  items[_LOOK_MAX_LINES];
+      U64         item_count = _Look_SelectedItems(app_state, &app_state->deck->slides[slide_idx], kind, idx, items);
+      _Look_Words words = {0};
+      if (_Look_SelectedWords(app_state, kind, &words)) {
+         at_end = _Look_ChangeWords(app_state, &words, 0, Str8Lit(""), 1, direction);
+      } else if (item_count != 0) {
          at_end = _Look_ChangeItems(app_state, slide_idx, idx, items, item_count, _Look_Change_Size, direction, Str8Lit(""), 0);
       } else {
          at_end = _Look_StepPiece(app_state, slide_idx, kind, idx, direction);
@@ -446,9 +584,12 @@ Look_SetColor(App_State* app_state, StateOp_List* ops, Look_SetColorOpParams* pa
       StateOp_App_Notice(ops)->notice = Str8Lit("Put the cursor in the words to colour: a title, or a line of the body");
       return;
    }
-   Deck_Item* items[_LOOK_MAX_LINES];
-   U64        item_count = _Look_SelectedItems(app_state, &app_state->deck->slides[slide_idx], kind, idx, items);
-   if (item_count != 0) {
+   Deck_Item*  items[_LOOK_MAX_LINES];
+   U64         item_count = _Look_SelectedItems(app_state, &app_state->deck->slides[slide_idx], kind, idx, items);
+   _Look_Words words = {0};
+   if (_Look_SelectedWords(app_state, kind, &words)) {
+      _Look_ChangeWords(app_state, &words, 1, name, 0, 0);
+   } else if (item_count != 0) {
       _Look_ChangeItems(app_state, slide_idx, idx, items, item_count, _Look_Change_Color, 0, name, 0);
    } else {
       _Look_WriteColor(app_state->editor, &app_state->deck->slides[slide_idx], kind, idx, name);
@@ -566,6 +707,10 @@ Look_Describe(Arena* arena, const App_State* app_state, B32 is_color) {
        Look_Target(app_state, &slide_idx, &kind, &idx)) {
       B32        is_lines = 0;
       Deck_Look* look = _Look_Shown(app_state, slide_idx, kind, idx, &is_lines);
+      // The words selected: said plainly, what they have is in their marks.
+      if (_Look_SelectedWords(app_state, kind, 0)) {
+         return is_color ? Str8Lit("the words selected: click a colour") : Str8Lit("the words selected: larger or smaller");
+      }
       // Whose words first, and short: what there is to click takes most of
       // the row, and the rest of this is cut off where it does not fit.
       char*      whose = is_lines ? "the lines selected" : (kind == Deck_PlaceKind_Title) ? "title" : "this block";
@@ -597,6 +742,14 @@ Look_ColorIsNow(const App_State* app_state, U64 named_idx) {
        Look_Target(app_state, &slide_idx, &kind, &idx)) {
       B32        is_lines = 0;
       Deck_Look* look = _Look_Shown(app_state, slide_idx, kind, idx, &is_lines);
+      // The words selected have their own, or none.
+      Deck_Look   words_look = {0};
+      _Look_Words words = {0};
+      if (_Look_SelectedWords(app_state, kind, &words)) {
+         words_look.has_color = words.span.has_color;
+         words_look.color = words.span.color;
+         look = &words_look;
+      }
       if (named_idx >= DECK_NAMED_COLOR_COUNT) {
          result = !look->has_color;
       } else if (look->has_color) {
@@ -615,8 +768,10 @@ Look_SizeIsUsual(const App_State* app_state) {
    B32            result = 0;
    if (app_state->editor != 0 && app_state->parsed_edit_count == app_state->editor->edit_count &&
        Look_Target(app_state, &slide_idx, &kind, &idx)) {
-      B32 is_lines = 0;
-      result = !_Look_Shown(app_state, slide_idx, kind, idx, &is_lines)->has_size;
+      B32         is_lines = 0;
+      _Look_Words words = {0};
+      result = _Look_SelectedWords(app_state, kind, &words) ? !words.span.has_size
+                                                            : !_Look_Shown(app_state, slide_idx, kind, idx, &is_lines)->has_size;
    }
    return result;
 }

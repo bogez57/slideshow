@@ -21,3 +21,7 @@ Draws one slide into a rect: lays out its title, body and pictures on a page of 
 - edit: the preview, and the small slides.
 - presenter: the slide showing and the next one.
 - place, caret, look: the boxes and runs of the preview's slide; place lines pieces up with the margins.
+
+## Words with a look of their own
+
+- `_View_PiecesFromText` reads `{red 1.5:words}` (deck's `Deck_SpanOpenAt`) beside bold and code: the pieces inside have a colour and a scale, and `_View_RichLines` makes a line as tall as its largest words.

@@ -128,6 +128,11 @@
 //    anything else      a paragraph. Each line is its own
 //    **words**          in a paragraph or a bullet: drawn bold
 //    `words`            in a paragraph or a bullet: drawn as code (view.c)
+//    {red:words}        in a paragraph or a bullet: those words in a colour
+//                       of their own - a name, or #rrggbb. {1.5:words} is
+//                       a size, as a part of the line's, and {red 1.5:words}
+//                       both. Anything else between { and : is not a mark,
+//                       and is drawn as written (Deck_SpanOpenAt)
 //    (an empty line)    a little more room before what follows
 //
 // A slide with only a title shows it large, in the middle. A slide with only
@@ -404,6 +409,20 @@ Deck_NamedColor Deck_NamedColorFromIdx(U64 idx);
 // The colour an @color line's word is: a name, or #rrggbb (or #rgb). 0 if
 // it is neither.
 B32 Deck_ColorFromString(String8 string, Vec4F32* color_out);
+
+// Words with a look of their own inside a line: "{red 1.5:these}".
+typedef struct Deck_Span Deck_Span;
+struct Deck_Span {
+   B32     has_color;
+   Vec4F32 color;
+   String8 color_name; // as written, a part of the text asked about
+   B32     has_size;
+   F32     size; // a part of the line's size
+};
+// How long the mark that opens a span at text[at] is - "{red 1.5:" - and
+// what it says, or 0 if there is none there: not a {, nothing or something
+// other than a colour and a size before the :, or no } after it on the line.
+U64 Deck_SpanOpenAt(String8 text, U64 at, Deck_Span* span_out);
 
 // Never 0. A folder that is missing, or has no images in it, gives a deck
 // with no slides.
