@@ -76,8 +76,11 @@
 //                     corner of it to resize it (place\place.c)
 //    the menu         right-click a piece, or the slide where nothing is:
 //                     what can be done there, each with its key beside it.
-//                     On words selected: bold and code, and a size, a
-//                     colour and a side for their lines
+//                     On words selected: bold and code, a size and a
+//                     colour for them, a side for their lines, and their
+//                     lines made bullets, a heading or plain. Where
+//                     nothing is: the slide's own - a new one, a copy,
+//                     deleted, made a board, and its layout
 //    which side       Ctrl+Shift+L, E, R: the words against the left, in
 //                     the middle, against the right (look\look.c)
 //    add a text box   double-click the slide where nothing is: a box there.
@@ -1220,14 +1223,23 @@ _Edit_NextTheme(Editor_Editor* editor, Deck_Deck* deck) {
 // Gives slide_idx the layout after the one it has: its @layout line is
 // written again, or a new one is put above the slide's # Title - or under
 // the --- or @slide line it starts with.
+PRIVATE void _Edit_WriteLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx, Deck_Layout layout);
+
 PRIVATE void
 _Edit_NextLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx) {
+   if (slide_idx < deck->slide_count) {
+      _Edit_WriteLayout(editor, deck, slide_idx, (Deck_Layout)((deck->slides[slide_idx].layout + 1) % Deck_Layout_COUNT));
+   }
+}
+
+// The slide's @layout line, written: over the one it has, or as a new one.
+PRIVATE void
+_Edit_WriteLayout(Editor_Editor* editor, Deck_Deck* deck, U64 slide_idx, Deck_Layout layout) {
    if (slide_idx >= deck->slide_count) {
       return;
    }
    Temp        scratch = ScratchBegin(0, 0);
    Deck_Slide* slide = &deck->slides[slide_idx];
-   Deck_Layout layout = (Deck_Layout)((slide->layout + 1) % Deck_Layout_COUNT);
    String8     line = PushStr8F(scratch.arena, "@layout %S", Deck_LayoutName(layout));
    String8     text = Editor_Text(editor);
 
@@ -1715,6 +1727,201 @@ Edit_AddSlide(App_State* app_state, StateOp_List* ops) {
    }
 }
 STATE_OP_NO_PARAMS(Edit_AddSlide)
+
+// The slide the cursor is on given a layout: its @layout line.
+typedef struct Edit_SetLayoutOpParams Edit_SetLayoutOpParams;
+struct Edit_SetLayoutOpParams {
+   Deck_Layout layout;
+};
+void
+Edit_SetLayout(App_State* app_state, StateOp_List* ops, Edit_SetLayoutOpParams* params) {
+   UnusedVariable(ops);
+   Editor_Editor* editor = app_state->editor;
+   if (editor != 0 && params->layout < Deck_Layout_COUNT) {
+      FR_SyncDeck(app_state);
+      _Edit_WriteLayout(editor, app_state->deck, Deck_SlideFromTextPos(app_state->deck, editor->cursor), params->layout);
+      editor->last_input_us = NowTimeUS();
+   }
+}
+STATE_OP(Edit_SetLayout)
+
+// 1 if a slide's piece of the text starts it wherever it is put: with a
+// # Title, a ---, an @slide or an @canvas - or lines about it above its
+// title. The deck's first slide can start with none of those.
+PRIVATE B32
+_Edit_SlideStartsItself(String8 piece, Deck_Slide* slide) {
+   B32 result = 0;
+   U64 i = 0;
+   while (i < piece.size && (piece.str[i] == ' ' || piece.str[i] == '\t' || piece.str[i] == '\n')) i += 1;
+   if (i < piece.size) {
+      String8 rest = Str8Skip(piece, i);
+      if (rest.str[0] == '#') {
+         result = slide->is_canvas ? 0 : !(rest.size > 1 && rest.str[1] == '#');
+      } else if (rest.str[0] == '-') {
+         result = (rest.size >= 3 && rest.str[1] == '-' && rest.str[2] == '-');
+      } else if (rest.str[0] == '@') {
+         result = (Str8Match(Str8Prefix(rest, 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive) ||
+                   Str8Match(Str8Prefix(rest, 7), Str8Lit("@canvas"), StringMatchFlag_CaseInsensitive) || slide->title_range.max != 0);
+      }
+   }
+   return result;
+}
+
+// What the slide menu does to the slide the cursor is on.
+typedef enum Edit_SlideChange {
+   Edit_SlideChange_Duplicate, // a copy of it after it, and the cursor in the copy
+   Edit_SlideChange_Delete,    // its piece of the text taken out
+   Edit_SlideChange_Board,     // a slide made a board (@canvas), or a board a slide
+} Edit_SlideChange;
+typedef struct Edit_ChangeSlideOpParams Edit_ChangeSlideOpParams;
+struct Edit_ChangeSlideOpParams {
+   Edit_SlideChange change;
+};
+void
+Edit_ChangeSlide(App_State* app_state, StateOp_List* ops, Edit_ChangeSlideOpParams* params) {
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   Deck_Deck* deck = app_state->deck;
+   if (deck->slide_count == 0) {
+      return;
+   }
+   Temp        scratch = ScratchBegin(0, 0);
+   U64         slide_idx = Deck_SlideFromTextPos(deck, editor->cursor);
+   Deck_Slide* slide = &deck->slides[slide_idx];
+   Rng1U64     range = _Edit_TextRangeFromSlide(editor, deck, slide_idx);
+   String8     text = Editor_Text(editor);
+   String8     piece = Str8Substr(text, range);
+   U64         undo_before = editor->undo_count;
+
+   if (params->change == Edit_SlideChange_Duplicate) {
+      // On lines of its own, an empty line before it, and starting a slide
+      // by itself - which the deck's first may not.
+      B32     ends_line = (piece.size == 0 || piece.str[piece.size - 1] == '\n');
+      B32     ends_empty = (piece.size >= 2 && piece.str[piece.size - 1] == '\n' && piece.str[piece.size - 2] == '\n');
+      String8 before = !ends_line ? Str8Lit("\n\n") : !ends_empty ? Str8Lit("\n") : Str8Lit("");
+      String8 start = _Edit_SlideStartsItself(piece, slide) ? Str8Lit("") : Str8Lit("---\n");
+      String8 after = (range.max < text.size && !ends_line) ? Str8Lit("\n\n") : Str8Lit("");
+      String8 added = PushStr8F(scratch.arena, "%S%S%S%S", before, start, piece, after);
+      Editor_ReplaceRange(editor, range.max, range.max, added);
+      Editor_SetCursor(editor, range.max + before.size);
+   } else if (params->change == Edit_SlideChange_Delete) {
+      // The slide after a first that did not start itself is the first now,
+      // and still starts itself.
+      Editor_ReplaceRange(editor, range.min, range.max, Str8Lit(""));
+      Editor_SetCursor(editor, Min(range.min, editor->size));
+      StateOp_App_Notice(ops)->notice = Str8Lit("Slide deleted      Ctrl+Z brings it back");
+   } else {
+      // The line the slide starts with.
+      U64 first = 0;
+      while (first < piece.size && (piece.str[first] == ' ' || piece.str[first] == '\t' || piece.str[first] == '\n')) first += 1;
+      U64 line_end = first;
+      while (line_end < piece.size && piece.str[line_end] != '\n') line_end += 1;
+      String8 line = Str8Substr(piece, R1U64(first, line_end));
+      B32     is_rule = (line.size >= 3 && line.str[0] == '-' && line.str[1] == '-' && line.str[2] == '-') ||
+                    Str8Match(Str8Prefix(line, 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive);
+      B32     is_canvas_line = Str8Match(Str8Prefix(line, 7), Str8Lit("@canvas"), StringMatchFlag_CaseInsensitive);
+      if (slide->is_canvas && is_canvas_line) {
+         _Edit_ReplaceKeepingCursor(editor, range.min + first, range.min + line_end, Str8Lit("---"));
+      } else if (!slide->is_canvas && is_rule) {
+         _Edit_ReplaceKeepingCursor(editor, range.min + first, range.min + line_end, Str8Lit("@canvas"));
+      } else if (!slide->is_canvas) {
+         // A # Title, or words: the board starts above them, and the title
+         // is a heading on it.
+         _Edit_ReplaceKeepingCursor(editor, range.min + first, range.min + first, Str8Lit("@canvas\n"));
+      }
+   }
+   Editor_JoinUndoSince(editor, undo_before);
+   editor->last_input_us = NowTimeUS();
+   FR_SyncDeck(app_state);
+   app_state->slide_idx = Deck_SlideFromTextPos(app_state->deck, editor->cursor);
+   ScratchEnd(scratch);
+}
+STATE_OP(Edit_ChangeSlide)
+
+// What a line of a block is, set from the menu: how it starts.
+typedef enum Edit_LineKind {
+   Edit_LineKind_Paragraph,
+   Edit_LineKind_Bullet,      // "- "
+   Edit_LineKind_InnerBullet, // "  - "
+   Edit_LineKind_Heading,     // "## "
+} Edit_LineKind;
+typedef struct Edit_SetLineKindOpParams Edit_SetLineKindOpParams;
+struct Edit_SetLineKindOpParams {
+   Edit_LineKind kind;
+};
+// Every line the selection is in - or the cursor's - made a line of that
+// kind: what it starts with taken off, and the kind's put on. Not a
+// picture's line, an @ line, an empty one, or a slide's # Title. One step
+// to undo, and the lines left selected.
+void
+Edit_SetLineKind(App_State* app_state, StateOp_List* ops, Edit_SetLineKindOpParams* params) {
+   UnusedVariable(ops);
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0) {
+      return;
+   }
+   FR_SyncDeck(app_state);
+   Deck_Deck* deck = app_state->deck;
+   B32        on_board = (deck->slide_count != 0 && deck->slides[Deck_SlideFromTextPos(deck, editor->cursor)].is_canvas);
+   String8    prefix = (params->kind == Edit_LineKind_Bullet)        ? Str8Lit("- ")
+                       : (params->kind == Edit_LineKind_InnerBullet) ? Str8Lit("  - ")
+                       : (params->kind == Edit_LineKind_Heading)     ? Str8Lit("## ")
+                                                                     : Str8Lit("");
+   U64 sel_min = Min(editor->cursor, editor->mark);
+   U64 sel_max = Max(editor->cursor, editor->mark);
+   U64 first_start = sel_min;
+   {
+      String8 text = Editor_Text(editor);
+      while (first_start > 0 && text.str[first_start - 1] != '\n') first_start -= 1;
+   }
+   // A selection that ends at the start of a line is not in that line.
+   U64 last_pos = (sel_max > sel_min && sel_max > first_start) ? sel_max - 1 : sel_max;
+   U64 end = last_pos;
+   {
+      String8 text = Editor_Text(editor);
+      while (end < text.size && text.str[end] != '\n') end += 1;
+   }
+
+   // The last line first: the ones before it stay where they are.
+   U64 undo_before = editor->undo_count;
+   U64 line_end = end;
+   for (;;) {
+      String8 text = Editor_Text(editor);
+      U64     line_start = line_end;
+      while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
+      U64 first = line_start;
+      while (first < line_end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
+      U64 hashes = 0;
+      while (first + hashes < line_end && text.str[first + hashes] == '#') hashes += 1;
+      B32 is_title = (hashes == 1 && !on_board);
+      B32 is_rule = (first + 2 < line_end && text.str[first] == '-' && text.str[first + 1] == '-' && text.str[first + 2] == '-');
+      B32 is_other = (first == line_end || text.str[first] == '@' || text.str[first] == '!' || is_rule);
+      if (!is_title && !is_other) {
+         // What it starts with now: a bullet's "- ", or a heading's #s.
+         U64 words = first;
+         if (hashes != 0) {
+            words = first + hashes;
+         } else if (first + 1 < line_end && text.str[first] == '-' && text.str[first + 1] == ' ') {
+            words = first + 1;
+         }
+         while (words < line_end && text.str[words] == ' ') words += 1;
+         Editor_ReplaceRange(editor, line_start, words, prefix);
+         end = end - (words - line_start) + prefix.size;
+      }
+      if (line_start <= first_start || line_start == 0) {
+         break;
+      }
+      line_end = line_start - 1;
+   }
+   Editor_JoinUndoSince(editor, undo_before);
+   editor->mark = Min(first_start, editor->size);
+   editor->cursor = Min(end, editor->size);
+   editor->last_input_us = NowTimeUS();
+}
+STATE_OP(Edit_SetLineKind)
 
 // A click on a small slide: the cursor to that slide's first line.
 typedef struct Edit_GoToSlideOpParams Edit_GoToSlideOpParams;
@@ -3034,6 +3241,10 @@ typedef enum _Edit_MenuItemKind {
    _Edit_MenuItem_Aligns, // a row: left, centre, right, and usual
    _Edit_MenuItem_Bold,   // around the words selected
    _Edit_MenuItem_Code,
+   _Edit_MenuItem_LineKind,    // with value: an Edit_LineKind for the lines selected
+   _Edit_MenuItem_NewSlide,    // after the one showing
+   _Edit_MenuItem_SlideChange, // with value: an Edit_SlideChange
+   _Edit_MenuItem_Layout,      // with value: a Deck_Layout for the slide
    _Edit_MenuItem_Arrange, // with arrange: lined up, or spaced
    _Edit_MenuItem_PutBack,
    _Edit_MenuItem_PickAll,
@@ -3047,6 +3258,7 @@ struct _Edit_MenuItem {
    String8            name;
    String8            keys;
    Place_ArrangeKind  arrange;
+   U64                value;
 };
 
 #define _EDIT_MENU_MAX_ITEMS 32
@@ -3142,6 +3354,7 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
    (items[count].kind = (kind_), items[count].name = Str8Lit(name_), items[count].keys = Str8Lit(keys_), count += 1)
 #define _Edit_MenuAddArrange(arrange_, name_, keys_) \
    (items[count].arrange = (arrange_), _Edit_MenuAdd(_Edit_MenuItem_Arrange, name_, keys_))
+#define _Edit_MenuAddValue(kind_, value_, name_, keys_) (items[count].value = (U64)(value_), _Edit_MenuAdd(kind_, name_, keys_))
    U64 picked = g_edit_view.picked_count;
    B32 has_words = 0;
    for (U64 i = 0; i < picked; i += 1) {
@@ -3157,6 +3370,11 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
       _Edit_MenuAdd(_Edit_MenuItem_Colors, "", "");
       _Edit_MenuAdd(_Edit_MenuItem_Aligns, "", "");
+      _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+      _Edit_MenuAddValue(_Edit_MenuItem_LineKind, Edit_LineKind_Bullet, "Bullets", "- ");
+      _Edit_MenuAddValue(_Edit_MenuItem_LineKind, Edit_LineKind_InnerBullet, "Inner bullets", "  - ");
+      _Edit_MenuAddValue(_Edit_MenuItem_LineKind, Edit_LineKind_Heading, "Heading", "## ");
+      _Edit_MenuAddValue(_Edit_MenuItem_LineKind, Edit_LineKind_Paragraph, "Plain lines", "");
    } else if (g_edit_view.menu_has_piece) {
       _Edit_MenuAdd(_Edit_MenuItem_Copy, "Copy", "Ctrl+C");
       _Edit_MenuAdd(_Edit_MenuItem_Cut, "Cut", "Ctrl+X");
@@ -3210,9 +3428,32 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       } else {
          _Edit_MenuAdd(_Edit_MenuItem_PickAll, "Select everything on the slide", "");
       }
+      // The slide itself.
+      _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+      _Edit_MenuAdd(_Edit_MenuItem_NewSlide, "New slide after this one", "");
+      _Edit_MenuAddValue(_Edit_MenuItem_SlideChange, Edit_SlideChange_Duplicate, "Duplicate slide", "");
+      _Edit_MenuAddValue(_Edit_MenuItem_SlideChange, Edit_SlideChange_Delete, "Delete slide", "");
+      if (g_edit_view.is_board) {
+         _Edit_MenuAddValue(_Edit_MenuItem_SlideChange, Edit_SlideChange_Board, "Make this board a slide", "---");
+      } else {
+         _Edit_MenuAddValue(_Edit_MenuItem_SlideChange, Edit_SlideChange_Board, "Make this slide a board", "@canvas");
+         // Its layout: each by its name, as written after @layout, and
+         // "now" beside the one it has.
+         _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+         Deck_Layout now = (app_state->slide_idx < app_state->deck->slide_count) ? app_state->deck->slides[app_state->slide_idx].layout
+                                                                                 : Deck_Layout_COUNT;
+         for (U64 k = 0; k < Deck_Layout_COUNT; k += 1) {
+            items[count].kind = _Edit_MenuItem_Layout;
+            items[count].value = k;
+            items[count].name = PushStr8F(app_state->frame_arena, "Layout: %S", Deck_LayoutName((Deck_Layout)k));
+            items[count].keys = ((Deck_Layout)k == now) ? Str8Lit("now") : Str8Lit("");
+            count += 1;
+         }
+      }
    }
 #undef _Edit_MenuAdd
 #undef _Edit_MenuAddArrange
+#undef _Edit_MenuAddValue
 
    //- bgz: how large it is, and where: all of it in the preview
    FNT_Tag font = app_state->fonts.regular;
@@ -3376,6 +3617,10 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
          case _Edit_MenuItem_Front: StateOp_Edit_OrderPieces(ops)->to_back = 0; break;
          case _Edit_MenuItem_Back: StateOp_Edit_OrderPieces(ops)->to_back = 1; break;
          case _Edit_MenuItem_Arrange: StateOp_Place_Arrange(ops)->kind = item->arrange; break;
+         case _Edit_MenuItem_LineKind: StateOp_Edit_SetLineKind(ops)->kind = (Edit_LineKind)item->value; break;
+         case _Edit_MenuItem_NewSlide: StateOp_Edit_AddSlide(ops); break;
+         case _Edit_MenuItem_SlideChange: StateOp_Edit_ChangeSlide(ops)->change = (Edit_SlideChange)item->value; break;
+         case _Edit_MenuItem_Layout: StateOp_Edit_SetLayout(ops)->layout = (Deck_Layout)item->value; break;
          case _Edit_MenuItem_Bold: StateOp_Edit_Wrap(ops)->is_code = 0; break;
          case _Edit_MenuItem_Code: StateOp_Edit_Wrap(ops)->is_code = 1; break;
          case _Edit_MenuItem_Larger:
