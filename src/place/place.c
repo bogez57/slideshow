@@ -189,60 +189,19 @@ _Place_BlockOfRange(Deck_Slide* slide, Rng1U64 range) {
    return result;
 }
 
-// Which box a point is on: 0 for none. Where boxes are over each other, a
-// point on a line of the body's words is on the block that line is in, one
-// on the title's words on the title, and any other on the picture drawn
-// last - the one on top - then the title, then the block drawn last.
-//
-// The words are the ones a click there would go to (Edit_PreviewHitAt): of
-// two blocks over each other, those of the one drawn later. Not merely
-// whichever block's box is last under the point - that box can be mostly
-// empty, over the words of another.
+// Which box a point is on: 0 for none. Where boxes are over each other,
+// the one on top: the last drawn (view.c draws the slide's pictures and
+// blocks in the order of their lines, and the title last), as what is
+// pressed there is (Place_BuildHits).
 View_Box*
 Place_BoxAt(const App_State* app_state, Vec2F32 pos) {
    Deck_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
-
-   // What words the point is on, if any: the title's, or which block's.
-   B32 on_title_words = 0;
-   U64 words_block = max_U64;
-   S64 hit_idx = Edit_PreviewHitAt(pos);
-   if (hit_idx >= 0) {
-      Rng1U64 range = g_edit_view.hits[hit_idx].text_range;
-      on_title_words = (range.min == slide->title_range.min && range.max == slide->title_range.max);
-      words_block = _Place_BlockOfRange(slide, range);
-   }
-
-   View_Box* title = 0;
-   View_Box* text = 0;
-   View_Box* words_text = 0;
-   View_Box* picture = 0;
-   for (U64 i = 0; i < g_edit_view.box_count; i += 1) {
-      View_Box* box = &g_edit_view.boxes[i];
-      if (Contains2F32(box->rect, pos)) {
-         if (box->kind == Deck_PlaceKind_Title) {
-            title = box;
-         } else if (box->kind == Deck_PlaceKind_Text) {
-            text = box;
-            if (box->idx == words_block) {
-               words_text = box;
-            }
-         } else if (box->idx < slide->picture_count) {
-            picture = box;
-         }
+   View_Box*   result = 0;
+   for (U64 i = g_edit_view.box_count; i > 0 && result == 0; i -= 1) {
+      View_Box* box = &g_edit_view.boxes[i - 1];
+      if (Contains2F32(box->rect, pos) && !(box->kind == Deck_PlaceKind_Picture && box->idx >= slide->picture_count)) {
+         result = box;
       }
-   }
-
-   View_Box* result = 0;
-   if (words_text != 0) {
-      result = words_text;
-   } else if (title != 0 && on_title_words) {
-      result = title;
-   } else if (picture != 0) {
-      result = picture;
-   } else if (title != 0) {
-      result = title;
-   } else {
-      result = text;
    }
    return result;
 }
@@ -1463,6 +1422,9 @@ Place_BuildCorners(const App_State* app_state, F32 ui, B32 interactive, Place_Ho
    return result;
 }
 
+// How many of the slide's hits are kept track of while its boxes are built.
+#define VIEW_MAX_HITS_BUILT 1024
+
 B32
 Place_BuildHits(const App_State* app_state, F32 ui, B32 interactive, Place_Hover* hover) {
    B32 result = 0;
@@ -1472,18 +1434,6 @@ Place_BuildHits(const App_State* app_state, F32 ui, B32 interactive, Place_Hover
    }
    Deck_Slide* slide = &app_state->deck->slides[app_state->slide_idx];
    UI_BoxFlags flags = UI_BoxFlag_MouseClickable | UI_BoxFlag_Scroll;
-
-   //- bgz: the words and the pictures, as drawn: the last drawn first, which
-   // is the one on top. A block's words are over a picture under them
-   for (U64 i = g_edit_view.hit_count; i > 0; i -= 1) {
-      View_Hit*      hit = &g_edit_view.hits[i - 1];
-      Deck_PlaceKind kind = Deck_PlaceKind_Title;
-      U64            idx = 0;
-      B32            has_piece = _Place_PieceOfHit(slide, hit, &kind, &idx);
-      UI_Box*        box = FR_BuildRectBox(flags, hit->rect, "###place hit %llu", (unsigned long long)(i - 1));
-      box->hover_cursor = _Place_HoverCursor(app_state, has_piece, kind, idx, 0);
-      result |= _Place_Signal(app_state, box, has_piece, kind, idx, 0, (S64)(i - 1), hover, ui);
-   }
 
    //- bgz: the line words are being selected from, when the drag has moved
    // it out of its block's room: it has no hit now, and its box would be
@@ -1498,54 +1448,49 @@ Place_BuildHits(const App_State* app_state, F32 ui, B32 interactive, Place_Hover
       result |= Place_SelectHeld(app_state, UI_SignalFromBox(held));
    }
 
-   //- bgz: the pieces' own boxes, where no words are: a picture over the
-   // title's or a block's, and the title's over a block's
-   // Before those, the piece being worked in - picked whole, or with the
-   // cursor in its words: all of its box is its own, over a picture too.
-   // A text box lying on a picture was the picture's wherever it had no
-   // words, so a right-click inside it opened the picture's menu, and
-   // "Bring to front" there was the picture's.
-   U64            target_slide = 0;
-   Deck_PlaceKind target_kind = Deck_PlaceKind_Title;
-   U64            target_idx = 0;
-   B32            has_target = (!g_caret_view.focus_hidden && app_state->editor != 0 &&
-                     app_state->parsed_edit_count == app_state->editor->edit_count &&
-                     Look_Target(app_state, &target_slide, &target_kind, &target_idx) && target_slide == app_state->slide_idx);
-   // With the cursor in it, only a box that was put somewhere (@place):
-   // the body where the layout has it is often all over a picture behind
-   // it, which could then not be taken hold of while typing.
-   if (has_target) {
-      has_target = (target_kind == Deck_PlaceKind_Text) ? (target_idx < slide->box_count && slide->boxes[target_idx].place.is_set)
-                                                        : slide->places[Deck_PlaceKind_Title].is_set;
-   }
-   B32 is_first[VIEW_MAX_BOXES] = {0};
-   for (U64 i = g_edit_view.box_count; i > 0; i -= 1) {
-      View_Box* box = &g_edit_view.boxes[i - 1];
-      if (i - 1 >= VIEW_MAX_BOXES || box->kind == Deck_PlaceKind_Picture) {
+   //- bgz: the slide's pieces as they are stacked, the one on top first: the
+   // last drawn (view.c draws them in the order of their lines, the title
+   // last). Each has its hits - its lines of words, or the picture - and
+   // then its own box, where it has no words. So what is pressed is what is
+   // seen there: a text box lying on a picture is the text box all over,
+   // and a picture lying on words is the picture.
+   B32 hit_built[VIEW_MAX_HITS_BUILT] = {0};
+   for (U64 b = g_edit_view.box_count; b > 0; b -= 1) {
+      View_Box* box = &g_edit_view.boxes[b - 1];
+      if (box->kind == Deck_PlaceKind_Picture && box->idx >= slide->picture_count) {
          continue;
       }
-      if (Edit_PieceIsPicked(app_state, box->kind, box->idx) || (has_target && box->kind == target_kind && box->idx == target_idx)) {
-         is_first[i - 1] = 1;
-         UI_Box* ui_box = FR_BuildRectBox(flags, box->rect, "###place box %d %llu", (int)box->kind, (unsigned long long)box->idx);
-         ui_box->hover_cursor = _Place_HoverCursor(app_state, 1, box->kind, box->idx, 0);
-         result |= _Place_Signal(app_state, ui_box, 1, box->kind, box->idx, 0, -1, hover, ui);
+      for (U64 i = g_edit_view.hit_count; i > 0; i -= 1) {
+         View_Hit*      hit = &g_edit_view.hits[i - 1];
+         Deck_PlaceKind kind = Deck_PlaceKind_Title;
+         U64            idx = 0;
+         if (i - 1 >= VIEW_MAX_HITS_BUILT || hit_built[i - 1] || !_Place_PieceOfHit(slide, hit, &kind, &idx) || kind != box->kind ||
+             idx != box->idx) {
+            continue;
+         }
+         hit_built[i - 1] = 1;
+         UI_Box* ui_hit = FR_BuildRectBox(flags, hit->rect, "###place hit %llu", (unsigned long long)(i - 1));
+         ui_hit->hover_cursor = _Place_HoverCursor(app_state, 1, kind, idx, 0);
+         result |= _Place_Signal(app_state, ui_hit, 1, kind, idx, 0, (S64)(i - 1), hover, ui);
       }
+      UI_Box* ui_box = FR_BuildRectBox(flags, box->rect, "###place box %d %llu", (int)box->kind, (unsigned long long)box->idx);
+      ui_box->hover_cursor = _Place_HoverCursor(app_state, 1, box->kind, box->idx, 0);
+      result |= _Place_Signal(app_state, ui_box, 1, box->kind, box->idx, 0, -1, hover, ui);
    }
 
-   Deck_PlaceKind kinds[] = {Deck_PlaceKind_Picture, Deck_PlaceKind_Title, Deck_PlaceKind_Text};
-   for (U64 k = 0; k < ArrayCount(kinds); k += 1) {
-      for (U64 i = g_edit_view.box_count; i > 0; i -= 1) {
-         View_Box* box = &g_edit_view.boxes[i - 1];
-         if (box->kind != kinds[k] || (box->kind == Deck_PlaceKind_Picture && box->idx >= slide->picture_count)) {
-            continue;
-         }
-         if (i - 1 < VIEW_MAX_BOXES && is_first[i - 1]) {
-            continue;
-         }
-         UI_Box* ui_box = FR_BuildRectBox(flags, box->rect, "###place box %d %llu", (int)box->kind, (unsigned long long)box->idx);
-         ui_box->hover_cursor = _Place_HoverCursor(app_state, 1, box->kind, box->idx, 0);
-         result |= _Place_Signal(app_state, ui_box, 1, box->kind, box->idx, 0, -1, hover, ui);
+   //- bgz: the hits that are no box's, under those: the text can be ahead
+   // of the slide drawn
+   for (U64 i = g_edit_view.hit_count; i > 0; i -= 1) {
+      if (i - 1 < VIEW_MAX_HITS_BUILT && hit_built[i - 1]) {
+         continue;
       }
+      View_Hit*      hit = &g_edit_view.hits[i - 1];
+      Deck_PlaceKind kind = Deck_PlaceKind_Title;
+      U64            idx = 0;
+      B32            has_piece = _Place_PieceOfHit(slide, hit, &kind, &idx);
+      UI_Box*        box = FR_BuildRectBox(flags, hit->rect, "###place hit %llu", (unsigned long long)(i - 1));
+      box->hover_cursor = _Place_HoverCursor(app_state, has_piece, kind, idx, 0);
+      result |= _Place_Signal(app_state, box, has_piece, kind, idx, 0, (S64)(i - 1), hover, ui);
    }
 
    return result;

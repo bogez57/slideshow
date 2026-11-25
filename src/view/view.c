@@ -996,7 +996,7 @@ View_DrawSlideOn(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_S
       }
    }
 
-   //- bgz: the pictures, under the words
+   //- bgz: the pictures' rooms
    //
    // The ones not placed share the room as a grid (above). One alone has all
    // of it.
@@ -1012,55 +1012,6 @@ View_DrawSlideOn(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_S
       _View_PictureGrid(picture_rect, aspects, Min(shared_count, DECK_MAX_PICTURES), gutter * 0.5f, slide->item_count != 0,
                         cells);
    }
-   for (U64 i = 0, cell_idx = 0; i < slide->picture_count; i += 1) {
-      if (i == behind_idx) {
-         continue;
-      }
-      Deck_Picture* picture = &slide->pictures[i];
-      B32           is_placed = picture->place.is_set;
-      B32           is_loaded = Image_IsLoaded(&picture->image);
-      Rng2F32       room = picture_rect;
-      if (is_placed) {
-         room = _View_PlacedRect(page, &picture->place);
-      } else if (shared_count > 1) {
-         room = cells[Min(cell_idx, DECK_MAX_PICTURES - 1)];
-         cell_idx += 1;
-      }
-
-      // The one picture beside a body starts level with the body's first
-      // line, not in the middle of its half's height: its room is cut down
-      // to the picture's own height, from the top. (The grid does that for
-      // several.)
-      if (!is_placed && shared_count == 1 && slide->item_count != 0 && is_loaded && picture->image.size.x > 0 &&
-          picture->image.size.y > 0) {
-         Vec2F32 room_dim = Dim2F32(room);
-         F32     fit = Min(room_dim.x / (F32)picture->image.size.x, room_dim.y / (F32)picture->image.size.y);
-         room.max.y = room.min.y + (F32)picture->image.size.y * fit;
-      }
-
-      Rng2F32 drawn = room;
-      if (is_loaded) {
-         View_DrawImageFit(&picture->image, room, alpha);
-         drawn = _View_FitRect(&picture->image, room);
-      } else if (picture->load_failed) {
-         // In the page, for the one picture that would fill the window.
-         if (!has_text && !is_placed && beside_count == 1) {
-            drawn = page;
-         }
-         _View_DrawMissingPicture(fonts, &colors, picture->path, drawn, scale, alpha);
-      }
-      // A placed picture's hit is the picture as drawn. One that is not
-      // placed keeps all of its room, as before there were places - which,
-      // in a grid, is the picture as drawn too.
-      _View_PushHit(arena, hits, is_placed ? drawn : room, picture->range);
-      _View_PushBox(hits, Deck_PlaceKind_Picture, i, drawn, 0, drawn, 0);
-   }
-
-   //- bgz: the title
-   if (has_title) {
-      _View_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 0, hits);
-   }
-
    //- bgz: the body, a block at a time
    //
    // A block with an @place line is where that says. The rest are one under
@@ -1071,20 +1022,86 @@ View_DrawSlideOn(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_S
    // its place, or the body's room for those that share it - is not shown,
    // and the block's scroll (Deck_Box's, or the slide's body_scroll for the
    // ones that share) says how far down its words the room shows.
-   if (slide->item_count != 0) {
-      U64 last_shared = max_U64; // the last block that is not placed
+   U64 last_shared = max_U64; // the last block that is not placed
+   {
       for (U64 i = 0; i < slide->box_count; i += 1) {
          if (slide->boxes[i].item_count != 0 && !slide->boxes[i].place.is_set) {
             last_shared = i;
          }
       }
 
-      if (is_board) {
+      if (is_board && slide->item_count != 0) {
          // No bottom: the words go on down, off the page.
          body_rect.max.y = Max(body_rect.max.y, rect.max.y) + 100000.0f * scale;
       }
-      F32 y_at = body_rect.min.y - slide->body_scroll * scale;
-      for (U64 i = 0; i < slide->box_count; i += 1) {
+   }
+   //- bgz: the pictures and the blocks, as one stack
+   //
+   // What is over what is the order of the lines in the deck's text: the
+   // one whose line is later is drawn later, over the others - a picture
+   // over a block of words as well as under one. The pictures are in the
+   // order of their lines already, and so are the blocks: the two are gone
+   // through together, the earlier line of the two next. The title is drawn
+   // after them all: its line starts the slide, and it would be under
+   // everything.
+   F32 y_at = body_rect.min.y - slide->body_scroll * scale;
+   U64 cell_idx = 0;
+   for (U64 picture_at = 0, block_at = 0; picture_at < slide->picture_count || block_at < slide->box_count;) {
+      B32 takes_picture = (block_at >= slide->box_count);
+      if (picture_at < slide->picture_count && block_at < slide->box_count) {
+         Deck_Box* next_block = &slide->boxes[block_at];
+         U64       block_pos = (next_block->first_item != 0 && next_block->item_count != 0) ? next_block->first_item->text_range.min
+                                                                                             : next_block->text_pos;
+         takes_picture = (slide->pictures[picture_at].range.min < block_pos);
+      }
+
+      if (takes_picture) {
+         U64 i = picture_at;
+         picture_at += 1;
+         if (i == behind_idx) {
+            continue;
+         }
+         Deck_Picture* picture = &slide->pictures[i];
+         B32           is_placed = picture->place.is_set;
+         B32           is_loaded = Image_IsLoaded(&picture->image);
+         Rng2F32       room = picture_rect;
+         if (is_placed) {
+            room = _View_PlacedRect(page, &picture->place);
+         } else if (shared_count > 1) {
+            room = cells[Min(cell_idx, DECK_MAX_PICTURES - 1)];
+            cell_idx += 1;
+         }
+
+         // The one picture beside a body starts level with the body's first
+         // line, not in the middle of its half's height: its room is cut down
+         // to the picture's own height, from the top. (The grid does that for
+         // several.)
+         if (!is_placed && shared_count == 1 && slide->item_count != 0 && is_loaded && picture->image.size.x > 0 &&
+             picture->image.size.y > 0) {
+            Vec2F32 room_dim = Dim2F32(room);
+            F32     fit = Min(room_dim.x / (F32)picture->image.size.x, room_dim.y / (F32)picture->image.size.y);
+            room.max.y = room.min.y + (F32)picture->image.size.y * fit;
+         }
+
+         Rng2F32 drawn = room;
+         if (is_loaded) {
+            View_DrawImageFit(&picture->image, room, alpha);
+            drawn = _View_FitRect(&picture->image, room);
+         } else if (picture->load_failed) {
+            // In the page, for the one picture that would fill the window.
+            if (!has_text && !is_placed && beside_count == 1) {
+               drawn = page;
+            }
+            _View_DrawMissingPicture(fonts, &colors, picture->path, drawn, scale, alpha);
+         }
+         // A placed picture's hit is the picture as drawn. One that is not
+         // placed keeps all of its room, as before there were places - which,
+         // in a grid, is the picture as drawn too.
+         _View_PushHit(arena, hits, is_placed ? drawn : room, picture->range);
+         _View_PushBox(hits, Deck_PlaceKind_Picture, i, drawn, 0, drawn, 0);
+      } else {
+         U64 i = block_at;
+         block_at += 1;
          Deck_Box* block = &slide->boxes[i];
          if (block->item_count == 0) {
             continue;
@@ -1135,6 +1152,11 @@ View_DrawSlideOn(Arena* arena, const Text_Fonts* fonts, Deck_Theme theme, Deck_S
             }
          }
       }
+   }
+
+   //- bgz: the title, over them
+   if (has_title) {
+      _View_Title(arena, fonts, &colors, slide, title_rect, scale, title_is_big, centered || title_is_big, alpha, 0, hits);
    }
 
    Core_D_PopClip();

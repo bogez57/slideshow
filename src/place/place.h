@@ -148,10 +148,8 @@ void Place_TakeDrag(const App_State* app_state, U64 slide_idx);
 // Whether the slide's boxes, as laid out, are of the text as it is.
 B32 Place_BoxesAreGood(const App_State* app_state);
 
-// Which box a point is on: 0 for none. Where boxes are over each other, a
-// point on a line of the body's words is on the block that line is in, one on
-// the title's words on the title, and any other on the picture drawn last -
-// the one on top - then the title, then the block drawn last.
+// Which box a point is on: 0 for none. Where boxes are over each other, the
+// one on top: the last drawn.
 View_Box* Place_BoxAt(const App_State* app_state, Vec2F32 pos);
 
 //- bgz: state ops, pushed with StateOp_<Name>(ops)

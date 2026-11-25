@@ -25,3 +25,7 @@ Draws one slide into a rect: lays out its title, body and pictures on a page of 
 ## Words with a look of their own
 
 - `_View_PiecesFromText` reads `{red 1.5:words}` (deck's `Deck_SpanOpenAt`) beside bold and code: the pieces inside have a colour and a scale, and `_View_RichLines` makes a line as tall as its largest words.
+
+## What is over what
+
+- `View_DrawSlideOn` draws the slide's pictures and blocks as one stack, in the order of their lines in the text (the earlier line of the next picture and the next block each time), then the title. The picture-behind layout's picture is first of all. Hits and boxes are pushed in that order, so the last is the one on top: place builds what is clicked from them, top first.

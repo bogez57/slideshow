@@ -1458,10 +1458,9 @@ _Edit_DropPicture(App_State* app_state, String8 path) {
 // Which of the preview's pieces (g_edit_view.hits) a point is on, or -1.
 // Asked by a click, which is already known to be on the slide's boxes: of
 // several hits there, the one it goes to.
-// Where pieces are over each other, the one drawn last: the slide's pictures
-// are drawn first, in the order of their lines, then the title, then the
-// body - so words on a picture are the words, and of pictures over each
-// other the one on top is the one seen.
+// Where pieces are over each other, the one drawn last: the slide's
+// pictures and blocks are drawn in the order of their lines, then the
+// title - so the one on top is the one seen.
 S64
 Edit_PreviewHitAt(Vec2F32 pos) {
    S64 result = -1;
@@ -2385,7 +2384,10 @@ Edit_PreviewClick(App_State* app_state, StateOp_List* ops, Edit_PreviewClickOpPa
    g_edit_view.picked_count = 0;
    if (!Caret_Click(app_state, params->pos, params->keeps_mark)) {
       S64 hit_idx = Edit_PreviewHitAt(params->pos);
-      if (hit_idx >= 0 && g_edit_view.hits[hit_idx].text_range.max <= editor->size) {
+      // Not a picture under a text box pressed where it has no words: the
+      // press was the text box's.
+      if (hit_idx >= 0 && g_edit_view.hits[hit_idx].text_range.max <= editor->size &&
+          !(params->picks && params->kind != Deck_PlaceKind_Picture)) {
          View_Hit* hit = &g_edit_view.hits[hit_idx];
          Editor_SetCursor(editor, hit->text_range.max);
          editor->mark = hit->text_range.min;
@@ -2536,15 +2538,15 @@ Edit_DuplicatePieces(App_State* app_state, StateOp_List* ops) {
 STATE_OP_NO_PARAMS(Edit_DuplicatePieces)
 
 // Ctrl+Shift+] and Ctrl+Shift+[ with pieces picked whole: in front of the
-// slide's other pieces of their kind, or with to_back behind them.
+// slide's other pieces, or with to_back behind them.
 //
 // What is over what is the order of the lines (view.c): the slide's
-// pictures are drawn first, in the order of their lines, then the title,
-// then the blocks in theirs. So a piece is brought to the front by moving
-// its lines to the end of the slide's, and sent to the back by moving them
-// to its start (_Edit_PastePieces) - among the pictures, or among the
-// blocks: a picture is never over words, and the title's place in it is
-// its own. A block with no @place line gets one, where it is.
+// pictures and blocks are one stack, each drawn over those whose lines
+// are before its own, and the title over them all. So a piece is brought
+// to the front by moving its lines to the end of the slide's, and sent to
+// the back by moving them to its start (_Edit_PastePieces) - a picture
+// over a text box as well as a text box over a picture. The title's place
+// is its own. A block with no @place line gets one, where it is.
 typedef struct Edit_OrderPiecesOpParams Edit_OrderPiecesOpParams;
 struct Edit_OrderPiecesOpParams {
    B32 to_back;
@@ -2569,7 +2571,7 @@ Edit_OrderPieces(App_State* app_state, StateOp_List* ops, Edit_OrderPiecesOpPara
    }
    g_edit_view.picked_count = count;
    if (count == 0) {
-      StateOp_App_Notice(ops)->notice = Str8Lit("The title is always over the pictures and under the text boxes");
+      StateOp_App_Notice(ops)->notice = Str8Lit("The title is always on top: its line starts the slide");
       return;
    }
    for (U64 i = 1; i < count; i += 1) {

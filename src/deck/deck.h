@@ -135,6 +135,11 @@
 //                       and is drawn as written (Deck_SpanOpenAt)
 //    (an empty line)    a little more room before what follows
 //
+// What is over what, where a slide's pieces overlap: the order of their
+// lines. A picture or a block of words is drawn over those whose lines are
+// before its own, so the last in the text is on top. The picture of the
+// picture-behind layout is under everything, and the title over everything.
+//
 // A slide with only a title shows it large, in the middle. A slide with only
 // a picture shows it filling the window, as a folder of images does.
 
