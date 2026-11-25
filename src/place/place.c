@@ -1500,11 +1500,46 @@ Place_BuildHits(const App_State* app_state, F32 ui, B32 interactive, Place_Hover
 
    //- bgz: the pieces' own boxes, where no words are: a picture over the
    // title's or a block's, and the title's over a block's
+   // Before those, the piece being worked in - picked whole, or with the
+   // cursor in its words: all of its box is its own, over a picture too.
+   // A text box lying on a picture was the picture's wherever it had no
+   // words, so a right-click inside it opened the picture's menu, and
+   // "Bring to front" there was the picture's.
+   U64            target_slide = 0;
+   Deck_PlaceKind target_kind = Deck_PlaceKind_Title;
+   U64            target_idx = 0;
+   B32            has_target = (!g_caret_view.focus_hidden && app_state->editor != 0 &&
+                     app_state->parsed_edit_count == app_state->editor->edit_count &&
+                     Look_Target(app_state, &target_slide, &target_kind, &target_idx) && target_slide == app_state->slide_idx);
+   // With the cursor in it, only a box that was put somewhere (@place):
+   // the body where the layout has it is often all over a picture behind
+   // it, which could then not be taken hold of while typing.
+   if (has_target) {
+      has_target = (target_kind == Deck_PlaceKind_Text) ? (target_idx < slide->box_count && slide->boxes[target_idx].place.is_set)
+                                                        : slide->places[Deck_PlaceKind_Title].is_set;
+   }
+   B32 is_first[VIEW_MAX_BOXES] = {0};
+   for (U64 i = g_edit_view.box_count; i > 0; i -= 1) {
+      View_Box* box = &g_edit_view.boxes[i - 1];
+      if (i - 1 >= VIEW_MAX_BOXES || box->kind == Deck_PlaceKind_Picture) {
+         continue;
+      }
+      if (Edit_PieceIsPicked(app_state, box->kind, box->idx) || (has_target && box->kind == target_kind && box->idx == target_idx)) {
+         is_first[i - 1] = 1;
+         UI_Box* ui_box = FR_BuildRectBox(flags, box->rect, "###place box %d %llu", (int)box->kind, (unsigned long long)box->idx);
+         ui_box->hover_cursor = _Place_HoverCursor(app_state, 1, box->kind, box->idx, 0);
+         result |= _Place_Signal(app_state, ui_box, 1, box->kind, box->idx, 0, -1, hover, ui);
+      }
+   }
+
    Deck_PlaceKind kinds[] = {Deck_PlaceKind_Picture, Deck_PlaceKind_Title, Deck_PlaceKind_Text};
    for (U64 k = 0; k < ArrayCount(kinds); k += 1) {
       for (U64 i = g_edit_view.box_count; i > 0; i -= 1) {
          View_Box* box = &g_edit_view.boxes[i - 1];
          if (box->kind != kinds[k] || (box->kind == Deck_PlaceKind_Picture && box->idx >= slide->picture_count)) {
+            continue;
+         }
+         if (i - 1 < VIEW_MAX_BOXES && is_first[i - 1]) {
             continue;
          }
          UI_Box* ui_box = FR_BuildRectBox(flags, box->rect, "###place box %d %llu", (int)box->kind, (unsigned long long)box->idx);
