@@ -75,7 +75,11 @@
 //    move a piece     drag the picture or the body in the preview, or a
 //                     corner of it to resize it (place\place.c)
 //    the menu         right-click a piece, or the slide where nothing is:
-//                     what can be done there, each with its key beside it
+//                     what can be done there, each with its key beside it.
+//                     On words selected: bold and code, and a size, a
+//                     colour and a side for their lines
+//    which side       Ctrl+Shift+L, E, R: the words against the left, in
+//                     the middle, against the right (look\look.c)
 //    add a text box   double-click the slide where nothing is: a box there.
 //                     Or Ctrl and a drag, for one as large as the mouse
 //                     makes it. Its words are selected, to be typed over. Left as it is, it goes again when something
@@ -149,6 +153,7 @@ enum {
    _Edit_FormatAction_Wrap,     // puts insert before and after the selection (Editor_WrapSelection)
    _Edit_FormatAction_Size,     // nothing by itself: the row has smaller, larger and usual to click (look\look.c)
    _Edit_FormatAction_Color,    // nothing by itself: the row has the colours to click
+   _Edit_FormatAction_Align,    // nothing by itself: the row has the sides to click
 };
 
 PRIVATE _Edit_FormatRow _edit_format_rows[] = {
@@ -165,9 +170,10 @@ PRIVATE _Edit_FormatRow _edit_format_rows[] = {
     {Str8LitComp("@note Say this"), Str8LitComp("a note to yourself. N shows notes while presenting"), Str8LitComp("@note Say this"), 6, 14},
     {Str8LitComp("@box"), Str8LitComp("another block of words on the slide, to drag on its own"), Str8LitComp("@box\nText"), 5, 9},
     {Str8LitComp("@video loop"), Str8LitComp("how the slide's video plays: loop, mute, manual"), Str8LitComp("@video loop"), 7, 11},
-    // What these four do is said in Edit_Build, with what the deck, the slide and the words have now.
+    // What these five do is said in Edit_Build, with what the deck, the slide and the words have now.
     {Str8LitComp("@size"), Str8LitComp(""), Str8LitComp(""), 0, 0, _Edit_FormatAction_Size},
     {Str8LitComp("@color"), Str8LitComp(""), Str8LitComp(""), 0, 0, _Edit_FormatAction_Color},
+    {Str8LitComp("@align"), Str8LitComp(""), Str8LitComp(""), 0, 0, _Edit_FormatAction_Align},
     {Str8LitComp("@theme"), Str8LitComp(""), Str8LitComp(""), 0, 0, _Edit_FormatAction_Theme},
     {Str8LitComp("@layout"), Str8LitComp(""), Str8LitComp(""), 0, 0, _Edit_FormatAction_Layout},
 };
@@ -1791,7 +1797,8 @@ Edit_FormatRow(App_State* app_state, StateOp_List* ops, Edit_FormatRowOpParams* 
          _Edit_NextLayout(editor, app_state->deck, Deck_SlideFromTextPos(app_state->deck, editor->cursor));
       }
       editor->last_input_us = NowTimeUS();
-   } else if (row->action == _Edit_FormatAction_Size || row->action == _Edit_FormatAction_Color) {
+   } else if (row->action == _Edit_FormatAction_Size || row->action == _Edit_FormatAction_Color ||
+              row->action == _Edit_FormatAction_Align) {
       // The row's own click does nothing: what is in it is what is clicked.
    } else if (row->action == _Edit_FormatAction_Wrap && !_Edit_CanWrap(app_state)) {
       // Said by the notice.
@@ -2996,9 +3003,15 @@ _Edit_LayoutPreview(const App_State* app_state, Rng2F32 page, F32 ui) {
 // not have to be remembered, and are learned from it. On a piece: the piece
 // is picked first, alone, unless it is one of those picked already, and the
 // lines are about all that are picked. On open space: what is not about a
-// piece. A click on a line does it and closes the menu; a click anywhere
-// else, or Esc, closes it. Larger and smaller words leave it open, to be
-// clicked again.
+// piece. On words that are selected - a drag across them, right at the
+// words - it is about those words and their lines, and nothing is picked:
+// bold and code around the words, and a size, a colour and a side for the
+// lines the selection is in, each its own (look\look.c). A click on a line
+// does it and closes the menu; a click anywhere else, or Esc, closes it.
+// Larger and smaller words leave it open, to be clicked again.
+//
+// A colour is a row of squares to click, and a side a row of words, with
+// "usual" for none of its own; what there is now has a white edge.
 //
 // It is built first of the preview's boxes (_Edit_BuildPreview), so it is
 // over everything there and asked before it, with a box the size of the
@@ -3016,6 +3029,11 @@ typedef enum _Edit_MenuItemKind {
    _Edit_MenuItem_Back,
    _Edit_MenuItem_Larger,
    _Edit_MenuItem_Smaller,
+   _Edit_MenuItem_UsualSize,
+   _Edit_MenuItem_Colors, // a row: the colours with names, and usual
+   _Edit_MenuItem_Aligns, // a row: left, centre, right, and usual
+   _Edit_MenuItem_Bold,   // around the words selected
+   _Edit_MenuItem_Code,
    _Edit_MenuItem_Arrange, // with arrange: lined up, or spaced
    _Edit_MenuItem_PutBack,
    _Edit_MenuItem_PickAll,
@@ -3038,8 +3056,25 @@ Edit_OpenMenu(const App_State* app_state, Vec2F32 pos, B32 has_piece, Deck_Place
    g_edit_view.menu_open = 1;
    g_edit_view.menu_pos = pos;
    g_edit_view.menu_has_piece = has_piece;
+   g_edit_view.menu_has_text = 0;
    g_edit_view.menu_kind = kind;
    g_edit_view.menu_idx = idx;
+   // On words selected in this piece: about them, and they stay selected.
+   // Not a text box just made, whose line is selected only to be typed
+   // over, and not a piece picked whole.
+   Editor_Editor* editor = app_state->editor;
+   if (has_piece && kind != Deck_PlaceKind_Picture && editor != 0 && editor->cursor != editor->mark &&
+       !g_edit_view.has_new_box && !Edit_PickedIsGood(app_state) && app_state->parsed_edit_count == editor->edit_count) {
+      U64            target_slide = 0;
+      Deck_PlaceKind target_kind = Deck_PlaceKind_Title;
+      U64            target_idx = 0;
+      if (Look_Target(app_state, &target_slide, &target_kind, &target_idx) && target_slide == app_state->slide_idx &&
+          target_kind == kind && target_idx == idx) {
+         g_edit_view.menu_has_piece = 0;
+         g_edit_view.menu_has_text = 1;
+         return;
+      }
+   }
    // Not one of those picked: it is picked alone, as a click on it would.
    if (has_piece && !Edit_PieceIsPicked(app_state, kind, idx)) {
       Edit_PreviewClickOpParams* click = StateOp_Edit_PreviewClick(app_state->op_list);
@@ -3051,16 +3086,49 @@ Edit_OpenMenu(const App_State* app_state, Vec2F32 pos, B32 has_piece, Deck_Place
    }
 }
 
+// One of the words to click in a row of the menu - a side, or usual: at x,
+// with a white edge when it is what there is now. How wide it is to
+// width_out, for the next; 1 when it is pressed.
+PRIVATE B32
+_Edit_BuildMenuWord(FNT_Tag font, F32 px, F32 x, F32 row_y, F32 row_h, F32 ui, String8 name, B32 is_now, U64 row_idx, U64 idx,
+                    F32* width_out) {
+   F32     line_h = Text_LineHeight(font, px);
+   F32     inset = Max((F32)(S32)(row_h * 0.14f), 1.0f);
+   F32     side_pad = (F32)(S32)(8.0f * ui);
+   F32     width = (F32)(S32)(Text_Width(font, px, name) + side_pad * 2.0f);
+   Rng2F32 rect = R2F32P(x, row_y + inset, x + width, row_y + row_h - inset);
+   UI_Signal signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, rect, "###edit menu word %llu %llu",
+                                                       (unsigned long long)row_idx, (unsigned long long)idx));
+   FR_BuildWords(font, px, V2F32(x + side_pad, (F32)(S32)(row_y + (row_h - line_h) * 0.5f)), V4F32(0.93f, 0.93f, 0.93f, 1.0f), name,
+                 "###edit menu word name %llu %llu", (unsigned long long)row_idx, (unsigned long long)idx);
+   if (is_now) {
+      FR_BuildEdge(rect, 1.0f, V4F32(1, 1, 1, 1), "###edit menu word now %llu %llu", (unsigned long long)row_idx,
+                   (unsigned long long)idx);
+   }
+   UI_SetNextBackgroundColor(UI_Hovering(signal) ? V4F32(0.30f, 0.50f, 0.95f, 0.55f) : V4F32(1, 1, 1, 0.07f));
+   FR_BuildRectBox(UI_BoxFlag_DrawBackground, rect, "###edit menu word ground %llu %llu", (unsigned long long)row_idx,
+                   (unsigned long long)idx);
+   *width_out = width;
+   return !!(signal.f & UI_SignalFlag_LeftPressed);
+}
+
+// The words of the menu's rows of things to click, and what each is.
+PRIVATE String8 _edit_menu_align_names[] = {Str8LitComp("Left"), Str8LitComp("Centre"), Str8LitComp("Right"), Str8LitComp("Usual")};
+PRIVATE U64     _edit_menu_aligns[] = {Deck_Align_Left, Deck_Align_Center, Deck_Align_Right, Deck_Align_COUNT};
+
 PRIVATE void
 _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactive) {
    if (!g_edit_view.menu_open) {
       return;
    }
-   // Gone with what it was about: the slide, or the pieces picked.
-   if (!interactive || !Place_BoxesAreGood(app_state) || (g_edit_view.menu_has_piece && !Edit_PickedIsGood(app_state))) {
+   // Gone with what it was about: the slide, the pieces picked, or the
+   // words selected.
+   B32 text_gone = g_edit_view.menu_has_text && (app_state->editor == 0 || app_state->editor->cursor == app_state->editor->mark);
+   if (!interactive || !Place_BoxesAreGood(app_state) || (g_edit_view.menu_has_piece && !Edit_PickedIsGood(app_state)) || text_gone) {
       g_edit_view.menu_open = 0;
       return;
    }
+   B32 has_text = g_edit_view.menu_has_text;
    StateOp_List* ops = app_state->op_list;
    F32           ui = layout->ui;
 
@@ -3076,7 +3144,17 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
    for (U64 i = 0; i < picked; i += 1) {
       has_words |= (g_edit_view.picked_kinds[i] != Deck_PlaceKind_Picture);
    }
-   if (g_edit_view.menu_has_piece) {
+   if (has_text) {
+      _Edit_MenuAdd(_Edit_MenuItem_Bold, "Bold", "Ctrl+B");
+      _Edit_MenuAdd(_Edit_MenuItem_Code, "Code", "Ctrl+E");
+      _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+      _Edit_MenuAdd(_Edit_MenuItem_Larger, "Larger", "Ctrl+]");
+      _Edit_MenuAdd(_Edit_MenuItem_Smaller, "Smaller", "Ctrl+[");
+      _Edit_MenuAdd(_Edit_MenuItem_UsualSize, "Usual size", "");
+      _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
+      _Edit_MenuAdd(_Edit_MenuItem_Colors, "", "");
+      _Edit_MenuAdd(_Edit_MenuItem_Aligns, "", "");
+   } else if (g_edit_view.menu_has_piece) {
       _Edit_MenuAdd(_Edit_MenuItem_Copy, "Copy", "Ctrl+C");
       _Edit_MenuAdd(_Edit_MenuItem_Cut, "Cut", "Ctrl+X");
       if (g_edit_view.clip_count != 0) {
@@ -3098,6 +3176,11 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
          _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
          _Edit_MenuAdd(_Edit_MenuItem_Larger, "Larger words", "Ctrl+Wheel up");
          _Edit_MenuAdd(_Edit_MenuItem_Smaller, "Smaller words", "Ctrl+Wheel down");
+      }
+      if (has_words) {
+         _Edit_MenuAdd(_Edit_MenuItem_UsualSize, "Usual size", "");
+         _Edit_MenuAdd(_Edit_MenuItem_Colors, "", "");
+         _Edit_MenuAdd(_Edit_MenuItem_Aligns, "", "");
       }
       if (picked >= 2) {
          _Edit_MenuAdd(_Edit_MenuItem_Separator, "", "");
@@ -3144,6 +3227,38 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       height += (items[i].kind == _Edit_MenuItem_Separator) ? sep_h : row_h;
    }
    F32     width = (F32)(S32)(pad + name_w + pad * 2.0f + keys_w + pad);
+
+   // The rows of things to click: a square a colour, and a gap; a word a
+   // side. The menu is as wide as the widest of them, too.
+   F32     swatch = (F32)(S32)(row_h * 0.62f);
+   F32     swatch_gap = (F32)(S32)(6.0f * ui);
+   F32     word_gap = (F32)(S32)(4.0f * ui);
+   F32     word_pad = (F32)(S32)(8.0f * ui) * 2.0f;
+   String8 usual_name = Str8Lit("Usual");
+   String8 color_label = Str8Lit("Colour");
+   String8 align_label = Str8Lit("Side");
+   F32     label_w = (F32)(S32)(Max(Text_Width(font, px, color_label), Text_Width(font, px, align_label)) + pad);
+   F32     colors_w = label_w + (F32)DECK_NAMED_COLOR_COUNT * (swatch + swatch_gap) + Text_Width(font, px, usual_name) + word_pad;
+   F32     aligns_w = label_w;
+   for (U64 i = 0; i < ArrayCount(_edit_menu_align_names); i += 1) {
+      aligns_w += (F32)(S32)(Text_Width(font, px, _edit_menu_align_names[i]) + word_pad) + word_gap;
+   }
+   for (U64 i = 0; i < count; i += 1) {
+      if (items[i].kind == _Edit_MenuItem_Colors) {
+         width = Max(width, (F32)(S32)(pad + colors_w + pad));
+      } else if (items[i].kind == _Edit_MenuItem_Aligns) {
+         width = Max(width, (F32)(S32)(pad + aligns_w + pad));
+      }
+   }
+
+   // What the words the menu is about have now: the lines selected, or the
+   // piece it was opened on.
+   Deck_Look* piece_look = 0;
+   if (!has_text && g_edit_view.menu_has_piece && g_edit_view.menu_kind != Deck_PlaceKind_Picture &&
+       app_state->slide_idx < app_state->deck->slide_count) {
+      piece_look = Look_Of(&app_state->deck->slides[app_state->slide_idx], g_edit_view.menu_kind, g_edit_view.menu_idx);
+   }
+
    Rng2F32 within = layout->preview;
    F32     x = Clamp(within.min.x, g_edit_view.menu_pos.x, Max(within.max.x - width, within.min.x));
    F32     y = Clamp(within.min.y, g_edit_view.menu_pos.y, Max(within.max.y - height, within.min.y));
@@ -3169,6 +3284,74 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       }
       Rng2F32   row = R2F32P(x, row_y, x + width, row_y + row_h);
       F32       text_y = (F32)(S32)(row_y + (row_h - line_h) * 0.5f);
+
+      //- bgz: a row of things to click: the colours, or the sides
+      if (item->kind == _Edit_MenuItem_Colors || item->kind == _Edit_MenuItem_Aligns) {
+         B32 is_colors = (item->kind == _Edit_MenuItem_Colors);
+         S64 picked_value = -1;
+         F32 at_x = x + pad + label_w;
+         F32 word_w = 0;
+         FR_BuildWords(font, px, V2F32(x + pad, text_y), keys_color, is_colors ? color_label : align_label, "###edit menu label %llu",
+                       (unsigned long long)i);
+         if (is_colors) {
+            for (U64 k = 0; k < DECK_NAMED_COLOR_COUNT; k += 1) {
+               Vec4F32 color = Deck_NamedColorFromIdx(k).color;
+               B32     is_now = has_text ? Look_ColorIsNow(app_state, k)
+                                         : (piece_look != 0 && piece_look->has_color && piece_look->color.x == color.x &&
+                                            piece_look->color.y == color.y && piece_look->color.z == color.z);
+               F32     top = (F32)(S32)(row_y + (row_h - swatch) * 0.5f);
+               Rng2F32 rect = R2F32P(at_x, top, at_x + swatch, top + swatch);
+               UI_SetNextBackgroundColor(color);
+               UI_Signal square = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_DrawBackground | UI_BoxFlag_MouseClickable, rect,
+                                                                   "###edit menu color %llu", (unsigned long long)k));
+               // An edge always, faint: white and black are near the menu's
+               // ground.
+               FR_BuildEdge(Pad2F32(rect, 2.0f), 1.0f,
+                            is_now ? V4F32(1, 1, 1, 1) : UI_Hovering(square) ? V4F32(1, 1, 1, 0.75f) : V4F32(1, 1, 1, 0.22f),
+                            "###edit menu color edge %llu", (unsigned long long)k);
+               if (square.f & UI_SignalFlag_LeftPressed) {
+                  picked_value = (S64)k;
+               }
+               at_x += swatch + swatch_gap;
+            }
+            B32 is_usual = has_text ? Look_ColorIsNow(app_state, DECK_NAMED_COLOR_COUNT) : (piece_look != 0 && !piece_look->has_color);
+            if (_Edit_BuildMenuWord(font, px, at_x, row_y, row_h, ui, usual_name, is_usual, i, 0, &word_w)) {
+               picked_value = DECK_NAMED_COLOR_COUNT;
+            }
+         } else {
+            for (U64 k = 0; k < ArrayCount(_edit_menu_aligns); k += 1) {
+               U64 align = _edit_menu_aligns[k];
+               B32 is_now = has_text ? Look_AlignIsNow(app_state, align)
+                                     : (piece_look != 0 &&
+                                        ((align >= Deck_Align_COUNT) ? !piece_look->has_align
+                                                                     : (piece_look->has_align && (U64)piece_look->align == align)));
+               if (_Edit_BuildMenuWord(font, px, at_x, row_y, row_h, ui, _edit_menu_align_names[k], is_now, i, k, &word_w)) {
+                  picked_value = (S64)align;
+               }
+               at_x += word_w + word_gap;
+            }
+         }
+         if (picked_value >= 0 && is_colors) {
+            Look_SetColorOpParams* set = StateOp_Look_SetColor(ops);
+            set->named_idx = (U64)picked_value;
+            set->has_piece = !has_text;
+            set->kind = g_edit_view.menu_kind;
+            set->idx = g_edit_view.menu_idx;
+            set->with_picked = !has_text;
+            closes = 1;
+         } else if (picked_value >= 0) {
+            Look_SetAlignOpParams* set = StateOp_Look_SetAlign(ops);
+            set->align = (U64)picked_value;
+            set->has_piece = !has_text;
+            set->kind = g_edit_view.menu_kind;
+            set->idx = g_edit_view.menu_idx;
+            set->with_picked = !has_text;
+            closes = 1;
+         }
+         row_y += row_h;
+         continue;
+      }
+
       UI_Signal signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, row, "###edit menu row %llu", (unsigned long long)i));
       FR_BuildWords(font, px, V2F32(x + pad, text_y), name_color, item->name, "###edit menu name %llu", (unsigned long long)i);
       if (item->keys.size != 0) {
@@ -3190,13 +3373,21 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
          case _Edit_MenuItem_Front: StateOp_Edit_OrderPieces(ops)->to_back = 0; break;
          case _Edit_MenuItem_Back: StateOp_Edit_OrderPieces(ops)->to_back = 1; break;
          case _Edit_MenuItem_Arrange: StateOp_Place_Arrange(ops)->kind = item->arrange; break;
+         case _Edit_MenuItem_Bold: StateOp_Edit_Wrap(ops)->is_code = 0; break;
+         case _Edit_MenuItem_Code: StateOp_Edit_Wrap(ops)->is_code = 1; break;
          case _Edit_MenuItem_Larger:
-         case _Edit_MenuItem_Smaller: {
-            // The words of all picked: left open, to be clicked again.
-            for (U64 k = 0; k < picked; k += 1) {
+         case _Edit_MenuItem_Smaller:
+         case _Edit_MenuItem_UsualSize: {
+            S32 direction = (item->kind == _Edit_MenuItem_Larger) ? 1 : (item->kind == _Edit_MenuItem_Smaller) ? -1 : 0;
+            if (has_text) {
+               // The lines selected (look\look.c).
+               StateOp_Look_StepSize(ops)->direction = direction;
+            }
+            // The words of all picked.
+            for (U64 k = 0; k < picked && !has_text; k += 1) {
                if (g_edit_view.picked_kinds[k] != Deck_PlaceKind_Picture) {
                   Look_StepSizeOpParams* step = StateOp_Look_StepSize(ops);
-                  step->direction = (item->kind == _Edit_MenuItem_Larger) ? 1 : -1;
+                  step->direction = direction;
                   step->has_piece = 1;
                   step->kind = g_edit_view.picked_kinds[k];
                   step->idx = g_edit_view.picked_idxs[k];
@@ -3204,7 +3395,8 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
                   break;
                }
             }
-            closes = 0;
+            // Larger and smaller: left open, to be clicked again.
+            closes = (direction == 0);
          } break;
          case _Edit_MenuItem_PutBack: {
             Place_RemoveLineOpParams* remove = StateOp_Place_RemoveLine(ops);
@@ -3508,7 +3700,7 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
       if (g_edit_view.is_drawing && g_edit_view.draw_is_box) {
          caption = g_edit_view.draw_picks ? Str8Lit("Let go to select what the box touches") : Str8Lit("Let go to make the text box");
       } else if (is_at_words) {
-         caption = Str8Lit("Drag across the words to select them      Double-click a word, triple-click a line");
+         caption = Str8Lit("Drag across the words to select them      Right-click what is selected to colour or size it");
       } else if (has_picked && !can_move) {
          caption = layout->is_board ? Str8Lit("Ctrl+Shift+N moves it to a slide of its own      Delete takes it out      Esc lets go of it")
                                     : Str8Lit("Delete takes it out      Click its words to type in them      Esc lets go of it");
@@ -3707,6 +3899,7 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
    B32 size_picked = 0;
    S32 size_direction = 0; // as Look_StepSize's
    S64 color_picked = -1;  // as Look_SetColor's named_idx
+   S64 align_picked = -1;  // as Look_SetAlign's align
 
    UI_BoxFlags click_flags = interactive ? UI_BoxFlag_Clickable : 0;
 
@@ -3935,6 +4128,8 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
                      what = Look_Describe(app_state->frame_arena, app_state, 0);
                   } else if (format_row->action == _Edit_FormatAction_Color) {
                      what = Look_Describe(app_state->frame_arena, app_state, 1);
+                  } else if (format_row->action == _Edit_FormatAction_Align) {
+                     what = Look_DescribeAlign(app_state->frame_arena, app_state);
                   }
                   UI_Box* row = UI_ListRow(row_h, 0, UI_BoxFlag_DrawBackground | click_flags, "###edit format row %lld", i);
                   UI_Parent(row) UI_PrefHeight(UI_Pct(1, 1)) {
@@ -3984,6 +4179,17 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
                         if (_Edit_BuildRowButton(Str8Lit("theme's"), Look_ColorIsNow(app_state, DECK_NAMED_COLOR_COUNT), row_h,
                                                  ui, interactive, "###edit color theme")) {
                            color_picked = DECK_NAMED_COLOR_COUNT;
+                        }
+                        UI_Spacer(UI_Px(pad - 6.0f * ui, 1));
+                     } else if (format_row->action == _Edit_FormatAction_Align) {
+                        String8 names[] = {Str8Lit("left"), Str8Lit("center"), Str8Lit("right"), Str8Lit("usual")};
+                        U64     aligns[] = {Deck_Align_Left, Deck_Align_Center, Deck_Align_Right, Deck_Align_COUNT};
+                        UI_Spacer(UI_Px(6.0f * ui, 1));
+                        for (U64 k = 0; k < ArrayCount(names); k += 1) {
+                           if (_Edit_BuildRowButton(names[k], Look_AlignIsNow(app_state, aligns[k]), row_h, ui, interactive,
+                                                    "###edit align %llu", (unsigned long long)k)) {
+                              align_picked = (S64)aligns[k];
+                           }
                         }
                         UI_Spacer(UI_Px(pad - 6.0f * ui, 1));
                      }
@@ -4046,6 +4252,9 @@ Edit_Build(const App_State* app_state, StateOp_List* ops, Vec2F32 window_dim, B3
    }
    if (color_picked >= 0) {
       StateOp_Look_SetColor(ops)->named_idx = (U64)color_picked;
+   }
+   if (align_picked >= 0) {
+      StateOp_Look_SetAlign(ops)->align = (U64)align_picked;
    }
    //- bgz: the preview: its slide, and what is over it
    _Edit_BuildPreview(app_state, &layout, interactive);

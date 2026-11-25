@@ -141,6 +141,7 @@ struct Edit_View {
    B32            menu_open;
    Vec2F32        menu_pos;
    B32            menu_has_piece;
+   B32            menu_has_text; // opened on words selected: about them, and their lines
    Deck_PlaceKind menu_kind;
    U64            menu_idx;
 

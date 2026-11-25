@@ -616,6 +616,10 @@ Caret_BuildRooms(const App_State* app_state, F32 ui, B32 interactive) {
       }
       result |= !!(signal.f & UI_SignalFlag_LeftPressed);
       result |= Place_SelectHeld(app_state, signal);
+      // The menu, as on the piece's words (place\place.c).
+      if (signal.f & UI_SignalFlag_RightPressed) {
+         Edit_OpenMenu(app_state, Core_WM_MouseFromWindow(app_state->window), 1, box->kind, box->idx);
+      }
       if (signal.scroll.y != 0 && box->kind == Deck_PlaceKind_Text) {
          Caret_ScrollBlock(app_state, box->idx, (F32)signal.scroll.y / FR_UI_SCROLL_PER_NOTCH);
          result = 1;

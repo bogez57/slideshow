@@ -21,7 +21,7 @@ The screen's own, `g_edit_view` (`Edit_View`, edit.h), written with no op:
 - `format_scroll`: where the Format panel's lines are scrolled to.
 - `pictures`, `pictures_arena`, `pictures_scanned_us`, `pictures_scroll`: the names in the list of pictures, and where it is scrolled to.
 - `is_drawing`, `draw_is_box`, `draw_picks`, `draw_from`, `draw_to`: a box being drawn with the mouse on the slide's open space: it picks the pieces it touches, or with Ctrl is a text box.
-- `menu_open`, `menu_pos`, `menu_has_piece`, `menu_kind`, `menu_idx`: the right-click menu on the preview's slide.
+- `menu_open`, `menu_pos`, `menu_has_piece`, `menu_has_text`, `menu_kind`, `menu_idx`: the right-click menu on the preview's slide, and what it was opened on: a piece, words that are selected, or open space.
 - `clip_arena`, `clip`, `clip_count`, `clip_text`, `clip_slide_idx`, `clip_paste_count`: the pieces copied whole (`Edit_ClipPiece`), and the text put on the system's clipboard for them. Ctrl+V pastes them as pieces while the clipboard still has that text.
 - `has_new_box`, `new_box_edit_count`, `new_box_range`: a text box just drawn on the slide's open space, while nothing has been done to it. Left so, it is taken out again.
 - `picked_count`, `picked_kinds`, `picked_idxs`, `picked_slide_idx`, `picked_edit_count`, `picked_cursor`, `picked_mark`: the pieces of the slide picked whole - a picture clicked, or the title or a block clicked away from its words; Ctrl+click adds one or takes it out, Shift+click picks all of the kind of the first - for as long as the text, the cursor and the slide are as the click left them. Delete takes them out, a drag of one moves them all, Ctrl and the wheel sizes their words.
@@ -30,7 +30,7 @@ The screen's own, `g_edit_view` (`Edit_View`, edit.h), written with no op:
 
 - `Edit_Input`: the keys of the list under an @ line (complete), then the screen's keys, then the text's (`Vim_KeyInput`, vim: vim's keys by its mode, then the editor's). Pushes ops.
 - `Edit_Build`: the whole screen, in FrameWork's UI build. Lays the preview's slide out into `g_edit_view`, and pushes ops for clicks.
-- `Edit_OpenMenu`: a right-click on the preview's slide opens its menu there - copy, delete, front and back, lining up - each line pushing the op its key does. place calls it for a right-click on a piece.
+- `Edit_OpenMenu`: a right-click on the preview's slide opens its menu there - copy, delete, front and back, lining up - each line pushing the op its key does. On a piece with words it has their size, a row of colours and a row of sides too. On words that are selected it is about them instead, and picks nothing: bold, code, and a size, a colour and a side for the lines the selection is in (look). place and caret call it for a right-click on a piece.
 - `Edit_PreviewHitAt`: which piece of the preview a point is on.
 - `Edit_PieceIsPicked`, `Edit_PickedIsGood`: whether a piece of the preview's slide is picked whole, or any is. caret leaves out the caret in one that is.
 - `Edit_KeepPicked`: after an op moved or sized the pieces picked, they stay picked. For ops only (place, look).
