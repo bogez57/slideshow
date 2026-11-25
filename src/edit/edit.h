@@ -207,6 +207,11 @@ void Edit_TakeOutLine(Editor_Editor* editor, Rng1U64 line);
 typedef struct Edit_DropPictureOpParams Edit_DropPictureOpParams;
 struct Edit_DropPictureOpParams {
    String8 path;
+   // With has_place, the picture is put there: place is in parts of the
+   // page, and written as its @place line (the right-click menu's "Add a
+   // picture or video", where the click was).
+   B32     has_place;
+   Rng2F32 place;
 };
 Edit_DropPictureOpParams* StateOp_Edit_DropPicture(StateOp_List* ops);
 

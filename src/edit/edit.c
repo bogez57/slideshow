@@ -1956,7 +1956,42 @@ Edit_DropPicture(App_State* app_state, StateOp_List* ops, Edit_DropPictureOpPara
    UnusedVariable(ops);
    if (app_state->editor != 0) {
       FR_SyncDeck(app_state);
+      Editor_Editor* editor = app_state->editor;
+      U64            edit_count_before = editor->edit_count;
+      U64            undo_before = editor->undo_count;
       _Edit_DropPicture(app_state, params->path);
+
+      // Where it was asked for: an @place line above its own, which the
+      // cursor is at the end of. Not when it took the place of a picture
+      // that has one already.
+      if (params->has_place && editor->edit_count != edit_count_before) {
+         Temp    scratch = ScratchBegin(0, 0);
+         String8 text = Editor_Text(editor);
+         U64     line_start = Min(editor->cursor, text.size);
+         while (line_start > 0 && text.str[line_start - 1] != '\n') line_start -= 1;
+         U64 first = line_start;
+         while (first < text.size && text.str[first] == ' ') first += 1;
+         B32 is_picture = (first + 1 < text.size && text.str[first] == '!' && text.str[first + 1] == '[');
+         U64 above = (line_start > 0) ? line_start - 1 : 0;
+         while (above > 0 && text.str[above - 1] != '\n') above -= 1;
+         B32 has_place_above = (line_start > 0 && Str8Match(Str8Prefix(Str8Substr(text, R1U64(above, line_start)), 6), Str8Lit("@place"),
+                                                            StringMatchFlag_CaseInsensitive));
+         if (is_picture && !has_place_above) {
+            Rng2F32 place = params->place;
+            // Under another picture's line an empty line first: an
+            // @place right under a picture that has none is read as that
+            // one's (deck.h).
+            U64 above_first = above;
+            while (above_first < line_start && text.str[above_first] == ' ') above_first += 1;
+            B32 picture_above = (line_start > 0 && above_first + 1 < line_start && text.str[above_first] == '!' &&
+                                 text.str[above_first + 1] == '[');
+            String8 line = PushStr8F(scratch.arena, "%s@place picture %.3f %.3f %.3f %.3f\n", picture_above ? "\n" : "", place.min.x,
+                                     place.min.y, place.max.x - place.min.x, place.max.y - place.min.y);
+            _Edit_ReplaceKeepingCursor(editor, line_start, line_start, line);
+            Editor_JoinUndoSince(editor, undo_before);
+         }
+         ScratchEnd(scratch);
+      }
    }
 }
 STATE_OP(Edit_DropPicture)
@@ -3242,6 +3277,7 @@ typedef enum _Edit_MenuItemKind {
    _Edit_MenuItem_Bold,   // around the words selected
    _Edit_MenuItem_Code,
    _Edit_MenuItem_LineKind,    // with value: an Edit_LineKind for the lines selected
+   _Edit_MenuItem_AddPicture,  // a file picked, and put where the menu was opened
    _Edit_MenuItem_NewSlide,    // after the one showing
    _Edit_MenuItem_SlideChange, // with value: an Edit_SlideChange
    _Edit_MenuItem_Layout,      // with value: a Deck_Layout for the slide
@@ -3262,6 +3298,11 @@ struct _Edit_MenuItem {
 };
 
 #define _EDIT_MENU_MAX_ITEMS 32
+
+// How large a picture added from the menu is, in parts of the page: the
+// room it is fitted in, from where the menu was opened.
+#define _EDIT_MENU_PICTURE_W 0.36f
+#define _EDIT_MENU_PICTURE_H 0.36f
 
 void
 Edit_OpenMenu(const App_State* app_state, Vec2F32 pos, B32 has_piece, Deck_PlaceKind kind, U64 idx) {
@@ -3422,6 +3463,7 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
       if (g_edit_view.clip_count != 0) {
          _Edit_MenuAdd(_Edit_MenuItem_Paste, "Paste", "Ctrl+V");
       }
+      _Edit_MenuAdd(_Edit_MenuItem_AddPicture, "Add a picture or video...", "");
       if (g_edit_view.is_board) {
          _Edit_MenuAdd(_Edit_MenuItem_PickAll, "Select everything on the board", "");
          _Edit_MenuAdd(_Edit_MenuItem_BoardHome, "Back to the page, at its size", "");
@@ -3618,6 +3660,35 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
          case _Edit_MenuItem_Back: StateOp_Edit_OrderPieces(ops)->to_back = 1; break;
          case _Edit_MenuItem_Arrange: StateOp_Place_Arrange(ops)->kind = item->arrange; break;
          case _Edit_MenuItem_LineKind: StateOp_Edit_SetLineKind(ops)->kind = (Edit_LineKind)item->value; break;
+         case _Edit_MenuItem_AddPicture: {
+            // bgz's shell: the system's window, which does not return until
+            // it is answered. It lists every file: a picture or a video is
+            // what can be taken. Put as one dropped on the window is - into
+            // the deck's folder too - with its top left where the menu was
+            // opened.
+            Temp    pick_scratch = ScratchBegin(0, 0);
+            String8 folder = (app_state->deck != 0) ? FR_WholePath(pick_scratch.arena, app_state->deck->folder) : Str8Zero();
+            String8 picked_file = ShPickFile(ops->arena, Str8Lit("Add a picture or video"), folder, Str8Zero());
+            if (picked_file.size != 0 && (Image_NameIsImage(picked_file) || Video_NameIsVideo(picked_file))) {
+               Edit_DropPictureOpParams* drop = StateOp_Edit_DropPicture(ops);
+               Vec2F32                   page_dim = Dim2F32(g_edit_view.page);
+               drop->path = picked_file;
+               if (page_dim.x > 0 && page_dim.y > 0) {
+                  F32 place_x = (g_edit_view.menu_pos.x - g_edit_view.page.min.x) / page_dim.x;
+                  F32 place_y = (g_edit_view.menu_pos.y - g_edit_view.page.min.y) / page_dim.y;
+                  if (!g_edit_view.is_board) {
+                     // All of it on the page.
+                     place_x = Clamp(0.0f, place_x, 1.0f - _EDIT_MENU_PICTURE_W);
+                     place_y = Clamp(0.0f, place_y, 1.0f - _EDIT_MENU_PICTURE_H);
+                  }
+                  drop->has_place = 1;
+                  drop->place = R2F32P(place_x, place_y, place_x + _EDIT_MENU_PICTURE_W, place_y + _EDIT_MENU_PICTURE_H);
+               }
+            } else if (picked_file.size != 0) {
+               StateOp_App_Notice(ops)->notice = Str8Lit("That file is not a picture or a video the program can show");
+            }
+            ScratchEnd(pick_scratch);
+         } break;
          case _Edit_MenuItem_NewSlide: StateOp_Edit_AddSlide(ops); break;
          case _Edit_MenuItem_SlideChange: StateOp_Edit_ChangeSlide(ops)->change = (Edit_SlideChange)item->value; break;
          case _Edit_MenuItem_Layout: StateOp_Edit_SetLayout(ops)->layout = (Deck_Layout)item->value; break;
