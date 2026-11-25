@@ -230,7 +230,8 @@ _View_Lines(Arena* arena, FNT_Tag font, F32 px, String8 text, F32 x, F32 y, F32 
 //                      faint box, as code is written. Inside, ** is only **
 //    {red 1.5:these}   in a colour and at a size of their own (deck.h's
 //                      Deck_SpanOpenAt). A line with larger words in it is
-//                      as tall as they need
+//                      as tall as they need. In a title or a heading too,
+//                      whose words are bold without marks
 //
 // The marks themselves are not drawn. One with no partner later in the line
 // is not a mark: it is drawn as written.
@@ -295,11 +296,13 @@ _View_PxFromStyle(U32 style, F32 px) {
    return (style & _View_Style_Code) ? px * 0.9f : px;
 }
 
+// base_style: what the words are with no marks around them - bold, for a
+// title or a heading.
 PRIVATE _View_PieceList
-_View_PiecesFromText(Arena* arena, const Text_Fonts* fonts, F32 px, String8 text) {
+_View_PiecesFromText(Arena* arena, const Text_Fonts* fonts, F32 px, String8 text, U32 base_style) {
    _View_PieceList result = {0};
 
-   U32 style = 0;
+   U32 style = base_style;
    U32 spaces = 0;
    U64 piece_start = 0;
    B32 in_piece = 0;
@@ -399,12 +402,15 @@ _View_PiecesFromText(Arena* arena, const Text_Fonts* fonts, F32 px, String8 text
 
 // As _View_Lines, for text that may have words in bold and in code. A run
 // is given for each piece: every one as tall as the line, whatever its font.
+// base_style: _View_Style_Bold for a title's or a heading's words, which
+// are bold with no marks, and measured by the bold font.
 PRIVATE F32
-_View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 px, String8 text, F32 x, F32 y, F32 max_width,
-                Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out, _View_RunsOf* runs_of) {
-   F32             line_height = Text_LineHeight(fonts->regular, px);
-   F32             space_width = Text_Width(fonts->regular, px, Str8Lit(" "));
-   _View_PieceList pieces = _View_PiecesFromText(arena, fonts, px, text);
+_View_RichLinesOf(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 px, String8 text, F32 x, F32 y, F32 max_width,
+                  Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out, _View_RunsOf* runs_of, U32 base_style) {
+   FNT_Tag         base_font = _View_FontFromStyle(fonts, base_style);
+   F32             line_height = Text_LineHeight(base_font, px);
+   F32             space_width = Text_Width(base_font, px, Str8Lit(" "));
+   _View_PieceList pieces = _View_PiecesFromText(arena, fonts, px, text, base_style);
    F32             widest = 0;
 
    // A line at a time: first how many pieces go on it, then they are drawn.
@@ -433,15 +439,15 @@ _View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 
       for (_View_Piece* piece = line_first; piece != line_end; piece = piece->next) {
          line_scale = Max(line_scale, piece->scale);
       }
-      F32 this_line_height = (line_scale > 1.0f) ? Text_LineHeight(fonts->regular, px * line_scale) : line_height;
+      F32 this_line_height = (line_scale > 1.0f) ? Text_LineHeight(base_font, px * line_scale) : line_height;
 
       if (do_draw) {
          // Every piece stands on one baseline, whatever its font and size:
          // the regular font's, at the size of the line's largest words. A
          // code box reaches from a little above a capital to a little under
          // the baseline, around the letters of the line.
-         F32     baseline = Text_Baseline(fonts->regular, px * line_scale);
-         F32     cap_h = Text_CapHeight(fonts->regular, px);
+         F32     baseline = Text_Baseline(base_font, px * line_scale);
+         F32     cap_h = Text_CapHeight(base_font, px);
          F32     box_top = y + baseline - cap_h * 1.32f;
          F32     box_bottom = y + baseline + cap_h * 0.42f;
          Vec4F32 box_color = _View_Faded(colors->body, alpha * 0.13f);
@@ -486,6 +492,23 @@ _View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 
       *widest_out = widest;
    }
    return y;
+}
+
+PRIVATE F32
+_View_RichLines(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, F32 px, String8 text, F32 x, F32 y, F32 max_width,
+                Vec4F32 color, F32 alpha, B32 do_draw, B32 centered, F32* widest_out, _View_RunsOf* runs_of) {
+   return _View_RichLinesOf(arena, fonts, colors, px, text, x, y, max_width, color, alpha, do_draw, centered, widest_out, runs_of, 0);
+}
+
+// 1 if the text may have words with a look of their own in it ({red:...}):
+// a title or a heading is then drawn a piece at a time, as a paragraph is.
+PRIVATE B32
+_View_MayHaveSpans(String8 text) {
+   B32 result = 0;
+   for (U64 i = 0; i < text.size && !result; i += 1) {
+      result = (text.str[i] == '{');
+   }
+   return result;
 }
 
 // The items of one block of the slide's body - its box_idx-th - from rect's
@@ -549,8 +572,13 @@ _View_Body(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Slid
 
       switch (item->kind) {
       case Deck_ItemKind_Heading: {
-         y = _View_Lines(arena, fonts->bold, _VIEW_HEADING_PX * unit, item->text, rect.min.x, y, Dim2F32(rect).x,
-                         _View_Faded(heading_color, alpha), 1, centered, widest_out, &runs_of);
+         if (_View_MayHaveSpans(item->text)) {
+            y = _View_RichLinesOf(arena, fonts, colors, _VIEW_HEADING_PX * unit, item->text, rect.min.x, y, Dim2F32(rect).x,
+                                  _View_Faded(heading_color, alpha), alpha, 1, centered, widest_out, &runs_of, _View_Style_Bold);
+         } else {
+            y = _View_Lines(arena, fonts->bold, _VIEW_HEADING_PX * unit, item->text, rect.min.x, y, Dim2F32(rect).x,
+                            _View_Faded(heading_color, alpha), 1, centered, widest_out, &runs_of);
+         }
       } break;
 
       case Deck_ItemKind_Bullet: {
@@ -808,8 +836,14 @@ _View_Title(Arena* arena, const Text_Fonts* fonts, View_Colors* colors, Deck_Sli
    F32 line_height = Text_LineHeight(fonts->bold, px);
    F32 widest = 0;
    _View_RunsOf runs_of = {measure ? 0 : hits, Deck_PlaceKind_Title, 0, slide->title_range.min};
-   F32 y = _View_Lines(arena, fonts->bold, px, slide->title, rect.min.x, rect.min.y, width, _View_Faded(color, alpha),
-                       !measure, centered, &widest, &runs_of);
+   F32 y = 0;
+   if (_View_MayHaveSpans(slide->title)) {
+      y = _View_RichLinesOf(arena, fonts, colors, px, slide->title, rect.min.x, rect.min.y, width, _View_Faded(color, alpha), alpha,
+                            !measure, centered, &widest, &runs_of, _View_Style_Bold);
+   } else {
+      y = _View_Lines(arena, fonts->bold, px, slide->title, rect.min.x, rect.min.y, width, _View_Faded(color, alpha), !measure,
+                      centered, &widest, &runs_of);
+   }
    if (slide->title.size == 0) {
       // No words yet: a run with no letters, where the first will go.
       _View_PushRun(arena, &runs_of, fonts->bold, px, slide->title, slide->title, centered ? rect.min.x + width * _View_AlignT(centered) : rect.min.x,

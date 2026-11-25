@@ -2003,7 +2003,16 @@ Edit_ChangeSlide(App_State* app_state, StateOp_List* ops, Edit_ChangeSlideOpPara
                     Str8Match(Str8Prefix(line, 6), Str8Lit("@slide"), StringMatchFlag_CaseInsensitive);
       B32     is_canvas_line = Str8Match(Str8Prefix(line, 7), Str8Lit("@canvas"), StringMatchFlag_CaseInsensitive);
       if (slide->is_canvas && is_canvas_line) {
-         _Edit_ReplaceKeepingCursor(editor, range.min + first, range.min + line_end, Str8Lit("---"));
+         // With a # line next, that is the slide's title and starts it:
+         // the @canvas line goes. Else a --- starts it.
+         U64 next = line_end;
+         while (next < piece.size && (piece.str[next] == ' ' || piece.str[next] == '\t' || piece.str[next] == '\n')) next += 1;
+         B32 title_is_next = (next < piece.size && piece.str[next] == '#' && !(next + 1 < piece.size && piece.str[next + 1] == '#'));
+         if (title_is_next) {
+            _Edit_ReplaceKeepingCursor(editor, range.min + first, range.min + next, Str8Lit(""));
+         } else {
+            _Edit_ReplaceKeepingCursor(editor, range.min + first, range.min + line_end, Str8Lit("---"));
+         }
       } else if (!slide->is_canvas && is_rule) {
          _Edit_ReplaceKeepingCursor(editor, range.min + first, range.min + line_end, Str8Lit("@canvas"));
       } else if (!slide->is_canvas) {

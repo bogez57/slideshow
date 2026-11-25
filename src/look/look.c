@@ -310,9 +310,9 @@ _Look_ChangeItems(App_State* app_state, U64 slide_idx, U64 idx, Deck_Item** item
 // of it, a size or a colour is of those words alone: marks around them in
 // the line, "{red 1.5:these words}" (deck.h, Deck_SpanOpenAt). Selected
 // again - they are left selected - the marks they have are changed, and
-// taken away when neither a colour nor a size is left. Not in a title or
-// a heading, which are drawn plain, nor on a picture's or an @ line. Which
-// side is always a line's.
+// taken away when neither a colour nor a size is left. In a title or a
+// heading too. Not on a picture's or an @ line. Which side is always a
+// line's.
 
 typedef struct _Look_Words _Look_Words;
 struct _Look_Words {
@@ -329,7 +329,8 @@ _Look_SelectedWords(const App_State* app_state, Deck_PlaceKind kind, _Look_Words
    Editor_Editor* editor = app_state->editor;
    _Look_Words    words = {0};
    B32            result = 0;
-   if (editor != 0 && editor->cursor != editor->mark && kind == Deck_PlaceKind_Text) {
+   UnusedVariable(kind);
+   if (editor != 0 && editor->cursor != editor->mark) {
       String8 text = Editor_Text(editor);
       words.min = Min(Min(editor->cursor, editor->mark), text.size);
       words.max = Min(Max(editor->cursor, editor->mark), text.size);
@@ -341,9 +342,13 @@ _Look_SelectedWords(const App_State* app_state, Deck_PlaceKind kind, _Look_Words
       // The line's own words: after the spaces, and a bullet's "- ".
       U64 first = line_start;
       while (first < line_end && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
-      B32 is_plain = (first < line_end && (text.str[first] == '@' || text.str[first] == '#' || text.str[first] == '!'));
+      B32 is_plain = (first < line_end && (text.str[first] == '@' || text.str[first] == '!'));
       if (first + 1 < line_end && text.str[first] == '-' && text.str[first + 1] == ' ') {
          first += 2;
+      } else if (first < line_end && text.str[first] == '#') {
+         // A title's or a heading's #s, and the space after them.
+         while (first < line_end && text.str[first] == '#') first += 1;
+         while (first < line_end && text.str[first] == ' ') first += 1;
       }
       U64 last = line_end;
       while (last > first && (text.str[last - 1] == ' ' || text.str[last - 1] == '\t')) last -= 1;
