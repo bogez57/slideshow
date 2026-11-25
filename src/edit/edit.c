@@ -81,6 +81,8 @@
 //                     lines made bullets, a heading or plain. Where
 //                     nothing is: the slide's own - a new one, a copy,
 //                     deleted, made a board, and its layout
+//    notes            the strip under the slide: click a note to go on
+//                     typing it, "+ Add" for a new one. Esc when done
 //    which side       Ctrl+Shift+L, E, R: the words against the left, in
 //                     the middle, against the right (look\look.c)
 //    add a text box   double-click the slide where nothing is: a box there.
@@ -206,6 +208,7 @@ struct _Edit_Layout {
    Rng2F32 board;         // what the slide is drawn in: its page - or, for a board, the preview down to the caption
    Rng2F32 board_base;    // a board's page with nothing moved: where a slide's is
    Rng2F32 caption;       // under the slide
+   Rng2F32 notes;         // the slide's notes, over the small slides. Zero for a board, and in a window too short for it
    Rng2F32 thumbs;        // the row of small slides, along the bottom
    Rng2F32 add_slide;     // the + at the row's right end
    Vec2F32 thumb_dim;     // the size of one
@@ -228,6 +231,9 @@ _Edit_BoardPage(Rng2F32 base) {
    F32     y = (F32)(S32)(middle.y - at.y * dim.y * zoom);
    return R2F32P(x, y, x + dim.x * zoom, y + dim.y * zoom);
 }
+
+// How tall the strip of the slide's notes is, under the slide. In UI units.
+#define _EDIT_NOTES_H 74.0f
 
 PRIVATE _Edit_Layout
 _Edit_LayoutFromWindowDim(const App_State* app_state, Vec2F32 window_dim) {
@@ -304,6 +310,19 @@ _Edit_LayoutFromWindowDim(const App_State* app_state, Vec2F32 window_dim) {
    }
 
    Rng2F32 page_room = R2F32P(left_w + pad, pad, window_dim.x - pad, thumbs_y - caption_h);
+   // The slide's notes have a strip over the small slides, out of the
+   // page's room - where there is enough of it, and not under a board,
+   // which is not presented and has all the room.
+   {
+      Deck_Deck* deck = app_state->deck;
+      B32        on_board = (deck != 0 && app_state->slide_idx < deck->slide_count && deck->slides[app_state->slide_idx].is_canvas);
+      F32        notes_h = (F32)(S32)(_EDIT_NOTES_H * ui);
+      F32        notes_gap = (F32)(S32)(8.0f * ui);
+      if (!on_board && page_room.max.x > page_room.min.x && Dim2F32(page_room).y - notes_h - notes_gap > 240.0f * ui) {
+         result.notes = R2F32P(page_room.min.x, thumbs_y - notes_gap - notes_h, page_room.max.x, thumbs_y - notes_gap);
+         page_room.max.y -= notes_h + notes_gap;
+      }
+   }
    if (page_room.max.x > page_room.min.x && page_room.max.y > page_room.min.y) {
       result.page = View_PageRectFromRect(page_room);
       result.board = result.page;
@@ -1871,6 +1890,55 @@ Edit_ToggleVideo(App_State* app_state, StateOp_List* ops, Edit_ToggleVideoOpPara
    ScratchEnd(scratch);
 }
 STATE_OP(Edit_ToggleVideo)
+
+// The notes strip under the slide. A click on a note: the cursor to pos,
+// the end of its line, to go on typing it. With adds, a new "@note " line
+// at the end of the slide the cursor is on first, and the cursor after it.
+// What is typed is the note's, and shows in the strip: Esc when it is done.
+typedef struct Edit_GoToNoteOpParams Edit_GoToNoteOpParams;
+struct Edit_GoToNoteOpParams {
+   B32 adds;
+   U64 pos;
+   U64 edit_count; // the editor's when pos was found
+};
+void
+Edit_GoToNote(App_State* app_state, StateOp_List* ops, Edit_GoToNoteOpParams* params) {
+   UnusedVariable(ops);
+   Editor_Editor* editor = app_state->editor;
+   if (editor == 0) {
+      return;
+   }
+   if (params->adds) {
+      FR_SyncDeck(app_state);
+      Deck_Deck* deck = app_state->deck;
+      if (deck->slide_count == 0) {
+         return;
+      }
+      // Under the slide's last line that has anything on it.
+      Rng1U64 range = _Edit_TextRangeFromSlide(editor, deck, Deck_SlideFromTextPos(deck, editor->cursor));
+      String8 text = Editor_Text(editor);
+      U64     at = Min(range.max, text.size);
+      while (at > range.min && (text.str[at - 1] == '\n' || text.str[at - 1] == ' ' || text.str[at - 1] == '\t')) at -= 1;
+      String8 added = (at == 0) ? Str8Lit("@note ") : Str8Lit("\n@note ");
+      // An empty line is kept before the next slide.
+      B32 needs_end = (at < text.size && !(at + 1 < text.size && text.str[at] == '\n' && text.str[at + 1] == '\n'));
+      U64 undo_before = editor->undo_count;
+      if (needs_end && at < text.size && text.str[at] != '\n') {
+         Editor_ReplaceRange(editor, at, at, Str8Lit("\n"));
+      }
+      Editor_ReplaceRange(editor, at, at, added);
+      Editor_JoinUndoSince(editor, undo_before);
+      Editor_SetCursor(editor, at + added.size);
+   } else if (params->edit_count == editor->edit_count) {
+      Editor_SetCursor(editor, Min(params->pos, editor->size));
+   } else {
+      return;
+   }
+   g_edit_view.picked_count = 0;
+   Vim_StartTyping(app_state);
+   editor->last_input_us = NowTimeUS();
+}
+STATE_OP(Edit_GoToNote)
 
 // The words selected copied, cut, or what is on the clipboard put in their
 // place: the text menu's, as Ctrl+C, Ctrl+X and Ctrl+V in the text are.
@@ -4000,6 +4068,136 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
    }
 }
 
+////////////////////////////////
+//~ bgz: the notes strip
+//
+// Under the slide, over the small slides: the slide's @note lines, one to a
+// row, read from the text as it is - so what is typed shows at once. A
+// click on one puts the cursor at its end, and what is typed goes on it,
+// with a caret here; "+ Add" starts a new one. A note longer than the row
+// shows the part the cursor is in. The notes are the presenter's (deck.h):
+// not on the slide.
+
+PRIVATE void
+_Edit_BuildNotes(const App_State* app_state, _Edit_Layout* layout, B32 interactive) {
+   Editor_Editor* editor = app_state->editor;
+   Deck_Deck*     deck = app_state->deck;
+   Rng2F32        strip = layout->notes;
+   if (editor == 0 || deck == 0 || Dim2F32(strip).x <= 0 || Dim2F32(strip).y <= 0 || app_state->slide_idx >= deck->slide_count ||
+       app_state->parsed_edit_count != editor->edit_count) {
+      return;
+   }
+   StateOp_List* ops = app_state->op_list;
+   F32           ui = layout->ui;
+   FNT_Tag       font = app_state->fonts.regular;
+   F32           px = layout->ui_px;
+   F32           line_h = Text_LineHeight(font, px);
+   F32           pad = (F32)(S32)(8.0f * ui);
+   Vec4F32       dim_color = V4F32(0.60f, 0.62f, 0.66f, 1.0f);
+   Vec4F32       text_color = V4F32(0.90f, 0.91f, 0.93f, 1.0f);
+
+   //- bgz: its label, and "+ Add" under it
+   String8 label = Str8Lit("Notes");
+   String8 add_name = Str8Lit("+ Add");
+   F32     label_w = (F32)(S32)(Max(Text_Width(font, px, label), Text_Width(font, px, add_name)) + pad * 2.0f);
+   FR_BuildWords(font, px, V2F32(strip.min.x + pad, strip.min.y + pad), dim_color, label, "###edit notes label");
+   Rng2F32   add_rect = R2F32P(strip.min.x, strip.min.y + pad + line_h, strip.min.x + label_w, Min(strip.min.y + pad + line_h * 2.2f, strip.max.y));
+   UI_Signal add_signal = {0};
+   if (interactive) {
+      add_signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, add_rect, "###edit notes add"));
+      if (add_signal.f & UI_SignalFlag_LeftPressed) {
+         StateOp_Edit_GoToNote(ops)->adds = 1;
+      }
+   }
+   FR_BuildWords(font, px, V2F32(strip.min.x + pad, (F32)(S32)(add_rect.min.y + (Dim2F32(add_rect).y - line_h) * 0.5f)),
+                 UI_Hovering(add_signal) ? text_color : V4F32(0.45f, 0.72f, 1.00f, 1.0f), add_name, "###edit notes add name");
+
+   //- bgz: the slide's @note lines, from the text
+   String8 text = Editor_Text(editor);
+   U64     slide_start = Min(deck->slides[app_state->slide_idx].text_pos, text.size);
+   U64     slide_end = (app_state->slide_idx + 1 < deck->slide_count) ? Min(deck->slides[app_state->slide_idx + 1].text_pos, text.size)
+                                                                     : text.size;
+   Rng1U64 notes[16];
+   U64     note_count = 0;
+   S64     cursor_note = -1;
+   for (U64 pos = slide_start; pos < slide_end;) {
+      U64 line_start = pos;
+      while (pos < slide_end && text.str[pos] != '\n') pos += 1;
+      U64 first = line_start;
+      while (first < pos && (text.str[first] == ' ' || text.str[first] == '\t')) first += 1;
+      if (pos - first >= 5 && Str8Match(Str8Substr(text, R1U64(first, first + 5)), Str8Lit("@note"), StringMatchFlag_CaseInsensitive) &&
+          (first + 5 == pos || text.str[first + 5] == ' ') && note_count < ArrayCount(notes)) {
+         U64 words = first + 5;
+         if (words < pos && text.str[words] == ' ') {
+            words += 1;
+         }
+         if (editor->cursor >= words && editor->cursor <= pos && editor->cursor == editor->mark) {
+            cursor_note = (S64)note_count;
+         }
+         notes[note_count] = R1U64(words, pos);
+         note_count += 1;
+      }
+      pos += 1;
+   }
+
+   //- bgz: as many rows as fit - with the cursor's among them
+   F32 rows_x = strip.min.x + label_w + pad;
+   F32 rows_w = strip.max.x - pad - rows_x;
+   U64 rows = (U64)Max((Dim2F32(strip).y - pad) / line_h, 1.0f);
+   U64 first_row = 0;
+   if (cursor_note >= 0 && (U64)cursor_note >= rows) {
+      first_row = (U64)cursor_note + 1 - rows;
+   }
+   if (note_count == 0 && rows_w > 0) {
+      FR_BuildWords(font, px, V2F32(rows_x, strip.min.y + pad), dim_color,
+                    Str8Lit("None on this slide. Notes are for whoever presents: N shows them while presenting."), "###edit notes none");
+   }
+   for (U64 row = 0; row < rows && first_row + row < note_count && rows_w > 0; row += 1) {
+      U64     note_idx = first_row + row;
+      Rng1U64 range = notes[note_idx];
+      F32     y = (F32)(S32)(strip.min.y + pad * 0.5f + (F32)row * line_h);
+      Rng2F32 row_rect = R2F32P(rows_x - pad * 0.5f, y, strip.max.x, y + line_h);
+      UI_Signal signal = {0};
+      if (interactive) {
+         signal = UI_SignalFromBox(FR_BuildRectBox(UI_BoxFlag_MouseClickable, row_rect, "###edit note row %llu", (unsigned long long)note_idx));
+         if (signal.f & UI_SignalFlag_LeftPressed) {
+            Edit_GoToNoteOpParams* go = StateOp_Edit_GoToNote(ops);
+            go->pos = range.max;
+            go->edit_count = editor->edit_count;
+         }
+      }
+
+      // The part of it that fits: from its start, or with the cursor in
+      // it, from far enough on that the cursor shows.
+      B32 has_cursor = ((S64)note_idx == cursor_note);
+      U64 from = range.min;
+      if (has_cursor) {
+         while (from < editor->cursor && Text_Width(font, px, Str8Substr(text, R1U64(from, editor->cursor))) > rows_w * 0.92f) from += 1;
+      }
+      U64 to = range.max;
+      while (to > from && Text_Width(font, px, Str8Substr(text, R1U64(from, to))) > rows_w) to -= 1;
+      FR_BuildWords(font, px, V2F32(rows_x, y), text_color, Str8Substr(text, R1U64(from, to)), "###edit note %llu",
+                    (unsigned long long)note_idx);
+      if (has_cursor) {
+         // Solid just after a key, then blinking, as the text's is.
+         U64 since_input_us = NowTimeUS() - editor->last_input_us;
+         if (since_input_us < 500000 || (since_input_us / 500000) % 2 == 0) {
+            F32 caret_x = (F32)(S32)(rows_x + Text_Width(font, px, Str8Substr(text, R1U64(from, Min(editor->cursor, to)))));
+            UI_SetNextBackgroundColor(V4F32(1, 1, 1, 0.95f));
+            FR_BuildRectBox(UI_BoxFlag_DrawBackground, R2F32P(caret_x, y, caret_x + Max(2.0f * ui, 1.5f), y + line_h), "###edit note caret");
+         }
+      }
+      if (UI_Hovering(signal) || has_cursor) {
+         UI_SetNextBackgroundColor(V4F32(1, 1, 1, has_cursor ? 0.08f : 0.05f));
+         FR_BuildRectBox(UI_BoxFlag_DrawBackground, row_rect, "###edit note wash %llu", (unsigned long long)note_idx);
+      }
+   }
+
+   //- bgz: its ground, under all of it
+   UI_SetNextBackgroundColor(V4F32(1, 1, 1, 0.04f));
+   FR_BuildRectBox(UI_BoxFlag_DrawBackground, strip, "###edit notes ground");
+}
+
 PRIVATE void
 _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interactive) {
    Editor_Editor* editor = app_state->editor;
@@ -4009,6 +4207,9 @@ _Edit_BuildPreview(const App_State* app_state, _Edit_Layout* layout, B32 interac
 
    //- bgz: the right-click menu, over everything else here
    _Edit_BuildMenu(app_state, layout, interactive);
+
+   //- bgz: the slide's notes, under it
+   _Edit_BuildNotes(app_state, layout, interactive);
 
    //- bgz: 1, 2: what the mouse holds, then the slide laid out. The deck is
    // of the text as it is, and the slide is the one the cursor is on:

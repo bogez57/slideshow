@@ -45,3 +45,9 @@ The screen's own, `g_edit_view` (`Edit_View`, edit.h), written with no op:
 - caret: the preview's layout, and whether a piece is picked.
 - copy: marks the list of pictures out of date.
 - complete: `Edit_DropPicture`, for a picture or video picked.
+
+## Added from the right-click menu and under the slide
+
+- The notes strip (`_Edit_BuildNotes`): the slide's `@note` lines under the slide, read from the text; a click goes to a note's end and `+ Add` starts one (`Edit_GoToNote`). Not under a board.
+- A picture's menu: `Edit_ReplacePicture` (another file in its place, its @place kept) and, for a video, `Edit_ToggleVideo` (loop, mute, manual: the slide's one `@video` line).
+- The text menu: `Edit_ClipWords` (copy, cut, paste of the words selected).
