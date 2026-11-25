@@ -3063,8 +3063,11 @@ Edit_OpenMenu(const App_State* app_state, Vec2F32 pos, B32 has_piece, Deck_Place
    // Not a text box just made, whose line is selected only to be typed
    // over, and not a piece picked whole.
    Editor_Editor* editor = app_state->editor;
+   // has_new_box stays up after the box is typed in, until a click looks
+   // at it (_Edit_TakeOutNewBox): only one still as it was made counts.
+   B32 is_new_box = (g_edit_view.has_new_box && editor != 0 && editor->edit_count == g_edit_view.new_box_edit_count);
    if (has_piece && kind != Deck_PlaceKind_Picture && editor != 0 && editor->cursor != editor->mark &&
-       !g_edit_view.has_new_box && !Edit_PickedIsGood(app_state) && app_state->parsed_edit_count == editor->edit_count) {
+       !is_new_box && !Edit_PickedIsGood(app_state) && app_state->parsed_edit_count == editor->edit_count) {
       U64            target_slide = 0;
       Deck_PlaceKind target_kind = Deck_PlaceKind_Title;
       U64            target_idx = 0;
