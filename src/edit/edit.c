@@ -3487,7 +3487,13 @@ _Edit_BuildMenu(const App_State* app_state, _Edit_Layout* layout, B32 interactiv
          for (U64 k = 0; k < Deck_Layout_COUNT; k += 1) {
             items[count].kind = _Edit_MenuItem_Layout;
             items[count].value = k;
-            items[count].name = PushStr8F(app_state->frame_arena, "Layout: %S", Deck_LayoutName((Deck_Layout)k));
+            // Said by what it does: its name in the text (@layout) is by
+            // where the picture goes, which reads as being about a picture.
+            items[count].name = ((Deck_Layout)k == Deck_Layout_PictureRight)    ? Str8Lit("Slide layout: words left, picture right")
+                                : ((Deck_Layout)k == Deck_Layout_PictureLeft)   ? Str8Lit("Slide layout: picture left, words right")
+                                : ((Deck_Layout)k == Deck_Layout_PictureBehind) ? Str8Lit("Slide layout: picture behind the words")
+                                : ((Deck_Layout)k == Deck_Layout_Center)        ? Str8Lit("Slide layout: everything centred")
+                                                                                : Deck_LayoutName((Deck_Layout)k);
             items[count].keys = ((Deck_Layout)k == now) ? Str8Lit("now") : Str8Lit("");
             count += 1;
          }
